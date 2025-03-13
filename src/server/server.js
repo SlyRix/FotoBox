@@ -1,4 +1,6 @@
 // server/index.js
+console.log('Server directory:', __dirname);
+console.log('Photos directory:', path.join(__dirname, 'public', 'photos'));
 const express = require('express');
 const cors = require('cors');
 const { exec } = require('child_process');
@@ -16,8 +18,8 @@ const captureInProgress = { status: false };
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static('public'));
-
+const path = require('path');
+app.use(express.static(path.join(__dirname, 'public')));
 // Create photos directory if it doesn't exist
 const PHOTOS_DIR = path.join(__dirname, 'public', 'photos');
 if (!fs.existsSync(PHOTOS_DIR)) {

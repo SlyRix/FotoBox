@@ -9,6 +9,10 @@ import GalleryView from './components/GalleryView';
 import { CameraProvider } from './contexts/CameraContext';
 import './styles/tailwind.css';
 
+// Global config for API URL - accessible throughout the app
+export const API_BASE_URL = 'http://192.168.1.70:5000';
+export const API_ENDPOINT = `${API_BASE_URL}/api`;
+
 function App() {
   const [cameraStatus, setCameraStatus] = useState({
     status: 'unknown',
@@ -18,7 +22,7 @@ function App() {
 
   useEffect(() => {
     // Check camera status when app loads
-    fetch('http://192.168.1.70:5000/api/status')
+    fetch(`${API_ENDPOINT}/status`)
         .then(response => response.json())
         .then(data => {
           setCameraStatus(data);
@@ -34,7 +38,7 @@ function App() {
   }, []);
 
   return (
-      <CameraProvider>
+      <CameraProvider apiBaseUrl={API_BASE_URL} apiEndpoint={API_ENDPOINT}>
         <Router>
           <div className="min-h-screen bg-wedding-background">
             {/* Camera status indicator */}

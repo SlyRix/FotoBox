@@ -1,21 +1,21 @@
-
 // client/src/components/PhotoPreview.js
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
 
 const PhotoPreview = () => {
-    const { currentPhoto, takePhoto, loading } = useCamera();
+    const { currentPhoto, loading, apiBaseUrl } = useCamera();
     const navigate = useNavigate();
-    const API = "http://192.168.1.70:5000";
-    //TODO: Add Global API URL for all files
+    const [imageError, setImageError] = useState(false);
 
-    // If no photo is available, redirect to camera
-    if (!currentPhoto && !loading) {
-        navigate('/camera');
-        return null;
-    }
+    // Use useEffect for navigation to avoid state updates during render
+    useEffect(() => {
+        // Only navigate if not loading and no current photo
+        if (!loading && !currentPhoto) {
+            navigate('/camera');
+        }
+    }, [currentPhoto, loading, navigate]);
 
     // Handle retaking the photo
     const handleRetake = () => {
@@ -39,8 +39,8 @@ const PhotoPreview = () => {
         );
     }
 
-    // Construct the image URL
-    const imageUrl = `${API}${currentPhoto.url}`;
+    // First try to use the fullUrl if available, otherwise construct it
+    const imageUrl = currentPhoto.fullUrl || `${apiBaseUrl}${currentPhoto.url}`;
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
@@ -55,16 +55,27 @@ const PhotoPreview = () => {
                 </div>
 
                 <div className="p-4">
-                    <div className="aspect-[4/3] w-full overflow-hidden rounded-lg border-4 border-wedding-background mb-4">
-                        <img
-                            src={imageUrl}
-                            alt="Your photo"
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                                e.target.onerror = null;
-                                e.target.src = '/placeholder-image.jpg';
-                            }}
-                        />
+                    <div className="aspect-[4/3] w-full overflow-hidden rounded-lg border-4 border-wedding-background mb-4 relative">
+                        {imageError ? (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100 text-gray-500">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                <p>Image could not be loaded</p>
+                                <p className="text-sm mt-2">URL: {imageUrl}</p>
+                            </div>
+                        ) : (
+                            <img
+                                src={imageUrl}
+                                alt="Your photo"
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                    console.error("Image failed to load:", imageUrl);
+                                    e.target.onerror = null;
+                                    setImageError(true);
+                                }}
+                            />
+                        )}
                     </div>
 
                     <p className="text-center mb-6 text-lg text-gray-700">
