@@ -8,6 +8,8 @@ import { motion } from 'framer-motion';
 const PhotoPreview = () => {
     const { currentPhoto, takePhoto, loading } = useCamera();
     const navigate = useNavigate();
+    const API = "http://192.168.1.70:5000";
+    //TODO: Add Global API URL for all files
 
     // If no photo is available, redirect to camera
     if (!currentPhoto && !loading) {
@@ -38,7 +40,7 @@ const PhotoPreview = () => {
     }
 
     // Construct the image URL
-    const imageUrl = `http://localhost:5000${currentPhoto.url}`;
+    const imageUrl = `${API}${currentPhoto.url}`;
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">

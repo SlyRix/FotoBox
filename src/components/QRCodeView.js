@@ -10,7 +10,8 @@ const QRCodeView = () => {
     const navigate = useNavigate();
     const [isPrinting, setIsPrinting] = useState(false);
     const [printMessage, setPrintMessage] = useState('');
-
+    //TODO: Add Global API URL for all files
+    const API = "http://192.168.1.70:5000";
     // If no photo is available, redirect to camera
     if (!currentPhoto) {
         navigate('/camera');
@@ -18,8 +19,8 @@ const QRCodeView = () => {
     }
 
     // Construct the image and QR code URLs
-    const imageUrl = `http://localhost:5000${currentPhoto.url}`;
-    const qrCodeUrl = `http://localhost:5000${currentPhoto.qrUrl}`;
+    const imageUrl = `${API}${currentPhoto.url}`;
+    const qrCodeUrl = `${API}${currentPhoto.qrUrl}`;
 
     // Handle the print request
     const handlePrint = async () => {

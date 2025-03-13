@@ -18,7 +18,7 @@ function App() {
 
   useEffect(() => {
     // Check camera status when app loads
-    fetch('http://localhost:5000/api/status')
+    fetch('http://192.168.1.70:5000/api/status')
         .then(response => response.json())
         .then(data => {
           setCameraStatus(data);
