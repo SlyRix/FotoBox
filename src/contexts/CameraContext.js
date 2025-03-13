@@ -11,7 +11,7 @@ export const CameraProvider = ({ children }) => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
-    const apiUrl = 'http://localhost:5000/api';
+    const apiUrl = 'http://192.168.1.70:5000/api';
 
     // Fetch all photos
     const fetchPhotos = async () => {
