@@ -1,70 +1,194 @@
-# Getting Started with Create React App
+# Wedding FotoBox 💒 📸
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A full-stack photo booth web application for weddings, allowing guests to take photos, view them via QR codes, and access a shared gallery of memories.
 
-## Available Scripts
+![React](https://img.shields.io/badge/React-18.2.0-61DAFB?logo=react)
+![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.4.17-38B2AC?logo=tailwind-css)
+![Express](https://img.shields.io/badge/Express-4.18.2-000000?logo=express)
+![Node.js](https://img.shields.io/badge/Node.js-18.x-339933?logo=node.js)
 
-In the project directory, you can run:
+## 🌟 Features
 
-### `npm start`
+- **Camera Integration**: Captures photos using a connected camera via gphoto2
+- **Photo Preview**: Allows users to preview their photos before saving
+- **QR Code Generation**: Creates QR codes for each photo for easy mobile viewing
+- **Photo Gallery**: Displays all photos taken during the event
+- **Responsive Design**: Works on all device sizes for guest convenience
+- **Elegant Wedding Theme**: Beautiful UI designed around wedding colors and aesthetics
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## 📋 Prerequisites
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+- Node.js (v14 or higher)
+- npm (v6 or higher)
+- [gphoto2](http://gphoto.org/) installed on your system for camera interaction
+- A compatible camera (check gphoto2 documentation for supported devices)
 
-### `npm test`
+## 🚀 Installation
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### Client Setup
 
-### `npm run build`
+1. Clone the repository
+   ```
+   git clone https://github.com/yourusername/wedding-fotobox.git
+   cd wedding-fotobox
+   ```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+2. Install dependencies
+   ```
+   npm install
+   ```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+3. Create a `.env` file in the root directory with the following content:
+   ```
+   REACT_APP_API_URL=http://localhost:5000/api
+   ```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+4. Start the development server
+   ```
+   npm start
+   ```
 
-### `npm run eject`
+### Server Setup
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+1. Navigate to the server directory
+   ```
+   cd src/server
+   ```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+2. Install server dependencies
+   ```
+   npm install
+   ```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+3. Start the server
+   ```
+   npm start
+   ```
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+## 📁 Project Structure
 
-## Learn More
+```
+wedding-fotobox/
+├── public/                  # Static files
+├── src/                     # React source files
+│   ├── components/          # React components
+│   │   ├── CameraView.js    # Camera interface
+│   │   ├── GalleryView.js   # Photo gallery
+│   │   ├── HomePage.js      # Landing page
+│   │   ├── PhotoPreview.js  # Photo preview
+│   │   └── QRCodeView.js    # QR code display
+│   ├── contexts/            # React contexts
+│   │   └── CameraContext.js # Camera state management
+│   ├── server/              # Backend server
+│   │   ├── config.js        # Server configuration
+│   │   ├── index.js         # Server entry point
+│   │   └── package.json     # Server dependencies
+│   ├── styles/              # CSS styles
+│   │   └── tailwind.css     # Tailwind CSS file
+│   ├── App.js               # Main React component
+│   └── index.js             # React entry point
+├── tailwind.config.js       # Tailwind CSS configuration
+├── package.json             # Client dependencies
+└── README.md                # This file
+```
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+## 📷 Camera Setup
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+1. Connect your camera to the computer via USB
+2. Ensure gphoto2 can detect your camera by running:
+   ```
+   gphoto2 --auto-detect
+   ```
+3. The server will automatically attempt to connect to the camera on startup
 
-### Code Splitting
+## 🎨 Customization
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+### Wedding Colors and Theme
 
-### Analyzing the Bundle Size
+You can customize the wedding theme by modifying the `tailwind.config.js` file:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+```js
+// tailwind.config.js
+module.exports = {
+  theme: {
+    extend: {
+      colors: {
+        'christian': {
+          primary: '#f9f7f5',
+          secondary: '#e8e6e1',
+          accent: '#b08968',
+          // ...
+        },
+        'hindu': {
+          primary: '#fff9e6',
+          secondary: '#bc863c',
+          accent: '#d93f0b',
+          // ...
+        },
+        // ...
+      }
+    }
+  }
+}
+```
 
-### Making a Progressive Web App
+### Wedding Details
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+Update the names and event details in `HomePage.js`:
 
-### Advanced Configuration
+```jsx
+// src/components/HomePage.js
+<h1 className="text-5xl md:text-6xl font-script text-wedding-love mb-4">
+  Your Names Here
+</h1>
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+## 📱 Usage Instructions
 
-### Deployment
+1. **Home Page**: Visitors can choose to take a photo or view the gallery
+2. **Camera View**: Users can take a photo with a countdown timer
+3. **Preview**: After taking a photo, users can choose to keep or retake it
+4. **QR Code**: A QR code is generated for each photo, which users can scan to view or download the photo
+5. **Gallery**: All photos are displayed in a gallery, sorted by most recent
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+## 🛠️ Technical Implementation
 
-### `npm run build` fails to minify
+- **Frontend**: React with Hooks, Context API for state management
+- **Styling**: TailwindCSS for responsive design
+- **Animations**: Framer Motion for smooth transitions
+- **Backend**: Express.js for API endpoints
+- **Camera Control**: gphoto2 for camera integration
+- **QR Codes**: Generated with qrcode library
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+## 🔄 API Endpoints
+
+- `GET /api/photos` - Retrieve all photos
+- `POST /api/photos/capture` - Take a new photo
+- `DELETE /api/photos/:filename` - Delete a photo
+- `POST /api/photos/print` - (Future feature) Send a print request
+- `GET /api/status` - Check camera connection status
+
+## 🚧 Future Enhancements
+
+- [ ] Photo printing functionality
+- [ ] Photo filters and effects
+- [ ] User authentication for admin controls
+- [ ] Cloud backup of photos
+- [ ] Email/SMS sharing options
+- [ ] Custom photo frames and stickers
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 👏 Acknowledgements
+
+- [gphoto2](http://gphoto.org/) for camera interaction
+- [TailwindCSS](https://tailwindcss.com/) for styling
+- [React](https://reactjs.org/) for the frontend framework
+- [Express](https://expressjs.com/) for the backend server
+- [QRCode](https://github.com/soldair/node-qrcode) for QR code generation
+
+---
+
+Created with ❤️ for Rushel & Sivani's Wedding
