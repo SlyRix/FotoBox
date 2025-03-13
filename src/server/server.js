@@ -117,7 +117,6 @@ app.post('/api/photos/capture', (req, res) => {
         }, 500); // 500ms delay to ensure USB device is properly released
     });
 });
-});
 
 // Delete a photo
 app.delete('/api/photos/:filename', (req, res) => {
