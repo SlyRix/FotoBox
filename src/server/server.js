@@ -59,11 +59,12 @@ app.get('/api/photos', (req, res) => {
     });
 });
 
-// Take a new photo - with improved error handling and device locking
+// Take a new photo - with improved error handling and no excessive process killing
 app.post('/api/photos/capture', (req, res) => {
     // Prevent multiple simultaneous capture requests
     if (captureInProgress.status) {
         return res.status(429).json({
+            success: false,
             error: 'A photo capture is already in progress. Please try again in a moment.'
         });
     }
@@ -77,89 +78,56 @@ app.post('/api/photos/capture', (req, res) => {
 
     console.log(`${new Date().toISOString()}: Starting photo capture process...`);
 
-    // More aggressive process killing approach
-    const killCommands = [
-        // Kill common processes that might be using the camera
-        'pkill -f gvfs-gphoto2-volume-monitor || true',
-        'pkill -f gvfsd-gphoto2 || true',
-        'pkill -f gphoto2 || true',
+    // Build the gphoto2 command with necessary parameters
+    const captureCommand = `gphoto2 --force-overwrite --capture-image-and-download --filename "${filepath}"`;
 
-        // Reset USB device if needed (first find the device)
-        'for i in $(lsusb | grep -i canon | cut -d " " -f 2,4 | sed "s/ /\//g"); do \
-            if [ -n "$i" ]; then \
-                echo "Resetting USB device: $i"; \
-                sudo usbreset /dev/bus/usb/$i || true; \
-            fi \
-        done || true',
+    exec(captureCommand, (error, stdout, stderr) => {
+        captureInProgress.status = false;
 
-        // Additional command to unbind/rebind the USB driver for camera
-        'echo "Attempting to unbind/rebind USB device..." || true'
-    ].join('; ');
+        if (error || stderr.includes('ERROR')) {
+            console.error(`${new Date().toISOString()}: Error capturing photo: ${error ? error.message : stderr}`);
 
-    console.log(`${new Date().toISOString()}: Releasing camera and resetting USB devices...`);
+            // Check if we should suggest using tethering mode
+            if (stderr.includes('Could not claim the USB device')) {
+                return res.status(500).json({
+                    success: false,
+                    error: 'Camera busy or inaccessible. Try disconnecting and reconnecting the camera.'
+                });
+            }
 
-    exec(killCommands, (killError, killStdout, killStderr) => {
-        if (killError) {
-            console.log(`${new Date().toISOString()}: Kill command error: ${killError.message}`);
-            console.log(`${new Date().toISOString()}: Kill command stderr: ${killStderr}`);
-        } else {
-            console.log(`${new Date().toISOString()}: Successfully killed processes: ${killStdout}`);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to capture photo'
+            });
         }
 
-        // Add a longer delay to ensure USB device is completely released
-        console.log(`${new Date().toISOString()}: Waiting for USB device to stabilize...`);
+        console.log(`${new Date().toISOString()}: Photo captured successfully: ${filename}`);
 
-        setTimeout(() => {
-            console.log(`${new Date().toISOString()}: Attempting to capture photo...`);
+        // Generate QR code for this photo
+        const photoUrl = `http://${req.headers.host}/photos/${filename}`;
+        const qrFilename = `qr_${timestamp}.png`;
+        const qrFilepath = path.join(QR_DIR, qrFilename);
 
-            // Build the gphoto2 command with additional parameters for reliability
-            const captureCommand = `gphoto2 --force-overwrite --set-config viewfinder=0 --capture-image-and-download --filename "${filepath}"`;
+        QRCode.toFile(qrFilepath, photoUrl, {
+            color: {
+                dark: '#000',  // Points
+                light: '#FFF'  // Background
+            }
+        }, (qrErr) => {
+            if (qrErr) {
+                console.error(`${new Date().toISOString()}: Error generating QR code: ${qrErr.message}`);
+            }
 
-            exec(captureCommand, (error, stdout, stderr) => {
-                captureInProgress.status = false;
-
-                if (error || stderr.includes('ERROR')) {
-                    console.error(`${new Date().toISOString()}: Error capturing photo: ${error ? error.message : stderr}`);
-
-                    // Check if we should suggest using tethering mode
-                    if (stderr.includes('Could not claim the USB device')) {
-                        return res.status(500).json({
-                            error: 'Camera busy or inaccessible. Try disconnecting and reconnecting the camera, or rebooting the system.'
-                        });
-                    }
-
-                    return res.status(500).json({ error: 'Failed to capture photo' });
+            res.json({
+                success: true,
+                photo: {
+                    filename,
+                    url: `/photos/${filename}`,
+                    qrUrl: `/qrcodes/${qrFilename}`,
+                    timestamp: Date.now()
                 }
-
-                console.log(`${new Date().toISOString()}: Photo captured successfully: ${filename}`);
-
-                // Generate QR code for this photo
-                const photoUrl = `http://${req.headers.host}/photos/${filename}`;
-                const qrFilename = `qr_${timestamp}.png`;
-                const qrFilepath = path.join(QR_DIR, qrFilename);
-
-                QRCode.toFile(qrFilepath, photoUrl, {
-                    color: {
-                        dark: '#000',  // Points
-                        light: '#FFF'  // Background
-                    }
-                }, (qrErr) => {
-                    if (qrErr) {
-                        console.error(`${new Date().toISOString()}: Error generating QR code: ${qrErr.message}`);
-                    }
-
-                    res.json({
-                        success: true,
-                        photo: {
-                            filename,
-                            url: `/photos/${filename}`,
-                            qrUrl: `/qrcodes/${qrFilename}`,
-                            timestamp: Date.now()
-                        }
-                    });
-                });
             });
-        }, 2000); // Increased delay to 2 seconds
+        });
     });
 });
 
@@ -195,27 +163,21 @@ app.post('/api/photos/print', (req, res) => {
     });
 });
 
-// Server status endpoint
+// Server status endpoint - simplified to avoid killing processes unnecessarily
 app.get('/api/status', (req, res) => {
-    // Command to kill any processes that might be using the camera
-    const killCommand = 'pkill -f gvfs-gphoto2-volume-monitor || pkill -f gvfsd-gphoto2 || true';
-
-    // First kill competing processes, then check camera status
-    exec(killCommand, () => {
-        exec('gphoto2 --auto-detect', (error, stdout, stderr) => {
-            if (error) {
-                return res.json({
-                    status: 'error',
-                    camera: false,
-                    message: 'Camera not detected'
-                });
-            }
-
-            res.json({
-                status: 'ok',
-                camera: true,
-                message: stdout.trim()
+    exec('gphoto2 --auto-detect', (error, stdout, stderr) => {
+        if (error) {
+            return res.json({
+                status: 'error',
+                camera: false,
+                message: 'Camera not detected'
             });
+        }
+
+        res.json({
+            status: 'ok',
+            camera: true,
+            message: stdout.trim()
         });
     });
 });

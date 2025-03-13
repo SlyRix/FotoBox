@@ -35,14 +35,18 @@ const CameraView = () => {
                     } else {
                         // Reset if there was an error
                         setIsReady(true);
+                        setCountdown(null); // Reset the countdown on error
                     }
                 } catch (err) {
                     console.error('Failed to take photo:', err);
                     setIsReady(true);
+                    setCountdown(null); // Reset the countdown on error
                 }
             };
 
             capturePhoto();
+            // Immediately set countdown to -1 to prevent multiple executions
+            setCountdown(-1);
         }
 
         return () => clearTimeout(timer);
