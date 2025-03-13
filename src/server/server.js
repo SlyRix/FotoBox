@@ -62,41 +62,61 @@ app.post('/api/photos/capture', (req, res) => {
     const filename = `wedding_${timestamp}.jpg`;
     const filepath = path.join(PHOTOS_DIR, filename);
 
-    // Build the gphoto2 command
-    const captureCommand = `gphoto2 --capture-image-and-download --filename "${filepath}"`;
+    // Command to kill any processes that might be using the camera
+    const killCommand = 'killall -9 gvfs-gphoto2-volume-monitor gvfsd-gphoto2 gphoto2 || true';
 
-    exec(captureCommand, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Error capturing photo: ${error.message}`);
-            return res.status(500).json({ error: 'Failed to capture photo' });
+    console.log('Releasing camera from other processes...');
+
+    // First kill competing processes, then capture the photo
+    exec(killCommand, (killError) => {
+        if (killError) {
+            console.log('No conflicting processes found or could not kill them (this is often normal)');
+        } else {
+            console.log('Successfully killed potentially conflicting processes');
         }
 
-        // Generate QR code for this photo
-        const photoUrl = `http://${req.headers.host}/photos/${filename}`;
-        const qrFilename = `qr_${timestamp}.png`;
-        const qrFilepath = path.join(QR_DIR, qrFilename);
+        // Add a small delay to ensure USB device is released
+        setTimeout(() => {
+            console.log('Attempting to capture photo...');
 
-        QRCode.toFile(qrFilepath, photoUrl, {
-            color: {
-                dark: '#000',  // Points
-                light: '#FFF'  // Background
-            }
-        }, (qrErr) => {
-            if (qrErr) {
-                console.error(`Error generating QR code: ${qrErr.message}`);
-            }
+            // Build the gphoto2 command
+            const captureCommand = `gphoto2 --capture-image-and-download --filename "${filepath}"`;
 
-            res.json({
-                success: true,
-                photo: {
-                    filename,
-                    url: `/photos/${filename}`,
-                    qrUrl: `/qrcodes/${qrFilename}`,
-                    timestamp: Date.now()
+            exec(captureCommand, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Error capturing photo: ${error.message}`);
+                    return res.status(500).json({ error: 'Failed to capture photo' });
                 }
+
+                // Generate QR code for this photo
+                const photoUrl = `http://${req.headers.host}/photos/${filename}`;
+                const qrFilename = `qr_${timestamp}.png`;
+                const qrFilepath = path.join(QR_DIR, qrFilename);
+
+                QRCode.toFile(qrFilepath, photoUrl, {
+                    color: {
+                        dark: '#000',  // Points
+                        light: '#FFF'  // Background
+                    }
+                }, (qrErr) => {
+                    if (qrErr) {
+                        console.error(`Error generating QR code: ${qrErr.message}`);
+                    }
+
+                    res.json({
+                        success: true,
+                        photo: {
+                            filename,
+                            url: `/photos/${filename}`,
+                            qrUrl: `/qrcodes/${qrFilename}`,
+                            timestamp: Date.now()
+                        }
+                    });
+                });
             });
-        });
+        }, 500); // 500ms delay to ensure USB device is properly released
     });
+});
 });
 
 // Delete a photo
@@ -133,19 +153,25 @@ app.post('/api/photos/print', (req, res) => {
 
 // Server status endpoint
 app.get('/api/status', (req, res) => {
-    exec('gphoto2 --auto-detect', (error, stdout, stderr) => {
-        if (error) {
-            return res.json({
-                status: 'error',
-                camera: false,
-                message: 'Camera not detected'
-            });
-        }
+    // Command to kill any processes that might be using the camera
+    const killCommand = 'killall -9 gvfs-gphoto2-volume-monitor gvfsd-gphoto2 || true';
 
-        res.json({
-            status: 'ok',
-            camera: true,
-            message: stdout.trim()
+    // First kill competing processes, then check camera status
+    exec(killCommand, () => {
+        exec('gphoto2 --auto-detect', (error, stdout, stderr) => {
+            if (error) {
+                return res.json({
+                    status: 'error',
+                    camera: false,
+                    message: 'Camera not detected'
+                });
+            }
+
+            res.json({
+                status: 'ok',
+                camera: true,
+                message: stdout.trim()
+            });
         });
     });
 });
