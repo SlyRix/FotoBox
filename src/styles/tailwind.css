@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    html {
+        @apply scroll-smooth;
+    }
+
+    body {
+        @apply font-body text-wedding-gray overflow-x-hidden bg-wedding-background;
+    }
+
+    h1, h2, h3, h4 {
+        @apply font-display leading-tight text-christian-text;
+    }
+
+    h1 {
+        @apply text-4xl md:text-5xl;
+    }
+
+    h2 {
+        @apply text-3xl md:text-4xl;
+    }
+
+    h3 {
+        @apply text-2xl md:text-3xl;
+    }
+
+    h4 {
+        @apply text-xl md:text-2xl;
+    }
+}
+
+@layer components {
+    .container {
+        @apply w-full max-w-6xl mx-auto px-4;
+    }
+
+    .section-title {
+        @apply text-3xl md:text-4xl text-center mb-12 relative pb-4 font-display;
+    }
+
+    .section-title::after {
+        @apply content-[''] absolute bottom-0 left-1/2 w-28 h-0.5 -translate-x-1/2;
+    }
+
+    .christian-title {
+        @apply text-christian-text;
+    }
+
+    .christian-title::after {
+        @apply bg-christian-accent;
+    }
+
+    .hindu-title {
+        @apply text-hindu-text;
+    }
+
+    .hindu-title::after {
+        @apply bg-hindu-accent;
+    }
+
+    .elegant-card {
+        @apply bg-white rounded-lg shadow-card p-6 transition-all duration-300 hover:shadow-lg;
+    }
+
+    /* Elegant buttons */
+    .btn {
+        @apply inline-block py-3 px-8 rounded-full font-semibold transition-all duration-300 relative overflow-hidden z-10 font-body tracking-wide;
+    }
+
+    .btn-primary {
+        @apply bg-gradient-to-r text-white shadow-md hover:shadow-lg transform hover:-translate-y-0.5;
+    }
+
+    .btn-christian {
+        @apply from-christian-accent to-christian-accent/90 text-white;
+    }
+
+    .btn-hindu {
+        @apply from-hindu-accent to-hindu-accent/90 text-white;
+    }
+
+    .btn-outline {
+        @apply border-2 bg-transparent shadow-none;
+    }
+
+    .btn-christian-outline {
+        @apply border-christian-accent text-christian-accent hover:bg-christian-accent hover:text-white;
+    }
+
+    .btn-hindu-outline {
+        @apply border-hindu-accent text-hindu-accent hover:bg-hindu-accent hover:text-white;
+    }
+
+    /* Wedding Decorative Elements */
+    .ornamental-divider {
+        @apply flex items-center justify-center my-10;
+    }
+
+    .ornamental-divider::before,
+    .ornamental-divider::after {
+        @apply content-[''] h-px bg-wedding-gold/30 flex-grow;
+    }
+
+    .ornamental-divider::before {
+        @apply mr-4;
+    }
+
+    .ornamental-divider::after {
+        @apply ml-4;
+    }
+
+    .ornamental-divider-icon {
+        @apply text-wedding-gold text-xl;
+    }
+}
+
+/* Text shadow utilities */
+.text-shadow {
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.text-shadow-lg {
+    text-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+}
+
+/* Add font imports - uncomment if you want to load fonts locally */
+/*
+@font-face {
+  font-family: 'Tangerine';
+  src: url('../fonts/Tangerine-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond';
+  src: url('../fonts/CormorantGaramond-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Montserrat';
+  src: url('../fonts/Montserrat-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+*/
+
+/* Alternatively, use Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Montserrat:wght@400;500;600;700&family=Tangerine:wght@400;700&display=swap');
