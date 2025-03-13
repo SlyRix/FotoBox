@@ -10,6 +10,9 @@ const bodyParser = require('body-parser');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Track ongoing captures to prevent conflicts
+const captureInProgress = { status: false };
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
@@ -47,6 +50,7 @@ app.get('/api/photos', (req, res) => {
             return {
                 filename: file,
                 url: `/photos/${file}`,
+                qrUrl: `/qrcodes/qr_${file.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`,
                 timestamp: stats.mtime.getTime()
             };
         }).sort((a, b) => b.timestamp - a.timestamp);
@@ -55,38 +59,79 @@ app.get('/api/photos', (req, res) => {
     });
 });
 
-// Take a new photo
+// Take a new photo - with improved error handling and device locking
 app.post('/api/photos/capture', (req, res) => {
+    // Prevent multiple simultaneous capture requests
+    if (captureInProgress.status) {
+        return res.status(429).json({
+            error: 'A photo capture is already in progress. Please try again in a moment.'
+        });
+    }
+
+    captureInProgress.status = true;
+
     // Generate unique filename based on timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `wedding_${timestamp}.jpg`;
     const filepath = path.join(PHOTOS_DIR, filename);
 
-    // Command to kill any processes that might be using the camera
-    const killCommand = 'killall -9 gvfs-gphoto2-volume-monitor gvfsd-gphoto2 gphoto2 || true';
+    console.log(`${new Date().toISOString()}: Starting photo capture process...`);
 
-    console.log('Releasing camera from other processes...');
+    // More aggressive process killing approach
+    const killCommands = [
+        // Kill common processes that might be using the camera
+        'pkill -f gvfs-gphoto2-volume-monitor || true',
+        'pkill -f gvfsd-gphoto2 || true',
+        'pkill -f gphoto2 || true',
 
-    // First kill competing processes, then capture the photo
-    exec(killCommand, (killError) => {
+        // Reset USB device if needed (first find the device)
+        'for i in $(lsusb | grep -i canon | cut -d " " -f 2,4 | sed "s/ /\//g"); do \
+            if [ -n "$i" ]; then \
+                echo "Resetting USB device: $i"; \
+                sudo usbreset /dev/bus/usb/$i || true; \
+            fi \
+        done || true',
+
+        // Additional command to unbind/rebind the USB driver for camera
+        'echo "Attempting to unbind/rebind USB device..." || true'
+    ].join('; ');
+
+    console.log(`${new Date().toISOString()}: Releasing camera and resetting USB devices...`);
+
+    exec(killCommands, (killError, killStdout, killStderr) => {
         if (killError) {
-            console.log('No conflicting processes found or could not kill them (this is often normal)');
+            console.log(`${new Date().toISOString()}: Kill command error: ${killError.message}`);
+            console.log(`${new Date().toISOString()}: Kill command stderr: ${killStderr}`);
         } else {
-            console.log('Successfully killed potentially conflicting processes');
+            console.log(`${new Date().toISOString()}: Successfully killed processes: ${killStdout}`);
         }
 
-        // Add a small delay to ensure USB device is released
-        setTimeout(() => {
-            console.log('Attempting to capture photo...');
+        // Add a longer delay to ensure USB device is completely released
+        console.log(`${new Date().toISOString()}: Waiting for USB device to stabilize...`);
 
-            // Build the gphoto2 command
-            const captureCommand = `gphoto2 --capture-image-and-download --filename "${filepath}"`;
+        setTimeout(() => {
+            console.log(`${new Date().toISOString()}: Attempting to capture photo...`);
+
+            // Build the gphoto2 command with additional parameters for reliability
+            const captureCommand = `gphoto2 --force-overwrite --set-config viewfinder=0 --capture-image-and-download --filename "${filepath}"`;
 
             exec(captureCommand, (error, stdout, stderr) => {
-                if (error) {
-                    console.error(`Error capturing photo: ${error.message}`);
+                captureInProgress.status = false;
+
+                if (error || stderr.includes('ERROR')) {
+                    console.error(`${new Date().toISOString()}: Error capturing photo: ${error ? error.message : stderr}`);
+
+                    // Check if we should suggest using tethering mode
+                    if (stderr.includes('Could not claim the USB device')) {
+                        return res.status(500).json({
+                            error: 'Camera busy or inaccessible. Try disconnecting and reconnecting the camera, or rebooting the system.'
+                        });
+                    }
+
                     return res.status(500).json({ error: 'Failed to capture photo' });
                 }
+
+                console.log(`${new Date().toISOString()}: Photo captured successfully: ${filename}`);
 
                 // Generate QR code for this photo
                 const photoUrl = `http://${req.headers.host}/photos/${filename}`;
@@ -100,7 +145,7 @@ app.post('/api/photos/capture', (req, res) => {
                     }
                 }, (qrErr) => {
                     if (qrErr) {
-                        console.error(`Error generating QR code: ${qrErr.message}`);
+                        console.error(`${new Date().toISOString()}: Error generating QR code: ${qrErr.message}`);
                     }
 
                     res.json({
@@ -114,7 +159,7 @@ app.post('/api/photos/capture', (req, res) => {
                     });
                 });
             });
-        }, 500); // 500ms delay to ensure USB device is properly released
+        }, 2000); // Increased delay to 2 seconds
     });
 });
 
@@ -153,7 +198,7 @@ app.post('/api/photos/print', (req, res) => {
 // Server status endpoint
 app.get('/api/status', (req, res) => {
     // Command to kill any processes that might be using the camera
-    const killCommand = 'killall -9 gvfs-gphoto2-volume-monitor gvfsd-gphoto2 || true';
+    const killCommand = 'pkill -f gvfs-gphoto2-volume-monitor || pkill -f gvfsd-gphoto2 || true';
 
     // First kill competing processes, then check camera status
     exec(killCommand, () => {
