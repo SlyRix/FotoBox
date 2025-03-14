@@ -39,8 +39,10 @@ let activeConnections = 0;
 
 // Initialize WebSocket server
 function setupWebSocketServer(server) {
-    wsServer = new WebSocket.Server({ server });
-
+    wsServer = new WebSocket.Server({
+        server: server,
+        path: '/liveview'  // Add this line to specify the path
+    });
     wsServer.on('connection', (ws) => {
         console.log('New client connected to live view');
         activeConnections++;
