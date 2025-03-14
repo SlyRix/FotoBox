@@ -192,94 +192,108 @@ function startWebcamPreview() {
         message: 'Starting webcam preview...'
     });
 
-    // Use a streaming approach instead of individual frames
-    // First, check if ffmpeg is available
-    exec('ffmpeg -version', (ffmpegError) => {
-        if (ffmpegError) {
-            console.log('ffmpeg not available, using fallback method');
-            startLegacyWebcamPreview();
-            return;
+    // Function to capture and send preview frame
+    const capturePreviewFrame = () => {
+        const timestamp = Date.now();
+        const previewPath = path.join(PREVIEW_DIR, `preview_${timestamp}.jpg`);
+
+        // Use fswebcam with optimized settings for smoother preview
+        exec(`fswebcam -d /dev/video0 -r 320x240 --fps 30 --no-banner --skip 1 --jpeg 80 ${previewPath}`, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Error capturing preview: ${error.message}`);
+                return;
+            }
+
+            // Check if file exists
+            if (!fs.existsSync(previewPath)) {
+                console.error('Preview file was not created');
+                return;
+            }
+
+            // Read the captured image
+            fs.readFile(previewPath, (err, imageData) => {
+                if (err) {
+                    console.error(`Error reading preview file: ${err.message}`);
+                    return;
+                }
+
+                // Send to all active clients
+                let activeClientCount = 0;
+                for (const [_, client] of activeStreams) {
+                    if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
+                        try {
+                            // Convert to base64 for sending via WebSocket
+                            const base64Image = imageData.toString('base64');
+                            client.ws.send(JSON.stringify({
+                                type: 'previewFrame',
+                                imageData: `data:image/jpeg;base64,${base64Image}`,
+                                timestamp
+                            }));
+                            activeClientCount++;
+                        } catch (err) {
+                            console.error(`Error sending preview to client: ${err.message}`);
+                        }
+                    }
+                }
+
+                // If no active clients, stop preview
+                if (activeClientCount === 0) {
+                    stopWebcamPreview();
+                }
+
+                // Delete the preview file to save space
+                fs.unlink(previewPath, () => {});
+            });
+        });
+    };
+
+    // Send initial preview status
+    broadcastToStreamingClients({
+        type: 'previewStatus',
+        status: 'active',
+        message: 'Webcam preview active'
+    });
+
+    // Start the preview interval with a shorter interval for smoother preview
+    previewInterval = setInterval(capturePreviewFrame, 200); // 5 fps
+
+    // Capture first frame immediately
+    capturePreviewFrame();
+}
+
+// Update the stopWebcamPreview function to handle new structure
+function stopWebcamPreview() {
+    // Check if any clients are still streaming
+    let hasActiveStreamers = false;
+    for (const [_, client] of activeStreams) {
+        if (client.isStreaming) {
+            hasActiveStreamers = true;
+            break;
+        }
+    }
+
+    // If no active streamers and interval is running, stop it
+    if (!hasActiveStreamers && previewInterval) {
+        console.log('Stopping webcam preview (no active clients)');
+
+        if (typeof previewInterval === 'object' && previewInterval.stop) {
+            previewInterval.stop();
+        } else if (typeof previewInterval === 'number') {
+            clearInterval(previewInterval);
         }
 
-        console.log('Using ffmpeg for smoother streaming');
+        previewInterval = null;
 
-        // Create a unique stream ID for this session
-        const streamId = Date.now().toString();
-        const mjpegUrl = `http://localhost:${PORT}/preview-stream/${streamId}`;
-
-        // Start ffmpeg process to stream from webcam
-        const ffmpegProcess = exec(`ffmpeg -f v4l2 -input_format mjpeg -framerate 30 -video_size 640x480 -i /dev/video0 -q:v 3 -f mpjpeg -update 1 -r 15 pipe:1`);
-
-        let frameBuffer = Buffer.alloc(0);
-        let boundaryString = '--myboundary';
-        let isFirstFrame = true;
-
-        ffmpegProcess.stdout.on('data', (chunk) => {
-            // Add to buffer
-            frameBuffer = Buffer.concat([frameBuffer, chunk]);
-
-            // Look for JPEG boundaries (FFD8 start, FFD9 end)
-            const startMarker = Buffer.from([0xFF, 0xD8]);
-            const endMarker = Buffer.from([0xFF, 0xD9]);
-
-            let startIdx = frameBuffer.indexOf(startMarker);
-            while (startIdx !== -1) {
-                let endIdx = frameBuffer.indexOf(endMarker, startIdx + 2);
-
-                if (endIdx !== -1) {
-                    // We have a complete JPEG frame
-                    endIdx += 2; // Include the end marker
-
-                    // Extract the frame
-                    const frameData = frameBuffer.slice(startIdx, endIdx);
-
-                    // Send to all clients
-                    sendFrameToClients(frameData.toString('base64'));
-
-                    // Remove processed data from buffer
-                    frameBuffer = frameBuffer.slice(endIdx);
-
-                    // Look for next frame
-                    startIdx = frameBuffer.indexOf(startMarker);
-                } else {
-                    // Incomplete frame, wait for more data
-                    break;
+        // Cleanup any temporary preview files
+        fs.readdir(PREVIEW_DIR, (err, files) => {
+            if (err) return;
+            for (const file of files) {
+                if (file.startsWith('preview_')) {
+                    fs.unlink(path.join(PREVIEW_DIR, file), () => {});
                 }
             }
         });
-
-        ffmpegProcess.stderr.on('data', (data) => {
-            // Log only occasional stderr output from ffmpeg
-            if (Math.random() < 0.01) {
-                console.log('ffmpeg:', data.toString().substring(0, 100));
-            }
-        });
-
-        ffmpegProcess.on('error', (err) => {
-            console.error('ffmpeg error:', err);
-            startLegacyWebcamPreview(); // Fall back to the old method
-        });
-
-        ffmpegProcess.on('exit', (code) => {
-            console.log(`ffmpeg process exited with code ${code}`);
-            previewInterval = null;
-        });
-
-        // Store the process for later cleanup
-        previewInterval = {
-            stop: () => {
-                ffmpegProcess.kill();
-                previewInterval = null;
-            }
-        };
-
-        // Send initial preview status
-        broadcastToStreamingClients({
-            type: 'previewStatus',
-            status: 'active',
-            message: 'Webcam preview active'
-        });
-    });
+    }
 }
 function sendFrameToClients(base64Image) {
     let activeClientCount = 0;
@@ -353,40 +367,6 @@ function startLegacyWebcamPreview() {
 
     // Capture first frame immediately
     capturePreviewFrame();
-}
-
-// Stop webcam preview
-function stopWebcamPreview() {
-    // Check if any clients are still streaming
-    let hasActiveStreamers = false;
-    for (const [_, client] of activeStreams) {
-        if (client.isStreaming) {
-            hasActiveStreamers = true;
-            break;
-        }
-    }
-
-    // If no active streamers and preview is running, stop it
-    if (!hasActiveStreamers && previewInterval) {
-        console.log('Stopping webcam preview (no active clients)');
-
-        if (typeof previewInterval === 'object' && previewInterval.stop) {
-            previewInterval.stop();
-        } else if (typeof previewInterval === 'number') {
-            clearInterval(previewInterval);
-            previewInterval = null;
-        }
-
-        // Cleanup any temporary preview files
-        fs.readdir(PREVIEW_DIR, (err, files) => {
-            if (err) return;
-            for (const file of files) {
-                if (file.startsWith('preview_')) {
-                    fs.unlink(path.join(PREVIEW_DIR, file), () => {});
-                }
-            }
-        });
-    }
 }
 
 // Helper function to broadcast to all streaming clients
