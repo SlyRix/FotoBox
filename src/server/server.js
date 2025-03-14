@@ -357,16 +357,14 @@ app.get('/api/status', (req, res) => {
 app.get('/api/liveview/check', (req, res) => {
     console.log('Checking camera live view support with direct test...');
 
-    // Instead of checking abilities, we'll directly test the capture-movie command
-    // with a quick check that will timeout if not working
     const testProcess = spawn('gphoto2', ['--stdout', '--capture-movie', '--frames=1'], {
         timeout: 5000 // 5 second timeout
     });
 
     let dataReceived = false;
     let errorOutput = '';
+    let responseSent = false;  // Flag to ensure only one response is sent
 
-    // Set a timeout to kill the process if it takes too long
     const timeoutId = setTimeout(() => {
         console.log('Live view check timed out - killing process');
         testProcess.kill();
@@ -380,10 +378,13 @@ app.get('/api/liveview/check', (req, res) => {
         clearTimeout(timeoutId);
         testProcess.kill();
 
-        res.json({
-            supported: true,
-            message: 'Camera supports live view'
-        });
+        if (!responseSent) {  // Check if response hasn't been sent yet
+            responseSent = true;
+            res.json({
+                supported: true,
+                message: 'Camera supports live view'
+            });
+        }
     });
 
     testProcess.stderr.on('data', (data) => {
@@ -393,8 +394,7 @@ app.get('/api/liveview/check', (req, res) => {
     testProcess.on('close', (code) => {
         clearTimeout(timeoutId);
 
-        // If we already sent a response, don't send another
-        if (dataReceived) return;
+        if (responseSent) return;  // Prevent response if already sent
 
         if (code === 0 || dataReceived) {
             res.json({
@@ -417,8 +417,7 @@ app.get('/api/liveview/check', (req, res) => {
         clearTimeout(timeoutId);
         console.error('Error testing live view:', err);
 
-        // Only send response if we haven't already
-        if (!dataReceived) {
+        if (!responseSent) {  // Only respond if not already sent
             res.json({
                 supported: false,
                 message: `Error testing live view: ${err.message}`
