@@ -1,4 +1,3 @@
-// server/index.js
 const express = require('express');
 const cors = require('cors');
 const { exec, spawn } = require('child_process');
@@ -39,10 +38,11 @@ let activeConnections = 0;
 
 // Initialize WebSocket server
 function setupWebSocketServer(server) {
+    // Create WebSocket server without a specific path (connects at root level)
     wsServer = new WebSocket.Server({
-        server: server,
-        path: '/liveview'  // Add this line to specify the path
+        server: server
     });
+
     wsServer.on('connection', (ws) => {
         console.log('New client connected to live view');
         activeConnections++;
@@ -73,12 +73,13 @@ function startLiveView() {
         // --stdout: Output to stdout instead of to a file
         // --frames: Number of frames to capture (0 = unlimited)
         // --no-keep: Don't keep file on camera
-        // Using sudo because we've confirmed it needs elevated permissions
-        const captureCommand = 'sudo gphoto2 --stdout --capture-movie --frames=0 --no-keep';
+        // Note: You might need to remove 'sudo' if running without proper permissions
+        const captureCommand = 'gphoto2 --stdout --capture-movie --frames=0 --no-keep';
 
         liveViewProcess = spawn(captureCommand, { shell: true });
 
         liveViewProcess.stdout.on('data', (data) => {
+            console.log(`Received frame data: ${data.length} bytes`);
             // Broadcast the frame data to all connected clients
             if (wsServer) {
                 wsServer.clients.forEach((client) => {
@@ -91,6 +92,12 @@ function startLiveView() {
 
         liveViewProcess.stderr.on('data', (data) => {
             console.error(`Live view stderr: ${data}`);
+            // Check for specific error messages
+            if (data.toString().includes('not supported') ||
+                data.toString().includes('error') ||
+                data.toString().includes('failed')) {
+                console.error('Camera does not support live view or encountered an error');
+            }
         });
 
         liveViewProcess.on('close', (code) => {

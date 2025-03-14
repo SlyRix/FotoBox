@@ -1,4 +1,4 @@
-// client/src/components/CameraView.js
+// client/src/components/CameraView.js - Updated WebSocket handling for live view
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
@@ -13,16 +13,23 @@ const CameraView = () => {
     const [liveViewSupported, setLiveViewSupported] = useState(false);
     const [liveViewConnected, setLiveViewConnected] = useState(false);
     const [liveViewError, setLiveViewError] = useState(null);
+    const [frameCount, setFrameCount] = useState(0);
+    const [lastFrameTime, setLastFrameTime] = useState(null);
 
     const canvasRef = useRef(null);
     const wsRef = useRef(null);
     const imageRef = useRef(new Image());
 
+    // Debug mode with additional logging
+    const DEBUG = true;
+
     // Check if the camera supports live view
     useEffect(() => {
+        if (DEBUG) console.log("Checking if camera supports live view...");
         fetch(`${API_ENDPOINT}/liveview/check`)
             .then(response => response.json())
             .then(data => {
+                if (DEBUG) console.log("Live view support check result:", data);
                 setLiveViewSupported(data.supported);
                 if (!data.supported) {
                     setLiveViewError(data.message);
@@ -36,70 +43,117 @@ const CameraView = () => {
 
     // Initialize WebSocket connection for live view
     useEffect(() => {
-        // Only attempt to connect if live view is supported and not already connected
-        if (liveViewSupported && !liveViewConnected && !countdown) {
+        // Only attempt to connect if live view is supported and countdown is not active
+        if (liveViewSupported && !countdown) {
+            if (DEBUG) console.log("Attempting to connect to WebSocket for live view...");
+
             // Clean up previous connection if it exists
             if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
                 wsRef.current.close();
             }
 
-            // Create WebSocket URL (use wss for https, ws for http)
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${API_BASE_URL.replace(/^https?:\/\//, '')}/liveview`;
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsHost = API_BASE_URL.replace(/^https?:\/\//, '');
+            const wsUrl = `${wsProtocol}//${wsHost}`;
+
+            if (DEBUG) console.log("Connecting to WebSocket at:", wsUrl);
 
             try {
                 const ws = new WebSocket(wsUrl);
                 wsRef.current = ws;
 
+                ws.binaryType = 'arraybuffer'; // Ensure we're receiving binary data as ArrayBuffer
+
                 ws.onopen = () => {
-                    console.log('Live view WebSocket connected');
+                    if (DEBUG) console.log('✅ Live view WebSocket connected successfully');
                     setLiveViewConnected(true);
                     setLiveViewError(null);
+                    setFrameCount(0);
+                    setLastFrameTime(Date.now());
                 };
 
-                ws.onclose = () => {
-                    console.log('Live view WebSocket disconnected');
+                ws.onclose = (event) => {
+                    if (DEBUG) console.log('Live view WebSocket disconnected', event.code, event.reason);
                     setLiveViewConnected(false);
+                    // Try to reconnect after a delay unless we're in countdown mode
+                    if (!countdown) {
+                        setTimeout(() => {
+                            if (DEBUG) console.log('Attempting to reconnect WebSocket...');
+                            setLiveViewConnected(false);
+                        }, 2000);
+                    }
                 };
 
                 ws.onerror = (error) => {
-                    console.error('Live view WebSocket error:', error);
-                    setLiveViewError('Failed to connect to live view stream');
+                    console.error('❌ Live view WebSocket error:', error);
+                    setLiveViewError('Connection error. Server might be unavailable.');
                     setLiveViewConnected(false);
                 };
 
                 // Handle incoming live view frames
                 ws.onmessage = (event) => {
-                    // Convert binary data to a base64 string
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        // Set the image source with the received data
-                        imageRef.current.src = reader.result;
+                    // Update frame counter for monitoring
+                    setFrameCount(prev => prev + 1);
+                    setLastFrameTime(Date.now());
 
-                        // When the image is loaded, draw it to the canvas
+                    try {
+                        // Converting ArrayBuffer to Blob
+                        const blob = new Blob([event.data], { type: 'image/jpeg' });
+
+                        // Create a URL for the blob
+                        const url = URL.createObjectURL(blob);
+
+                        // Set the image source and handle its loading
                         imageRef.current.onload = () => {
+                            // Draw to canvas when image is loaded
                             const canvas = canvasRef.current;
                             if (canvas) {
                                 const ctx = canvas.getContext('2d');
-                                ctx.drawImage(imageRef.current, 0, 0, canvas.width, canvas.height);
+
+                                // Clear the canvas first
+                                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                                // Calculate scaling to maintain aspect ratio while filling canvas
+                                const hRatio = canvas.width / imageRef.current.width;
+                                const vRatio = canvas.height / imageRef.current.height;
+                                const ratio = Math.min(hRatio, vRatio);
+
+                                // Center the image
+                                const centerX = (canvas.width - imageRef.current.width * ratio) / 2;
+                                const centerY = (canvas.height - imageRef.current.height * ratio) / 2;
+
+                                // Draw the image with proper scaling
+                                ctx.drawImage(
+                                    imageRef.current,
+                                    0, 0, imageRef.current.width, imageRef.current.height,
+                                    centerX, centerY, imageRef.current.width * ratio, imageRef.current.height * ratio
+                                );
+
+                                // Clean up the blob URL to avoid memory leaks
+                                URL.revokeObjectURL(url);
                             }
                         };
-                    };
-                    reader.readAsDataURL(event.data);
+
+                        // Set the image source to trigger loading
+                        imageRef.current.src = url;
+                    } catch (error) {
+                        console.error('Error processing camera frame:', error);
+                    }
                 };
             } catch (error) {
                 console.error('Error setting up WebSocket connection:', error);
-                setLiveViewError('Failed to set up live view connection');
+                setLiveViewError(`Failed to connect: ${error.message}`);
             }
         }
 
         // Cleanup WebSocket on component unmount or during countdown
         return () => {
             if (wsRef.current) {
+                if (DEBUG) console.log('Closing WebSocket connection on cleanup');
                 wsRef.current.close();
             }
         };
-    }, [liveViewSupported, liveViewConnected, countdown, API_BASE_URL]);
+    }, [liveViewSupported, countdown, API_BASE_URL]);
 
     // Handle taking a photo with countdown
     const handleTakePhoto = () => {
@@ -107,6 +161,7 @@ const CameraView = () => {
 
         // Disconnect live view during countdown to avoid conflicts
         if (wsRef.current) {
+            if (DEBUG) console.log('Closing WebSocket before taking photo');
             wsRef.current.close();
             setLiveViewConnected(false);
         }
@@ -130,6 +185,7 @@ const CameraView = () => {
             // Take photo after showing the smile message
             const capturePhoto = async () => {
                 try {
+                    if (DEBUG) console.log('Taking photo...');
                     const photo = await takePhoto();
                     if (photo) {
                         // Navigate to preview page
@@ -164,6 +220,15 @@ const CameraView = () => {
             </div>
         );
     }
+
+    // Calculate FPS (when frames are being received)
+    const getFps = () => {
+        if (!lastFrameTime || frameCount === 0) return 'N/A';
+        const secondsActive = (Date.now() - lastFrameTime) / 1000;
+        // Only show FPS if we received a frame in the last 3 seconds
+        if (secondsActive > 3) return 'Inactive';
+        return (frameCount / secondsActive).toFixed(1);
+    };
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10">
@@ -224,15 +289,35 @@ const CameraView = () => {
                         animate={{ opacity: 1 }}
                         className="flex flex-col items-center"
                     >
-                        <div className="bg-black/10 p-4 rounded-lg w-full max-w-xl h-80 mb-8 border-4 border-dashed border-white/50 flex items-center justify-center overflow-hidden">
+                        <div className="bg-black p-4 rounded-lg w-full max-w-xl h-80 mb-8 border-2 border-gray-800 flex items-center justify-center overflow-hidden">
                             {liveViewSupported && !liveViewError ? (
-                                // Live view canvas
-                                <canvas
-                                    ref={canvasRef}
-                                    width="640"
-                                    height="480"
-                                    className="max-w-full max-h-full object-contain bg-black"
-                                />
+                                liveViewConnected ? (
+                                    <>
+                                        {/* Live view canvas */}
+                                        <canvas
+                                            ref={canvasRef}
+                                            width="640"
+                                            height="480"
+                                            className="max-w-full max-h-full object-contain bg-black"
+                                        />
+
+                                        {/* FPS Counter for debugging */}
+                                        {DEBUG && (
+                                            <div className="absolute top-2 right-2 text-white bg-black/50 px-2 py-1 rounded text-xs">
+                                                FPS: {getFps()} | Frames: {frameCount}
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    // Show connecting message
+                                    <div className="text-center text-white/80">
+                                        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mx-auto mb-4"></div>
+                                        <p>Connecting to camera live view...</p>
+                                        {liveViewError && (
+                                            <p className="text-red-300 mt-2 text-sm">{liveViewError}</p>
+                                        )}
+                                    </div>
+                                )
                             ) : (
                                 // Fallback when live view is not available
                                 <div className="text-center text-white/80">
@@ -245,12 +330,25 @@ const CameraView = () => {
                                     <p className="text-lg">Camera View</p>
                                     <p className="text-sm opacity-70 mt-2">
                                         {liveViewError
-                                            ? liveViewError
+                                            ? `Live view not available: ${liveViewError}`
                                             : "Stand here and press the button when you're ready!"}
                                     </p>
                                 </div>
                             )}
                         </div>
+
+                        {DEBUG && (
+                            <div className="mb-4 p-3 bg-gray-100 text-gray-700 rounded-lg text-sm text-left w-full max-w-xl">
+                                <h3 className="font-bold">Debug Info:</h3>
+                                <ul className="list-disc pl-5 mt-1">
+                                    <li>Live view supported: {liveViewSupported ? 'Yes' : 'No'}</li>
+                                    <li>WebSocket connected: {liveViewConnected ? 'Yes' : 'No'}</li>
+                                    <li>Frames received: {frameCount}</li>
+                                    <li>FPS: {getFps()}</li>
+                                    {liveViewError && <li className="text-red-500">Error: {liveViewError}</li>}
+                                </ul>
+                            </div>
+                        )}
 
                         {error && (
                             <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
