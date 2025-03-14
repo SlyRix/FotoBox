@@ -16,6 +16,11 @@ export const CameraProvider = ({ children }) => {
     const [previewImage, setPreviewImage] = useState(null);
     const [previewStatus, setPreviewStatus] = useState('inactive'); // inactive, connecting, active, paused, error
 
+    // Optimize preview image handling
+    const prevFrameTimestampRef = useRef(0);
+    const pendingFrameRef = useRef(null);
+    const frameProcessingRef = useRef(false);
+
     // Camera information
     const [cameraInfo, setCameraInfo] = useState({
         webcamAvailable: false,
@@ -27,6 +32,60 @@ export const CameraProvider = ({ children }) => {
     // WebSocket connection
     const wsRef = useRef(null);
     const reconnectTimerRef = useRef(null);
+
+    // Process incoming preview frames with throttling
+    const processPreviewFrame = useCallback((imageData, timestamp) => {
+        // If we're currently processing a frame, store this one for later
+        if (frameProcessingRef.current) {
+            pendingFrameRef.current = { imageData, timestamp };
+            return;
+        }
+
+        // Skip if this frame is older than one we've already processed
+        if (timestamp < prevFrameTimestampRef.current) {
+            return;
+        }
+
+        // Mark that we're processing a frame
+        frameProcessingRef.current = true;
+
+        // Create a new image to preload this frame
+        const img = new Image();
+        img.onload = () => {
+            // Update the displayed image
+            setPreviewImage(imageData);
+            prevFrameTimestampRef.current = timestamp;
+
+            // Mark that we're done processing
+            frameProcessingRef.current = false;
+
+            // Process any pending frame that came in while we were busy
+            if (pendingFrameRef.current) {
+                const { imageData: pendingImageData, timestamp: pendingTimestamp } = pendingFrameRef.current;
+                pendingFrameRef.current = null;
+
+                // Short timeout to allow UI to update before processing next frame
+                setTimeout(() => {
+                    processPreviewFrame(pendingImageData, pendingTimestamp);
+                }, 0);
+            }
+        };
+
+        img.onerror = () => {
+            // If there's an error, just mark that we're done processing
+            frameProcessingRef.current = false;
+
+            // Process any pending frame
+            if (pendingFrameRef.current) {
+                const { imageData: pendingImageData, timestamp: pendingTimestamp } = pendingFrameRef.current;
+                pendingFrameRef.current = null;
+                processPreviewFrame(pendingImageData, pendingTimestamp);
+            }
+        };
+
+        // Start loading the image
+        img.src = imageData;
+    }, []);
 
     // Check camera status on mount
     useEffect(() => {
@@ -112,8 +171,8 @@ export const CameraProvider = ({ children }) => {
                         break;
 
                     case 'previewFrame':
-                        // New frame received
-                        setPreviewImage(message.imageData);
+                        // Process new frame with the optimized handler
+                        processPreviewFrame(message.imageData, message.timestamp);
                         setPreviewStatus('active');
                         break;
 
@@ -151,7 +210,7 @@ export const CameraProvider = ({ children }) => {
         };
 
         wsRef.current = ws;
-    }, []);
+    }, [processPreviewFrame]);
 
     // Connect to WebSocket when the component mounts
     useEffect(() => {
