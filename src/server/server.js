@@ -121,14 +121,6 @@ function startLiveView() {
     console.log('========================================');
     console.log('Starting live view stream...');
 
-    // Test gphoto2 specifically for capture-movie capability
-    try {
-        const testOutput = execSync('gphoto2 --list-all-config | grep -i capture-movie').toString();
-        console.log('Camera supports capture-movie according to config:', testOutput);
-    } catch (err) {
-        console.warn('Could not verify capture-movie support:', err.message);
-        // Continue anyway as it might still work
-    }
 
     try {
         // Using the command that works locally
@@ -371,23 +363,75 @@ app.get('/api/status', (req, res) => {
 
 // Add API endpoint to check if live view is supported
 app.get('/api/liveview/check', (req, res) => {
-    exec('gphoto2 --abilities', (error, stdout, stderr) => {
-        if (error) {
-            return res.json({
-                supported: false,
-                message: 'Error checking camera capabilities'
-            });
-        }
+    console.log('Checking camera live view support with direct test...');
 
-        // Check if the camera supports capture-movie (live view)
-        const supportsLiveView = stdout.includes('capture-movie');
+    // Instead of checking abilities, we'll directly test the capture-movie command
+    // with a quick check that will timeout if not working
+    const testProcess = spawn('gphoto2', ['--stdout', '--capture-movie', '--frames=1'], {
+        timeout: 5000 // 5 second timeout
+    });
+
+    let dataReceived = false;
+    let errorOutput = '';
+
+    // Set a timeout to kill the process if it takes too long
+    const timeoutId = setTimeout(() => {
+        console.log('Live view check timed out - killing process');
+        testProcess.kill();
+    }, 5000);
+
+    testProcess.stdout.on('data', (data) => {
+        console.log(`Live view test received ${data.length} bytes - camera supports live view!`);
+        dataReceived = true;
+
+        // We got data, so live view is working
+        clearTimeout(timeoutId);
+        testProcess.kill();
 
         res.json({
-            supported: supportsLiveView,
-            message: supportsLiveView
-                ? 'Camera supports live view'
-                : 'Camera does not support live view or is not properly connected'
+            supported: true,
+            message: 'Camera supports live view'
         });
+    });
+
+    testProcess.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+    });
+
+    testProcess.on('close', (code) => {
+        clearTimeout(timeoutId);
+
+        // If we already sent a response, don't send another
+        if (dataReceived) return;
+
+        if (code === 0 || dataReceived) {
+            res.json({
+                supported: true,
+                message: 'Camera supports live view'
+            });
+        } else {
+            console.log(`Live view test exited with code ${code}`);
+            console.log(`Error output: ${errorOutput}`);
+
+            res.json({
+                supported: false,
+                message: 'Camera does not support live view or is not properly connected',
+                details: errorOutput
+            });
+        }
+    });
+
+    testProcess.on('error', (err) => {
+        clearTimeout(timeoutId);
+        console.error('Error testing live view:', err);
+
+        // Only send response if we haven't already
+        if (!dataReceived) {
+            res.json({
+                supported: false,
+                message: `Error testing live view: ${err.message}`
+            });
+        }
     });
 });
 
