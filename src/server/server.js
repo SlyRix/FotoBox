@@ -119,12 +119,16 @@ let liveViewRetries = 0;
 const maxLiveViewRetries = 5;
 const liveViewCooldown = 3000;
 // Start the live view process
+
 function startLiveView() {
     if (liveViewRetries >= maxLiveViewRetries) {
         console.log(`Max live view retries reached (${maxLiveViewRetries}). Waiting...`);
+
+        // Notify client and close connection
+        ws.send(JSON.stringify({ type: 'error', message: 'Live view unavailable. Max retries reached. Please restart the server or camera.' }));
+        ws.close(1011, 'Live view unavailable');
         return;
     }
-
     console.log('========================================');
     console.log(`Starting live view stream (Attempt #${liveViewRetries + 1})...`);
 
