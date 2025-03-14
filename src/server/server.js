@@ -123,19 +123,9 @@ const liveViewCooldown = 3000;
 function startLiveView() {
     if (liveViewRetries >= maxLiveViewRetries) {
         console.log(`Max live view retries reached (${maxLiveViewRetries}). Waiting...`);
-
-        // Notify client and close connection
-        const captureCommand = '^C';
-        console.log(`Executing command: ${captureCommand}`);
-
-        liveViewProcess = spawn(captureCommand, {
-            shell: true,
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
-
         return;
     }
-    console.log('========================================');
+
     console.log(`Starting live view stream (Attempt #${liveViewRetries + 1})...`);
 
     try {
@@ -182,17 +172,23 @@ function startLiveView() {
             }
         });
 
+        // Here, capture the live view data from stdout and send to WebSocket clients
+        liveViewProcess.stdout.on('data', (data) => {
+            // You can send the data to the WebSocket here, depending on the format
+            // For example, sending the raw binary data or converting to base64
+            if (wsServer.clients.size > 0) {
+                wsServer.clients.forEach((client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        // Example: Send base64-encoded image data
+                        let base64Data = data.toString('base64');
+                        client.send(JSON.stringify({ type: 'liveview', image: base64Data }));
+                    }
+                });
+            }
+        });
+
     } catch (error) {
         console.error('Error starting live view:', error);
-    }
-}
-
-// Stop the live view process
-function stopLiveView() {
-    if (liveViewProcess !== null) {
-        console.log('Stopping live view stream...');
-        liveViewProcess.kill('SIGTERM');
-        liveViewProcess = null;
     }
 }
 
