@@ -1,27 +1,13 @@
 // server/index.js
 const express = require('express');
 const cors = require('cors');
-const { exec, spawn, execSync } = require('child_process');
+const { exec, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
 const bodyParser = require('body-parser');
 const http = require('http');
 const WebSocket = require('ws');
-
-// Setup diagnostics to test WebSocket functionality
-console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
-
-// Check if WebSocket module is properly loaded
-console.log(`WebSocket module loaded: ${typeof WebSocket !== 'undefined' ? 'YES' : 'NO'}`);
-
-// Check if gphoto2 is available on the system
-try {
-    const gphotoVersion = execSync('gphoto2 --version').toString().trim();
-    console.log(`gphoto2 available: YES - ${gphotoVersion.split('\n')[0]}`);
-} catch (err) {
-    console.log(`gphoto2 available: NO - ${err.message}`);
-}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -60,147 +46,49 @@ function setupWebSocketServer(server) {
         server: server
     });
 
-    console.log(`WebSocket server created successfully: ${wsServer ? 'YES' : 'NO'}`);
-
-    // Log when the server is listening
-    wsServer.on('listening', () => {
-        console.log('WebSocket server is now listening for connections');
-    });
-
-    // Added error handler for WebSocket server
-    wsServer.on('error', (error) => {
-        console.error('WebSocket SERVER ERROR:', error);
-    });
-
     wsServer.on('connection', (ws, req) => {
-        // Log detailed connection info
-        console.log(`New WebSocket connection from ${req.socket.remoteAddress}`);
-        console.log(`Client headers: ${JSON.stringify(req.headers)}`);
         activeConnections++;
+        console.log(`New WebSocket connection from ${req.socket.remoteAddress}`);
         console.log(`Active connections: ${activeConnections}`);
 
         // Start live view stream if it's not already running
         if (liveViewProcess === null) {
-            console.log('Starting live view process due to new connection');
             startLiveView();
         }
 
-        // Log all incoming messages (might be useful for debugging)
-        ws.on('message', (message) => {
-            console.log(`Received message from client: ${message}`);
-        });
-
-        ws.on('close', (code, reason) => {
-            console.log(`Client disconnected with code ${code}, reason: ${reason || 'none provided'}`);
+        ws.on('close', () => {
             activeConnections--;
             console.log(`Active connections: ${activeConnections}`);
 
             // If no clients are connected, stop the live view process
             if (activeConnections === 0 && liveViewProcess !== null) {
-                console.log('No active connections, stopping live view');
                 stopLiveView();
             }
         });
-
-        ws.on('error', (error) => {
-            console.error('WebSocket client error:', error);
-        });
-
-        // Send a test message to confirm connection works
-        try {
-            ws.send(JSON.stringify({ type: 'info', message: 'Connection established successfully' }));
-            console.log('Sent welcome message to client');
-        } catch (e) {
-            console.error('Error sending welcome message:', e);
-        }
     });
 }
+
 function stopLiveView() {
     if (liveViewProcess) {
         console.log('Stopping live view process...');
-
-        // Send a termination signal
         liveViewProcess.kill('SIGINT');  // You can use 'SIGTERM' or 'SIGKILL' if necessary
-
-        // Wait for the process to exit or timeout
-        liveViewProcess.on('exit', (code) => {
-            if (code === 0) {
-                console.log('Live view process ended successfully.');
-            } else {
-                console.log(`Live view process ended with error code: ${code}`);
-            }
-        });
-
         liveViewProcess = null;  // Clean up after killing the process
-    } else {
-        console.log('No live view process to stop.');
     }
 }
-let liveViewRetries = 0;
-const maxLiveViewRetries = 5;
-const liveViewCooldown = 3000;
-// Start the live view process
 
 function startLiveView() {
-    if (liveViewRetries >= maxLiveViewRetries) {
-        console.log(`Max live view retries reached (${maxLiveViewRetries}). Waiting...`);
-        return;
-    }
-
-    console.log(`Starting live view stream (Attempt #${liveViewRetries + 1})...`);
-
+    console.log('Starting live view stream...');
+    const captureCommand = 'gphoto2 --stdout --capture-movie';
     try {
-        const captureCommand = 'gphoto2 --stdout --capture-movie';
-        console.log(`Executing command: ${captureCommand}`);
-
         liveViewProcess = spawn(captureCommand, {
             shell: true,
             stdio: ['ignore', 'pipe', 'pipe'],
         });
 
-        console.log(`Process spawned with PID: ${liveViewProcess.pid}`);
-        liveViewRetries++;
-
-        let errorOutput = '';
-
-        liveViewProcess.stderr.on('data', (data) => {
-            errorOutput += data.toString();
-
-            if (errorOutput.includes('Could not claim the USB device')) {
-                console.error('Live view failed: Camera is busy. Retrying after cooldown...');
-                stopLiveView();
-
-                setTimeout(() => {
-                    startLiveView();
-                }, liveViewCooldown);
-            }
-        });
-
-        liveViewProcess.on('close', (code) => {
-            console.log(`Live view process exited with code ${code}`);
-            if (code !== 0 && liveViewRetries < maxLiveViewRetries) {
-                console.log(`Retrying live view in ${liveViewCooldown / 1000} seconds...`);
-                setTimeout(startLiveView, liveViewCooldown);
-            }
-        });
-
-        liveViewProcess.on('error', (err) => {
-            console.error('Failed to start live view process:', err);
-            liveViewRetries++;
-            if (liveViewRetries < maxLiveViewRetries) {
-                console.log(`Retrying live view in ${liveViewCooldown / 1000} seconds...`);
-                setTimeout(startLiveView, liveViewCooldown);
-            }
-        });
-
-        // Here, capture the live view data from stdout and send to WebSocket clients
         liveViewProcess.stdout.on('data', (data) => {
-            // You can send the data to the WebSocket here, depending on the format
-            // For example, sending the raw binary data or converting to base64
             if (wsServer.clients.size > 0) {
                 wsServer.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN) {
-                        // Example: Send base64-encoded image data
                         let base64Data = data.toString('base64');
                         client.send(JSON.stringify({ type: 'liveview', image: base64Data }));
                     }
@@ -222,12 +110,10 @@ app.get('/api/photos', (req, res) => {
             return res.status(500).json({ error: 'Failed to retrieve photos' });
         }
 
-        // Filter for image files
         const photoFiles = files.filter(file =>
             /\.(jpg|jpeg|png)$/i.test(file)
         );
 
-        // Add timestamps and sort by most recent
         const photos = photoFiles.map(file => {
             const stats = fs.statSync(path.join(PHOTOS_DIR, file));
             return {
@@ -242,9 +128,8 @@ app.get('/api/photos', (req, res) => {
     });
 });
 
-// Take a new photo - with improved error handling and no excessive process killing
+// Take a new photo
 app.post('/api/photos/capture', (req, res) => {
-    // Prevent multiple simultaneous capture requests
     if (captureInProgress.status) {
         return res.status(429).json({
             success: false,
@@ -254,7 +139,6 @@ app.post('/api/photos/capture', (req, res) => {
 
     captureInProgress.status = true;
 
-    // Generate unique filename based on timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `wedding_${timestamp}.jpg`;
     const filepath = path.join(PHOTOS_DIR, filename);
@@ -266,7 +150,6 @@ app.post('/api/photos/capture', (req, res) => {
         stopLiveView();
     }
 
-    // Build the gphoto2 command with necessary parameters
     const captureCommand = `gphoto2 --force-overwrite --capture-image-and-download --filename "${filepath}"`;
 
     exec(captureCommand, (error, stdout, stderr) => {
@@ -274,15 +157,6 @@ app.post('/api/photos/capture', (req, res) => {
 
         if (error || stderr.includes('ERROR')) {
             console.error(`${new Date().toISOString()}: Error capturing photo: ${error ? error.message : stderr}`);
-
-            // Check if we should suggest using tethering mode
-            if (stderr.includes('Could not claim the USB device')) {
-                return res.status(500).json({
-                    success: false,
-                    error: 'Camera busy or inaccessible. Try disconnecting and reconnecting the camera.'
-                });
-            }
-
             return res.status(500).json({
                 success: false,
                 error: 'Failed to capture photo'
@@ -298,8 +172,8 @@ app.post('/api/photos/capture', (req, res) => {
 
         QRCode.toFile(qrFilepath, photoUrl, {
             color: {
-                dark: '#000',  // Points
-                light: '#FFF'  // Background
+                dark: '#000',
+                light: '#FFF'
             }
         }, (qrErr) => {
             if (qrErr) {
@@ -330,116 +204,6 @@ app.delete('/api/photos/:filename', (req, res) => {
         }
 
         res.json({ success: true, message: 'Photo deleted successfully' });
-    });
-});
-
-// Send print command (placeholder for future implementation)
-app.post('/api/photos/print', (req, res) => {
-    const { filename } = req.body;
-
-    if (!filename) {
-        return res.status(400).json({ error: 'Filename is required' });
-    }
-
-    // This is where you would implement the printing logic
-    // For now, just return a success message
-    console.log(`Print request received for: ${filename}`);
-
-    res.json({
-        success: true,
-        message: 'Print request received. Printing functionality will be implemented later.'
-    });
-});
-
-// Server status endpoint - simplified to avoid killing processes unnecessarily
-app.get('/api/status', (req, res) => {
-    exec('gphoto2 --auto-detect', (error, stdout, stderr) => {
-        if (error) {
-            return res.json({
-                status: 'error',
-                camera: false,
-                message: 'Camera not detected'
-            });
-        }
-
-        res.json({
-            status: 'ok',
-            camera: true,
-            message: stdout.trim()
-        });
-    });
-});
-
-// Add API endpoint to check if live view is supported
-app.get('/api/liveview/check', (req, res) => {
-    console.log('Checking camera live view support with direct test...');
-
-    const testProcess = spawn('gphoto2', ['--stdout', '--capture-movie', '--frames=1'], {
-        timeout: 5000 // 5 second timeout
-    });
-
-    let dataReceived = false;
-    let errorOutput = '';
-    let responseSent = false;  // Flag to ensure only one response is sent
-
-    const timeoutId = setTimeout(() => {
-        console.log('Live view check timed out - killing process');
-        testProcess.kill();
-    }, 5000);
-
-    testProcess.stdout.on('data', (data) => {
-        console.log(`Live view test received ${data.length} bytes - camera supports live view!`);
-        dataReceived = true;
-
-        // We got data, so live view is working
-        clearTimeout(timeoutId);
-        testProcess.kill();
-
-        if (!responseSent) {  // Check if response hasn't been sent yet
-            responseSent = true;
-            res.json({
-                supported: true,
-                message: 'Camera supports live view'
-            });
-        }
-    });
-
-    testProcess.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-    });
-
-    testProcess.on('close', (code) => {
-        clearTimeout(timeoutId);
-
-        if (responseSent) return;  // Prevent response if already sent
-
-        if (code === 0 || dataReceived) {
-            res.json({
-                supported: true,
-                message: 'Camera supports live view'
-            });
-        } else {
-            console.log(`Live view test exited with code ${code}`);
-            console.log(`Error output: ${errorOutput}`);
-
-            res.json({
-                supported: false,
-                message: 'Camera does not support live view or is not properly connected',
-                details: errorOutput
-            });
-        }
-    });
-
-    testProcess.on('error', (err) => {
-        clearTimeout(timeoutId);
-        console.error('Error testing live view:', err);
-
-        if (!responseSent) {  // Only respond if not already sent
-            res.json({
-                supported: false,
-                message: `Error testing live view: ${err.message}`
-            });
-        }
     });
 });
 
