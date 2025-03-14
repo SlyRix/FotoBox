@@ -115,6 +115,7 @@ function setupWebSocketServer(server) {
         }
     });
 }
+
 function stopLiveView() {
     if (liveViewProcess) {
         console.log('Stopping live view process...');
@@ -136,11 +137,18 @@ function stopLiveView() {
         console.log('No live view process to stop.');
     }
 }
+
 let liveViewRetries = 0;
 const maxLiveViewRetries = 5;
 const liveViewCooldown = 3000;
-// Start the live view process
 
+// Function to reset live view retries
+function resetLiveViewRetries() {
+    console.log('Resetting live view retry counter');
+    liveViewRetries = 0;
+}
+
+// Start the live view process
 function startLiveView() {
     if (liveViewRetries >= maxLiveViewRetries) {
         console.log(`Max live view retries reached (${maxLiveViewRetries}). Waiting...`);
@@ -193,18 +201,68 @@ function startLiveView() {
             }
         });
 
-        // Here, capture the live view data from stdout and send to WebSocket clients
-        liveViewProcess.stdout.on('data', (data) => {
-            // You can send the data to the WebSocket here, depending on the format
-            // For example, sending the raw binary data or converting to base64
-            if (wsServer.clients.size > 0) {
-                wsServer.clients.forEach((client) => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        // Example: Send base64-encoded image data
-                        let base64Data = data.toString('base64');
-                        client.send(JSON.stringify({ type: 'liveview', image: base64Data }));
-                    }
-                });
+        // Create a buffer to accumulate image data
+        let imageBuffer = Buffer.alloc(0);
+        let imageFrameSize = 0;
+        const JPEG_START = Buffer.from([0xFF, 0xD8]); // JPEG start marker
+        const JPEG_END = Buffer.from([0xFF, 0xD9]);   // JPEG end marker
+
+        liveViewProcess.stdout.on('data', (chunk) => {
+            // Append the new chunk to our buffer
+            imageBuffer = Buffer.concat([imageBuffer, chunk]);
+
+            // Look for JPEG frame boundaries
+            let startIdx = 0;
+            while (startIdx < imageBuffer.length - 1) {
+                // Find JPEG start marker
+                const startMarkerPos = imageBuffer.indexOf(JPEG_START, startIdx);
+                if (startMarkerPos === -1) break;
+
+                // Find JPEG end marker after the start marker
+                const endMarkerPos = imageBuffer.indexOf(JPEG_END, startMarkerPos + 2);
+                if (endMarkerPos === -1) break;
+
+                // We found a complete JPEG frame
+                const frameEndPos = endMarkerPos + 2; // Include the end marker
+                const completeFrame = imageBuffer.slice(startMarkerPos, frameEndPos);
+
+                // Send frame to all connected clients
+                if (wsServer.clients.size > 0) {
+                    const base64Frame = completeFrame.toString('base64');
+                    wsServer.clients.forEach((client) => {
+                        if (client.readyState === WebSocket.OPEN) {
+                            try {
+                                client.send(JSON.stringify({
+                                    type: 'liveview',
+                                    image: base64Frame,
+                                    frameSize: completeFrame.length
+                                }));
+                            } catch (err) {
+                                console.error('Error sending frame to client:', err);
+                            }
+                        }
+                    });
+                }
+
+                // Log frame info occasionally (every 10 frames)
+                imageFrameSize++;
+                if (imageFrameSize % 10 === 0) {
+                    console.log(`Sent live view frame #${imageFrameSize}, size: ${completeFrame.length} bytes`);
+                }
+
+                // Move past this frame in the buffer
+                startIdx = frameEndPos;
+            }
+
+            // Keep only the part of the buffer that might contain a partial frame
+            if (startIdx > 0) {
+                imageBuffer = imageBuffer.slice(startIdx);
+            }
+
+            // Safety check - if buffer gets too large, reset it
+            if (imageBuffer.length > 1000000) { // 1MB limit
+                console.log('Buffer too large, resetting');
+                imageBuffer = Buffer.alloc(0);
             }
         });
 
@@ -348,6 +406,15 @@ app.post('/api/photos/print', (req, res) => {
     res.json({
         success: true,
         message: 'Print request received. Printing functionality will be implemented later.'
+    });
+});
+
+// Reset live view retries endpoint
+app.post('/api/liveview/reset', (req, res) => {
+    resetLiveViewRetries();
+    res.json({
+        success: true,
+        message: 'Live view retry counter has been reset'
     });
 });
 

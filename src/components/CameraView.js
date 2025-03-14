@@ -47,6 +47,26 @@ const CameraView = () => {
         return reasons[code] || `Unknown reason (${code})`;
     };
 
+    // Reset live view connection
+    const resetLiveViewConnection = () => {
+        fetch(`${API_ENDPOINT}/liveview/reset`, {
+            method: 'POST'
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    setConnectionAttempts(0);
+                    setLiveViewError('Connection reset. Attempting to reconnect...');
+                    setTimeout(() => {
+                        initializeWebSocket();
+                    }, 1000);
+                }
+            })
+            .catch(error => {
+                console.error('Error resetting live view:', error);
+            });
+    };
+
     // Check if the camera supports live view
     useEffect(() => {
         console.log("%c[Camera] Checking if camera supports live view...", "color: purple; font-weight: bold");
@@ -100,8 +120,8 @@ const CameraView = () => {
             wsRef.current.close();
         }
 
-        const wsProtocol = 'wss:';
-        const wsHost = API_BASE_URL.replace(/^https?:\/\//, '').replace(/\/api$/, '');
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsHost = API_BASE_URL.replace(/^https?:\/\//, '');
         const wsUrl = `${wsProtocol}//${wsHost}`;
 
         try {
@@ -114,21 +134,54 @@ const CameraView = () => {
                 setLiveViewConnected(true);
                 setLiveViewError(null);
                 setConnectionAttempts(0); // Reset attempts on success
+                setFrameCount(0);  // Reset frame counter
+                setLastFrameTime(Date.now());  // Initialize frame timing
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'liveview' && data.image) {
+                        // Increment frame counter for FPS calculation
+                        setFrameCount(prev => prev + 1);
+                        setLastFrameTime(Date.now());
+
+                        // Draw the image on canvas
+                        const canvas = canvasRef.current;
+                        if (canvas) {
+                            const ctx = canvas.getContext('2d');
+                            const img = new Image();
+                            img.onload = () => {
+                                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            };
+                            img.src = `data:image/jpeg;base64,${data.image}`;
+                        }
+                    } else if (data.type === 'info') {
+                        console.log("[WebSocket] Info message:", data.message);
+                    }
+                } catch (error) {
+                    console.error("[WebSocket] Error processing message:", error);
+                }
             };
 
             ws.onclose = (event) => {
                 console.log(`%c[WebSocket] Connection CLOSED: Code=${event.code}, Reason="${event.reason || 'none'}"`, "color: orange; font-weight: bold");
 
+                setLiveViewConnected(false);
+
                 if (event.code === 1006 || event.code === 1005) {
                     console.warn('[WebSocket] Abnormal closure, retrying...');
-                    setLiveViewConnected(false);
 
                     // Use exponential backoff for retries
                     const delay = Math.min(1000 * Math.pow(1.5, connectionAttempts), reconnectCooldown);
                     console.log(`[WebSocket] Reconnecting in ${delay / 1000} seconds...`);
 
-                    setTimeout(() => {
-                        initializeWebSocket();
+                    reconnectTimeoutRef.current = setTimeout(() => {
+                        if (countdown === null) {  // Only reconnect if not in countdown mode
+                            initializeWebSocket();
+                        }
                     }, delay);
                 }
             };
@@ -143,7 +196,7 @@ const CameraView = () => {
             console.error('[WebSocket] Setup error:', error);
             setLiveViewError(`Failed to set up WebSocket: ${error.message}`);
         }
-    }, [API_BASE_URL, countdown, connectionAttempts]);
+    }, [API_BASE_URL, countdown, connectionAttempts, reconnectCooldown, maxReconnectAttempts]);
 
     // Add cleanup on component unmount
     useEffect(() => {
@@ -366,9 +419,17 @@ const CameraView = () => {
                                     <li>Reconnecting: {reconnecting ? 'Yes' : 'No'}</li>
                                     <li>Frames received: {frameCount}</li>
                                     <li>FPS: {getFps()}</li>
-                                    <li>WebSocket URL: wss://{API_BASE_URL.replace(/^https?:\/\//, '').replace(/\/api$/, '')}</li>
+                                    <li>WebSocket URL: wss://{API_BASE_URL.replace(/^https?:\/\//, '')}</li>
                                     {liveViewError && <li className="text-red-500">Error: {liveViewError}</li>}
                                 </ul>
+
+                                {/* Reset connection button for troubleshooting */}
+                                <button
+                                    onClick={resetLiveViewConnection}
+                                    className="mt-2 text-sm px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                                >
+                                    Reset Live View Connection
+                                </button>
                             </div>
                         )}
 
