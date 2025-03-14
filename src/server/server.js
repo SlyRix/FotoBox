@@ -102,18 +102,18 @@ function startLiveView() {
 }
 
 // API Endpoints
-
-// Get list of all photos
 app.get('/api/photos', (req, res) => {
     fs.readdir(PHOTOS_DIR, (err, files) => {
         if (err) {
             return res.status(500).json({ error: 'Failed to retrieve photos' });
         }
 
+        // Filter for image files
         const photoFiles = files.filter(file =>
             /\.(jpg|jpeg|png)$/i.test(file)
         );
 
+        // Add timestamps and sort by most recent
         const photos = photoFiles.map(file => {
             const stats = fs.statSync(path.join(PHOTOS_DIR, file));
             return {
@@ -128,8 +128,9 @@ app.get('/api/photos', (req, res) => {
     });
 });
 
-// Take a new photo
+// Take a new photo - with improved error handling and no excessive process killing
 app.post('/api/photos/capture', (req, res) => {
+    // Prevent multiple simultaneous capture requests
     if (captureInProgress.status) {
         return res.status(429).json({
             success: false,
@@ -139,6 +140,7 @@ app.post('/api/photos/capture', (req, res) => {
 
     captureInProgress.status = true;
 
+    // Generate unique filename based on timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `wedding_${timestamp}.jpg`;
     const filepath = path.join(PHOTOS_DIR, filename);
@@ -150,6 +152,7 @@ app.post('/api/photos/capture', (req, res) => {
         stopLiveView();
     }
 
+    // Build the gphoto2 command with necessary parameters
     const captureCommand = `gphoto2 --force-overwrite --capture-image-and-download --filename "${filepath}"`;
 
     exec(captureCommand, (error, stdout, stderr) => {
@@ -157,6 +160,15 @@ app.post('/api/photos/capture', (req, res) => {
 
         if (error || stderr.includes('ERROR')) {
             console.error(`${new Date().toISOString()}: Error capturing photo: ${error ? error.message : stderr}`);
+
+            // Check if we should suggest using tethering mode
+            if (stderr.includes('Could not claim the USB device')) {
+                return res.status(500).json({
+                    success: false,
+                    error: 'Camera busy or inaccessible. Try disconnecting and reconnecting the camera.'
+                });
+            }
+
             return res.status(500).json({
                 success: false,
                 error: 'Failed to capture photo'
@@ -172,8 +184,8 @@ app.post('/api/photos/capture', (req, res) => {
 
         QRCode.toFile(qrFilepath, photoUrl, {
             color: {
-                dark: '#000',
-                light: '#FFF'
+                dark: '#000',  // Points
+                light: '#FFF'  // Background
             }
         }, (qrErr) => {
             if (qrErr) {
@@ -206,6 +218,44 @@ app.delete('/api/photos/:filename', (req, res) => {
         res.json({ success: true, message: 'Photo deleted successfully' });
     });
 });
+
+// Send print command (placeholder for future implementation)
+app.post('/api/photos/print', (req, res) => {
+    const { filename } = req.body;
+
+    if (!filename) {
+        return res.status(400).json({ error: 'Filename is required' });
+    }
+
+    // This is where you would implement the printing logic
+    // For now, just return a success message
+    console.log(`Print request received for: ${filename}`);
+
+    res.json({
+        success: true,
+        message: 'Print request received. Printing functionality will be implemented later.'
+    });
+});
+
+// Server status endpoint - simplified to avoid killing processes unnecessarily
+app.get('/api/status', (req, res) => {
+    exec('gphoto2 --auto-detect', (error, stdout, stderr) => {
+        if (error) {
+            return res.json({
+                status: 'error',
+                camera: false,
+                message: 'Camera not detected'
+            });
+        }
+
+        res.json({
+            status: 'ok',
+            camera: true,
+            message: stdout.trim()
+        });
+    });
+});
+
 
 // Create HTTP server and attach WebSocket server
 const server = http.createServer(app);
