@@ -125,15 +125,21 @@ function startLiveView() {
         console.log(`Max live view retries reached (${maxLiveViewRetries}). Waiting...`);
 
         // Notify client and close connection
-        ws.send(JSON.stringify({ type: 'error', message: 'Live view unavailable. Max retries reached. Please restart the server or camera.' }));
-        ws.close(1011, 'Live view unavailable');
+        const captureCommand = '^C';
+        console.log(`Executing command: ${captureCommand}`);
+
+        liveViewProcess = spawn(captureCommand, {
+            shell: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
         return;
     }
     console.log('========================================');
     console.log(`Starting live view stream (Attempt #${liveViewRetries + 1})...`);
 
     try {
-        const captureCommand = 'gphoto2 --stdout --capture-movie --frames=30';
+        const captureCommand = 'gphoto2 --stdout --capture-movie --frames=10';
         console.log(`Executing command: ${captureCommand}`);
 
         liveViewProcess = spawn(captureCommand, {
