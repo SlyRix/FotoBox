@@ -25,7 +25,10 @@ const CameraView = () => {
             // Continue countdown
             timer = setTimeout(() => setCountdown(countdown - 1), 1000);
         } else if (countdown === 0) {
-            // Take photo when countdown reaches 0
+            // Show "SMILEEE!" message
+            setCountdown("SMILEEE!");
+
+            // Take photo after showing the smile message
             const capturePhoto = async () => {
                 try {
                     const photo = await takePhoto();
@@ -44,9 +47,8 @@ const CameraView = () => {
                 }
             };
 
-            capturePhoto();
-            // Immediately set countdown to -1 to prevent multiple executions
-            setCountdown(-1);
+            // Short delay to show the "SMILEEE!" message before taking the photo
+            setTimeout(capturePhoto, 500);
         }
 
         return () => clearTimeout(timer);
@@ -83,17 +85,38 @@ const CameraView = () => {
                         className="flex flex-col items-center"
                     >
                         <div className="bg-white/90 p-8 rounded-full w-64 h-64 flex items-center justify-center mb-8 shadow-lg">
-                            <motion.span
-                                key={countdown}
-                                initial={{ scale: 2, opacity: 0 }}
-                                animate={{ scale: 1, opacity: 1 }}
-                                exit={{ scale: 0.5, opacity: 0 }}
-                                className="text-8xl font-bold text-wedding-love"
-                            >
-                                {countdown}
-                            </motion.span>
+                            {typeof countdown === 'string' ? (
+                                // "SMILEEE!" display
+                                <motion.div
+                                    key="smile"
+                                    initial={{ scale: 0.5, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    className="flex flex-col items-center"
+                                >
+                                    <span className="text-5xl font-bold text-wedding-love">
+                                        SMILEEE!
+                                    </span>
+                                    <span className="text-3xl mt-2">
+                                        😊📸
+                                    </span>
+                                </motion.div>
+                            ) : (
+                                // Number countdown display
+                                <motion.span
+                                    key={countdown}
+                                    initial={{ scale: 2, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    exit={{ scale: 0.5, opacity: 0 }}
+                                    className="text-8xl font-bold text-wedding-love"
+                                >
+                                    {countdown}
+                                </motion.span>
+                            )}
                         </div>
-                        <h2 className="text-2xl font-bold">Get ready to smile!</h2>
+
+                        {typeof countdown !== 'string' && (
+                            <h2 className="text-2xl font-bold">Get ready to smile!</h2>
+                        )}
                     </motion.div>
                 ) : (
                     // Camera ready state
