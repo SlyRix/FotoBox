@@ -12,7 +12,8 @@ const CameraView = () => {
         previewImage,
         previewStatus,
         startPreview,
-        stopPreview
+        stopPreview,
+        cameraInfo
     } = useCamera();
 
     const navigate = useNavigate();
@@ -93,7 +94,11 @@ const CameraView = () => {
             case 'connecting':
                 return 'Connecting to camera...';
             case 'active':
-                return 'Camera connected';
+                return cameraInfo.cameraAvailable
+                    ? 'Preview active, using DSLR for final photo'
+                    : 'Camera connected';
+            case 'paused':
+                return 'Camera paused (taking photo)';
             case 'error':
                 return 'Camera error. Please try again.';
             default:
@@ -206,6 +211,13 @@ const CameraView = () => {
                                     <span className="text-xs text-white/70">LIVE</span>
                                 </div>
                             )}
+
+                            {/* DSLR indicator when both webcam and camera are available */}
+                            {cameraInfo.cameraAvailable && cameraInfo.webcamAvailable && previewStatus === 'active' && (
+                                <div className="absolute bottom-2 left-2 flex items-center bg-black/50 rounded-full px-2 py-1">
+                                    <span className="text-xs text-green-400">DSLR Ready</span>
+                                </div>
+                            )}
                         </div>
 
                         {error && (
@@ -230,6 +242,13 @@ const CameraView = () => {
                                     ? 'Please wait for camera to connect...'
                                     : 'Camera must be connected to take a photo'
                                 }
+                            </p>
+                        )}
+
+                        {/* Camera info message */}
+                        {previewStatus === 'active' && (
+                            <p className="mt-2 text-sm text-gray-500">
+                                {cameraInfo.statusMessage}
                             </p>
                         )}
                     </motion.div>

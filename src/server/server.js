@@ -28,8 +28,16 @@ try {
             console.log(stdout);
         }
     });
+
+    exec('gphoto2 --version', (error, stdout) => {
+        if (error) {
+            console.log(`gphoto2 available: NO - ${error.message}`);
+        } else {
+            console.log(`gphoto2 available: YES - ${stdout.split('\n')[0]}`);
+        }
+    });
 } catch (err) {
-    console.log(`Webcam diagnostics error: ${err.message}`);
+    console.log(`Camera diagnostics error: ${err.message}`);
 }
 
 const app = express();
@@ -294,19 +302,45 @@ function broadcastToStreamingClients(message) {
 
 // API Endpoints
 app.get('/api/status', (req, res) => {
-    exec('v4l2-ctl --list-devices', (error, stdout, stderr) => {
-        if (error) {
-            return res.json({
-                status: 'error',
-                camera: false,
-                message: 'Webcam not detected'
-            });
-        }
+    // Check webcam status
+    exec('v4l2-ctl --list-devices', (webcamError, webcamStdout) => {
+        let webcamStatus = {
+            available: !webcamError,
+            message: webcamError ? 'Webcam not detected' : webcamStdout.trim()
+        };
 
-        res.json({
-            status: 'ok',
-            camera: true,
-            message: stdout.trim()
+        // Check camera status via gphoto2
+        exec('gphoto2 --auto-detect', (cameraError, cameraStdout) => {
+            let cameraStatus = {
+                available: !cameraError && !cameraStdout.includes("There are no cameras"),
+                message: cameraError ? 'Camera not detected' : cameraStdout.trim()
+            };
+
+            // Determine overall status
+            const status = {
+                status: 'ok',
+                webcam: webcamStatus,
+                camera: cameraStatus,
+                message: 'Ready for preview and capture',
+                preferCamera: true // Signal to client to use camera for final photos
+            };
+
+            // If neither are available, status is error
+            if (!webcamStatus.available && !cameraStatus.available) {
+                status.status = 'error';
+                status.message = 'No capture devices available';
+            }
+            // If only webcam is available
+            else if (!cameraStatus.available) {
+                status.message = 'Webcam only mode (no camera detected)';
+                status.preferCamera = false;
+            }
+            // If only camera is available
+            else if (!webcamStatus.available) {
+                status.message = 'Camera detected but no webcam for preview';
+            }
+
+            res.json(status);
         });
     });
 });
@@ -338,7 +372,7 @@ app.get('/api/photos', (req, res) => {
     });
 });
 
-// Take a new photo - using webcam
+// Take a new photo - using gphoto2 for final capture
 app.post('/api/photos/capture', (req, res) => {
     // Prevent multiple simultaneous capture requests
     if (captureInProgress.status) {
@@ -355,63 +389,94 @@ app.post('/api/photos/capture', (req, res) => {
     const filename = `wedding_${timestamp}.jpg`;
     const filepath = path.join(PHOTOS_DIR, filename);
 
-    console.log(`Taking photo with webcam: ${filename}`);
+    console.log(`Taking photo with camera: ${filename}`);
 
     // Stop preview during capture
     const wasPreviewActive = previewInterval !== null;
     if (wasPreviewActive) {
         clearInterval(previewInterval);
         previewInterval = null;
+
+        // Notify clients that preview is paused for photo capture
+        broadcastToStreamingClients({
+            type: 'previewStatus',
+            status: 'paused',
+            message: 'Preview paused while taking photo'
+        });
     }
 
-    // Build the fswebcam command with better quality settings
-    const captureCommand = `fswebcam -d /dev/video0 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
+    // Build the gphoto2 command for high quality camera capture
+    const captureCommand = `gphoto2 --force-overwrite --capture-image-and-download --filename "${filepath}"`;
 
     exec(captureCommand, (error, stdout, stderr) => {
         // Resume preview if it was active
         if (wasPreviewActive) {
-            startWebcamPreview();
+            setTimeout(() => {
+                startWebcamPreview();
+                broadcastToStreamingClients({
+                    type: 'previewStatus',
+                    status: 'active',
+                    message: 'Preview resumed'
+                });
+            }, 1500); // Short delay to allow camera to recover
         }
 
         captureInProgress.status = false;
 
-        if (error) {
-            console.error(`Error capturing photo: ${error.message}`);
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to capture photo'
+        if (error || stderr.includes('ERROR')) {
+            console.error(`Error capturing photo: ${error ? error.message : stderr}`);
+
+            // If gphoto2 fails, fall back to webcam as backup
+            const fallbackCommand = `fswebcam -d /dev/video0 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
+
+            exec(fallbackCommand, (fbError, fbStdout, fbStderr) => {
+                if (fbError) {
+                    return res.status(500).json({
+                        success: false,
+                        error: 'Failed to capture photo with both camera and webcam'
+                    });
+                }
+
+                console.log(`Photo captured with webcam as fallback`);
+                generateQRAndRespond(req, res, filename, timestamp);
             });
+
+            return;
         }
 
-        console.log(`Photo captured successfully: ${filename}`);
-
-        // Generate QR code for this photo
-        const photoUrl = `http://${req.headers.host}/photos/${filename}`;
-        const qrFilename = `qr_${timestamp}.png`;
-        const qrFilepath = path.join(QR_DIR, qrFilename);
-
-        QRCode.toFile(qrFilepath, photoUrl, {
-            color: {
-                dark: '#000',  // Points
-                light: '#FFF'  // Background
-            }
-        }, (qrErr) => {
-            if (qrErr) {
-                console.error(`Error generating QR code: ${qrErr.message}`);
-            }
-
-            res.json({
-                success: true,
-                photo: {
-                    filename,
-                    url: `/photos/${filename}`,
-                    qrUrl: `/qrcodes/${qrFilename}`,
-                    timestamp: Date.now()
-                }
-            });
-        });
+        console.log(`Photo captured successfully with camera: ${filename}`);
+        generateQRAndRespond(req, res, filename, timestamp);
     });
 });
+
+// Helper function to generate QR code and send response
+function generateQRAndRespond(req, res, filename, timestamp) {
+    // Generate QR code for this photo
+    const photoUrl = `http://${req.headers.host}/photos/${filename}`;
+    const qrFilename = `qr_${timestamp}.png`;
+    const qrFilepath = path.join(QR_DIR, qrFilename);
+
+    QRCode.toFile(qrFilepath, photoUrl, {
+        color: {
+            dark: '#000',  // Points
+            light: '#FFF'  // Background
+        }
+    }, (qrErr) => {
+        if (qrErr) {
+            console.error(`Error generating QR code: ${qrErr.message}`);
+        }
+
+        res.json({
+            success: true,
+            photo: {
+                filename,
+                url: `/photos/${filename}`,
+                qrUrl: `/qrcodes/${qrFilename}`,
+                timestamp: Date.now()
+            }
+        });
+    });
+}
 
 // Delete a photo
 app.delete('/api/photos/:filename', (req, res) => {

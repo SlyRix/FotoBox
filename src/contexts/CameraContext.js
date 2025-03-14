@@ -14,11 +14,54 @@ export const CameraProvider = ({ children }) => {
 
     // Preview state
     const [previewImage, setPreviewImage] = useState(null);
-    const [previewStatus, setPreviewStatus] = useState('inactive'); // inactive, connecting, active, error
+    const [previewStatus, setPreviewStatus] = useState('inactive'); // inactive, connecting, active, paused, error
+
+    // Camera information
+    const [cameraInfo, setCameraInfo] = useState({
+        webcamAvailable: false,
+        cameraAvailable: false,
+        preferCamera: true,
+        statusMessage: 'Checking device status...'
+    });
 
     // WebSocket connection
     const wsRef = useRef(null);
     const reconnectTimerRef = useRef(null);
+
+    // Check camera status on mount
+    useEffect(() => {
+        checkCameraStatus();
+    }, []);
+
+    // Function to check camera and webcam status
+    const checkCameraStatus = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_ENDPOINT}/status`);
+            if (!response.ok) {
+                throw new Error(`Server responded with status: ${response.status}`);
+            }
+
+            const statusData = await response.json();
+            setCameraInfo({
+                webcamAvailable: statusData.webcam?.available || false,
+                cameraAvailable: statusData.camera?.available || false,
+                preferCamera: statusData.preferCamera || false,
+                statusMessage: statusData.message || 'Camera status unknown'
+            });
+
+            return statusData;
+        } catch (error) {
+            console.error('Error checking camera status:', error);
+            setCameraInfo({
+                webcamAvailable: false,
+                cameraAvailable: false,
+                preferCamera: false,
+                statusMessage: 'Error connecting to camera system'
+            });
+            setError('Failed to check camera status: ' + error.message);
+            return null;
+        }
+    }, []);
 
     // Initialize WebSocket connection
     const connectWebSocket = useCallback(() => {
@@ -184,6 +227,9 @@ export const CameraProvider = ({ children }) => {
         setLoading(true);
         setError(null);
 
+        // Pause preview state to provide feedback to the user
+        setPreviewStatus('paused');
+
         try {
             const response = await fetch(`${API_ENDPOINT}/photos/capture`, {
                 method: 'POST',
@@ -212,6 +258,9 @@ export const CameraProvider = ({ children }) => {
             console.error('Error taking photo:', error);
             setError(error.message || 'An error occurred while taking the photo');
             setLoading(false);
+
+            // Resume preview if there was an error
+            setPreviewStatus('active');
             return null;
         }
     }, []);
@@ -284,7 +333,10 @@ export const CameraProvider = ({ children }) => {
         previewImage,
         previewStatus,
         startPreview,
-        stopPreview
+        stopPreview,
+        // Camera information
+        cameraInfo,
+        checkCameraStatus
     };
 
     return (
