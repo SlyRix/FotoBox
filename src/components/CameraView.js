@@ -120,68 +120,40 @@ const CameraView = () => {
             wsRef.current.close();
         }
 
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        // Use secure WebSocket when on HTTPS, otherwise use regular WebSocket
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsHost = API_BASE_URL.replace(/^https?:\/\//, '');
-        const wsUrl = `${wsProtocol}//${wsHost}`;
+        const wsUrl = `${protocol}//${wsHost}`;
 
         try {
             const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
-            ws.binaryType = 'arraybuffer';
+
+            // Setup the WebSocket handlers for frame processing
+            setupWebSocketHandlers(ws, canvasRef);
 
             ws.onopen = () => {
                 console.log("%c[WebSocket] Connection OPENED successfully!", "color: green; font-weight: bold");
                 setLiveViewConnected(true);
                 setLiveViewError(null);
                 setConnectionAttempts(0); // Reset attempts on success
-                setFrameCount(0);  // Reset frame counter
-                setLastFrameTime(Date.now());  // Initialize frame timing
-            };
-
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-
-                    if (data.type === 'liveview' && data.image) {
-                        // Increment frame counter for FPS calculation
-                        setFrameCount(prev => prev + 1);
-                        setLastFrameTime(Date.now());
-
-                        // Draw the image on canvas
-                        const canvas = canvasRef.current;
-                        if (canvas) {
-                            const ctx = canvas.getContext('2d');
-                            const img = new Image();
-                            img.onload = () => {
-                                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                            };
-                            img.src = `data:image/jpeg;base64,${data.image}`;
-                        }
-                    } else if (data.type === 'info') {
-                        console.log("[WebSocket] Info message:", data.message);
-                    }
-                } catch (error) {
-                    console.error("[WebSocket] Error processing message:", error);
-                }
+                setReconnecting(false);
             };
 
             ws.onclose = (event) => {
                 console.log(`%c[WebSocket] Connection CLOSED: Code=${event.code}, Reason="${event.reason || 'none'}"`, "color: orange; font-weight: bold");
-
                 setLiveViewConnected(false);
 
                 if (event.code === 1006 || event.code === 1005) {
                     console.warn('[WebSocket] Abnormal closure, retrying...');
+                    setReconnecting(true);
 
                     // Use exponential backoff for retries
                     const delay = Math.min(1000 * Math.pow(1.5, connectionAttempts), reconnectCooldown);
                     console.log(`[WebSocket] Reconnecting in ${delay / 1000} seconds...`);
 
                     reconnectTimeoutRef.current = setTimeout(() => {
-                        if (countdown === null) {  // Only reconnect if not in countdown mode
-                            initializeWebSocket();
-                        }
+                        initializeWebSocket();
                     }, delay);
                 }
             };
@@ -195,8 +167,13 @@ const CameraView = () => {
         } catch (error) {
             console.error('[WebSocket] Setup error:', error);
             setLiveViewError(`Failed to set up WebSocket: ${error.message}`);
+
+            // Try to reconnect after a delay
+            reconnectTimeoutRef.current = setTimeout(() => {
+                initializeWebSocket();
+            }, reconnectCooldown);
         }
-    }, [API_BASE_URL, countdown, connectionAttempts, reconnectCooldown, maxReconnectAttempts]);
+    }, [API_BASE_URL, countdown, connectionAttempts, maxReconnectAttempts, reconnectCooldown]);
 
     // Add cleanup on component unmount
     useEffect(() => {
@@ -270,6 +247,77 @@ const CameraView = () => {
 
         return () => clearTimeout(timer);
     }, [countdown, takePhoto, navigate, initializeWebSocket]);
+    function setupWebSocketHandlers(ws, canvasRef) {
+        ws.binaryType = 'arraybuffer';
+
+        ws.onmessage = (event) => {
+            try {
+                // Parse the incoming JSON message
+                const message = JSON.parse(event.data);
+
+                // Check if this is a frame message
+                if (message.type === 'frame') {
+                    // Update stats
+                    setFrameCount(prevCount => prevCount + 1);
+                    setLastFrameTime(Date.now());
+
+                    // Create an image from the base64 data
+                    const img = new Image();
+                    img.onload = () => {
+                        // Draw the image to the canvas when it loads
+                        const canvas = canvasRef.current;
+                        if (canvas) {
+                            const ctx = canvas.getContext('2d');
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                            // Calculate dimensions to maintain aspect ratio
+                            const scale = Math.min(
+                                canvas.width / img.width,
+                                canvas.height / img.height
+                            );
+
+                            const x = (canvas.width - img.width * scale) / 2;
+                            const y = (canvas.height - img.height * scale) / 2;
+
+                            ctx.drawImage(
+                                img,
+                                x, y,
+                                img.width * scale,
+                                img.height * scale
+                            );
+                        }
+                    };
+
+                    // Set the source to the base64 data
+                    img.src = `data:image/jpeg;base64,${message.data}`;
+                } else if (message.type === 'info') {
+                    // Handle info messages
+                    console.log('WebSocket info:', message.message);
+                }
+            } catch (error) {
+                console.error('Error processing WebSocket message:', error);
+            }
+        };
+    }
+    const resetServerRetryCounter = async () => {
+        try {
+            const response = await fetch(`${API_ENDPOINT}/liveview/reset`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                console.log('Successfully reset server retry counter');
+                // Reset our own counters
+                setConnectionAttempts(0);
+                // Try connecting again
+                initializeWebSocket();
+            } else {
+                console.error('Failed to reset server retry counter');
+            }
+        } catch (error) {
+            console.error('Error resetting server retry counter:', error);
+        }
+    };
 
     // Calculate FPS (when frames are being received)
     const getFps = () => {
@@ -459,6 +507,18 @@ const CameraView = () => {
                     </motion.div>
                 )}
             </div>
+            {connectionAttempts >= maxReconnectAttempts && (
+                <div className="mt-4 text-center">
+                    <p className="text-red-500 mb-2">Maximum connection attempts reached.</p>
+                    <button
+                        onClick={resetServerRetryCounter}
+                        className="btn btn-outline btn-hindu-outline text-sm py-2"
+                    >
+                        Reset and Try Again
+                    </button>
+                </div>
+            )}
+
         </div>
     );
 };

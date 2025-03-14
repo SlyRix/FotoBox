@@ -149,9 +149,26 @@ function resetLiveViewRetries() {
 }
 
 // Start the live view process
+
+let liveViewRetries = 0;
+const maxLiveViewRetries = 5;
+const liveViewCooldown = 3000;
+
 function startLiveView() {
+    if (liveViewProcess !== null) {
+        console.log('Live view process already running, not starting a new one');
+        return;
+    }
+
     if (liveViewRetries >= maxLiveViewRetries) {
-        console.log(`Max live view retries reached (${maxLiveViewRetries}). Waiting...`);
+        console.log(`Max live view retries reached (${maxLiveViewRetries}). Waiting for manual reset...`);
+
+        // Set a timeout to reset the retry counter after 2 minutes
+        setTimeout(() => {
+            console.log('Resetting live view retry counter');
+            liveViewRetries = 0;
+        }, 120000); // 2 minutes cooldown
+
         return;
     }
 
@@ -170,9 +187,13 @@ function startLiveView() {
         liveViewRetries++;
 
         let errorOutput = '';
+        let frameBuffer = Buffer.alloc(0);
+        let frameStartMarker = false;
+        let currentFrameSize = 0;
 
         liveViewProcess.stderr.on('data', (data) => {
             errorOutput += data.toString();
+            console.log(`Live view stderr: ${data.toString().trim()}`);
 
             if (errorOutput.includes('Could not claim the USB device')) {
                 console.error('Live view failed: Camera is busy. Retrying after cooldown...');
@@ -186,6 +207,8 @@ function startLiveView() {
 
         liveViewProcess.on('close', (code) => {
             console.log(`Live view process exited with code ${code}`);
+            liveViewProcess = null;
+
             if (code !== 0 && liveViewRetries < maxLiveViewRetries) {
                 console.log(`Retrying live view in ${liveViewCooldown / 1000} seconds...`);
                 setTimeout(startLiveView, liveViewCooldown);
@@ -194,84 +217,109 @@ function startLiveView() {
 
         liveViewProcess.on('error', (err) => {
             console.error('Failed to start live view process:', err);
-            liveViewRetries++;
+            liveViewProcess = null;
+
             if (liveViewRetries < maxLiveViewRetries) {
                 console.log(`Retrying live view in ${liveViewCooldown / 1000} seconds...`);
                 setTimeout(startLiveView, liveViewCooldown);
             }
         });
 
-        // Create a buffer to accumulate image data
-        let imageBuffer = Buffer.alloc(0);
-        let imageFrameSize = 0;
-        const JPEG_START = Buffer.from([0xFF, 0xD8]); // JPEG start marker
-        const JPEG_END = Buffer.from([0xFF, 0xD9]);   // JPEG end marker
+        // Improved frame processing using a frame boundary detection approach
+        liveViewProcess.stdout.on('data', (data) => {
+            try {
+                // Add new data to our buffer
+                frameBuffer = Buffer.concat([frameBuffer, data]);
 
-        liveViewProcess.stdout.on('data', (chunk) => {
-            // Append the new chunk to our buffer
-            imageBuffer = Buffer.concat([imageBuffer, chunk]);
+                // Simple JPEG frame detection - look for JPEG SOI marker (0xFFD8) and EOI marker (0xFFD9)
+                // This is a simple approach - a more robust one would parse the actual JPEG structure
+                let frameStart = -1;
+                let frameEnd = -1;
 
-            // Look for JPEG frame boundaries
-            let startIdx = 0;
-            while (startIdx < imageBuffer.length - 1) {
-                // Find JPEG start marker
-                const startMarkerPos = imageBuffer.indexOf(JPEG_START, startIdx);
-                if (startMarkerPos === -1) break;
+                // Look for a JPEG start marker
+                for (let i = 0; i < frameBuffer.length - 1; i++) {
+                    if (frameBuffer[i] === 0xFF && frameBuffer[i + 1] === 0xD8) {
+                        frameStart = i;
+                        break;
+                    }
+                }
 
-                // Find JPEG end marker after the start marker
-                const endMarkerPos = imageBuffer.indexOf(JPEG_END, startMarkerPos + 2);
-                if (endMarkerPos === -1) break;
-
-                // We found a complete JPEG frame
-                const frameEndPos = endMarkerPos + 2; // Include the end marker
-                const completeFrame = imageBuffer.slice(startMarkerPos, frameEndPos);
-
-                // Send frame to all connected clients
-                if (wsServer.clients.size > 0) {
-                    const base64Frame = completeFrame.toString('base64');
-                    wsServer.clients.forEach((client) => {
-                        if (client.readyState === WebSocket.OPEN) {
-                            try {
-                                client.send(JSON.stringify({
-                                    type: 'liveview',
-                                    image: base64Frame,
-                                    frameSize: completeFrame.length
-                                }));
-                            } catch (err) {
-                                console.error('Error sending frame to client:', err);
-                            }
+                // If we found a start marker, look for an end marker
+                if (frameStart !== -1) {
+                    for (let i = frameStart + 2; i < frameBuffer.length - 1; i++) {
+                        if (frameBuffer[i] === 0xFF && frameBuffer[i + 1] === 0xD9) {
+                            frameEnd = i + 2; // Include the end marker
+                            break;
                         }
-                    });
+                    }
                 }
 
-                // Log frame info occasionally (every 10 frames)
-                imageFrameSize++;
-                if (imageFrameSize % 10 === 0) {
-                    console.log(`Sent live view frame #${imageFrameSize}, size: ${completeFrame.length} bytes`);
+                // If we found a complete frame, process it
+                if (frameStart !== -1 && frameEnd !== -1) {
+                    const frameData = frameBuffer.slice(frameStart, frameEnd);
+
+                    // Remove the processed frame from the buffer
+                    frameBuffer = frameBuffer.slice(frameEnd);
+
+                    // Send the frame to all connected clients
+                    if (wsServer && wsServer.clients.size > 0) {
+                        const frame = frameData.toString('base64');
+
+                        wsServer.clients.forEach((client) => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                try {
+                                    client.send(JSON.stringify({
+                                        type: 'frame',
+                                        data: frame,
+                                        timestamp: Date.now()
+                                    }));
+                                } catch (sendError) {
+                                    console.error('Error sending frame to client:', sendError);
+                                }
+                            }
+                        });
+                    }
+
+                    // Log occasionally to avoid filling logs
+                    if (Math.random() < 0.01) {  // Log roughly 1% of frames
+                        console.log(`Sent frame: ${frameData.length} bytes`);
+                    }
                 }
 
-                // Move past this frame in the buffer
-                startIdx = frameEndPos;
-            }
-
-            // Keep only the part of the buffer that might contain a partial frame
-            if (startIdx > 0) {
-                imageBuffer = imageBuffer.slice(startIdx);
-            }
-
-            // Safety check - if buffer gets too large, reset it
-            if (imageBuffer.length > 1000000) { // 1MB limit
-                console.log('Buffer too large, resetting');
-                imageBuffer = Buffer.alloc(0);
+                // Safety check - if buffer gets too large without finding frames, reset it
+                if (frameBuffer.length > 10000000) {  // 10MB limit
+                    console.warn('Frame buffer grew too large without finding complete frames, resetting');
+                    frameBuffer = Buffer.alloc(0);
+                }
+            } catch (processError) {
+                console.error('Error processing live view frame:', processError);
             }
         });
 
     } catch (error) {
         console.error('Error starting live view:', error);
+        liveViewProcess = null;
+    }
+}
+function resetLiveViewRetries() {
+    liveViewRetries = 0;
+    console.log('Live view retry counter has been reset');
+
+    // If we have connections but no live view, try starting it now
+    if (activeConnections > 0 && liveViewProcess === null) {
+        startLiveView();
     }
 }
 
+
 // API Endpoints
+app.post('/api/liveview/reset', (req, res) => {
+    resetLiveViewRetries();
+    res.json({
+        success: true,
+        message: 'Live view retry counter has been reset'
+    });
+});
 
 // Get list of all photos
 app.get('/api/photos', (req, res) => {
