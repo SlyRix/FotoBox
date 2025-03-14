@@ -29,9 +29,10 @@ export const CameraProvider = ({ children }) => {
             wsRef.current.close();
         }
 
-        // Create WebSocket URL from the API base URL
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        // Create WebSocket URL from the API base URL, ensuring correct protocol
         const apiUrl = new URL(API_BASE_URL);
+        // Always use wss:// if the API is https://
+        const wsProtocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${wsProtocol}//${apiUrl.host}`;
 
         console.log(`Connecting to WebSocket at ${wsUrl}`);
@@ -102,6 +103,12 @@ export const CameraProvider = ({ children }) => {
 
         ws.onerror = (error) => {
             console.error('WebSocket error:', error);
+            // Add more detailed error reporting
+            console.error('WebSocket error details:', {
+                readyState: ws.readyState,
+                url: wsUrl,
+                apiUrl: API_BASE_URL
+            });
             setError('Connection to camera server lost. Reconnecting...');
             setStreamStatus('error');
         };
