@@ -1,5 +1,5 @@
 // client/src/contexts/CameraContext.js
-import React, { createContext, useState, useContext, useCallback } from 'react';
+import React, { createContext, useState, useContext, useCallback, useEffect, useRef } from 'react';
 import { API_BASE_URL, API_ENDPOINT } from '../App';
 
 const CameraContext = createContext();
@@ -11,6 +11,144 @@ export const CameraProvider = ({ children }) => {
     const [photos, setPhotos] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+
+    // Preview state
+    const [previewImage, setPreviewImage] = useState(null);
+    const [previewStatus, setPreviewStatus] = useState('inactive'); // inactive, connecting, active, error
+
+    // WebSocket connection
+    const wsRef = useRef(null);
+    const reconnectTimerRef = useRef(null);
+
+    // Initialize WebSocket connection
+    const connectWebSocket = useCallback(() => {
+        // Close existing connection if any
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.close();
+        }
+
+        // Create WebSocket URL from the API base URL, ensuring correct protocol
+        const apiUrl = new URL(API_BASE_URL);
+        // Always use wss:// if the API is https://
+        const wsProtocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${apiUrl.host}`;
+
+        console.log(`Connecting to WebSocket at ${wsUrl}`);
+        setPreviewStatus('connecting');
+
+        const ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            console.log('WebSocket connection established');
+
+            // Clear reconnect timer if set
+            if (reconnectTimerRef.current) {
+                clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = null;
+            }
+
+            // Start ping interval to keep connection alive
+            const pingInterval = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+                } else {
+                    clearInterval(pingInterval);
+                }
+            }, 30000); // Ping every 30 seconds
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const message = JSON.parse(event.data);
+
+                // Handle different message types
+                switch (message.type) {
+                    case 'previewStatus':
+                        console.log(`Preview status: ${message.status} - ${message.message}`);
+                        setPreviewStatus(message.status);
+                        break;
+
+                    case 'previewFrame':
+                        // New frame received
+                        setPreviewImage(message.imageData);
+                        setPreviewStatus('active');
+                        break;
+
+                    case 'info':
+                        console.log(`Server info: ${message.message}`);
+                        break;
+
+                    case 'pong':
+                        // Server responded to our ping
+                        break;
+
+                    default:
+                        console.log(`Unknown message type: ${message.type}`);
+                }
+            } catch (e) {
+                console.error('Error parsing WebSocket message:', e);
+            }
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            setError('Connection to camera server lost. Reconnecting...');
+            setPreviewStatus('error');
+        };
+
+        ws.onclose = (event) => {
+            console.log(`WebSocket connection closed: ${event.code} ${event.reason}`);
+            setPreviewStatus('inactive');
+
+            // Attempt to reconnect after a delay
+            reconnectTimerRef.current = setTimeout(() => {
+                console.log('Attempting to reconnect...');
+                connectWebSocket();
+            }, 5000);
+        };
+
+        wsRef.current = ws;
+    }, []);
+
+    // Connect to WebSocket when the component mounts
+    useEffect(() => {
+        connectWebSocket();
+
+        // Cleanup WebSocket connection on unmount
+        return () => {
+            if (wsRef.current) {
+                if (wsRef.current.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'stopPreview' }));
+                }
+                wsRef.current.close();
+            }
+
+            if (reconnectTimerRef.current) {
+                clearTimeout(reconnectTimerRef.current);
+            }
+        };
+    }, [connectWebSocket]);
+
+    // Start webcam preview
+    const startPreview = useCallback(() => {
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+            connectWebSocket();
+            return;
+        }
+
+        // Request to start the preview
+        wsRef.current.send(JSON.stringify({ type: 'startPreview' }));
+        setPreviewStatus('connecting');
+    }, [connectWebSocket]);
+
+    // Stop webcam preview
+    const stopPreview = useCallback(() => {
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+        // Request to stop the preview
+        wsRef.current.send(JSON.stringify({ type: 'stopPreview' }));
+        setPreviewStatus('inactive');
+    }, []);
 
     // Fetch all photos
     const fetchPhotos = useCallback(async () => {
@@ -141,7 +279,12 @@ export const CameraProvider = ({ children }) => {
         takePhoto,
         deletePhoto,
         printPhoto,
-        apiBaseUrl: API_BASE_URL
+        apiBaseUrl: API_BASE_URL,
+        // Preview related values
+        previewImage,
+        previewStatus,
+        startPreview,
+        stopPreview
     };
 
     return (

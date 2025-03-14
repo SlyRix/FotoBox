@@ -7,19 +7,29 @@ const fs = require('fs');
 const QRCode = require('qrcode');
 const bodyParser = require('body-parser');
 const http = require('http');
+const WebSocket = require('ws');
 
 // Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
 try {
-    exec('gphoto2 --version', (error, stdout) => {
+    exec('fswebcam --version', (error, stdout) => {
         if (error) {
-            console.log(`gphoto2 available: NO - ${error.message}`);
+            console.log(`fswebcam available: NO - ${error.message}`);
         } else {
-            console.log(`gphoto2 available: YES - ${stdout.split('\n')[0]}`);
+            console.log(`fswebcam available: YES - ${stdout.split('\n')[0]}`);
+        }
+    });
+
+    exec('v4l2-ctl --list-devices', (error, stdout) => {
+        if (error) {
+            console.log(`Webcam detection: FAILED - ${error.message}`);
+        } else {
+            console.log(`Webcam detection: SUCCESS`);
+            console.log(stdout);
         }
     });
 } catch (err) {
-    console.log(`gphoto2 available: NO - ${err.message}`);
+    console.log(`Webcam diagnostics error: ${err.message}`);
 }
 
 const app = express();
@@ -31,9 +41,10 @@ const captureInProgress = {status: false};
 // Directory paths
 const PHOTOS_DIR = path.join(__dirname, 'public', 'photos');
 const QR_DIR = path.join(__dirname, 'public', 'qrcodes');
+const PREVIEW_DIR = path.join(__dirname, 'public', 'preview');
 
 // Create required directories
-[PHOTOS_DIR, QR_DIR].forEach(dir => {
+[PHOTOS_DIR, QR_DIR, PREVIEW_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, {recursive: true});
     }
@@ -75,14 +86,220 @@ app.use((req, res, next) => {
     next();
 });
 
+// WebSocket server for webcam preview
+let wsServer;
+let previewInterval = null;
+let activeStreams = new Map(); // Track active streaming clients
+
+// Initialize WebSocket server
+function setupWebSocketServer(server) {
+    console.log('=== SETTING UP WEBSOCKET SERVER ===');
+
+    wsServer = new WebSocket.Server({server});
+    console.log(`WebSocket server created: ${wsServer ? 'YES' : 'NO'}`);
+
+    wsServer.on('connection', (ws, req) => {
+        const clientId = Date.now().toString();
+        console.log(`New WebSocket connection from ${req.socket.remoteAddress} (ID: ${clientId})`);
+
+        // Store client in our map
+        activeStreams.set(clientId, {ws, isStreaming: false});
+
+        // Send welcome message
+        ws.send(JSON.stringify({
+            type: 'info',
+            message: 'Connection established to FotoBox server',
+            timestamp: Date.now()
+        }));
+
+        // Handle client messages
+        ws.on('message', (message) => {
+            try {
+                const data = JSON.parse(message);
+
+                if (data.type === 'ping') {
+                    ws.send(JSON.stringify({type: 'pong', timestamp: Date.now()}));
+                    return;
+                }
+
+                // Handle stream start/stop requests
+                if (data.type === 'startPreview') {
+                    // Start streaming if not already streaming for this client
+                    const clientInfo = activeStreams.get(clientId);
+                    if (clientInfo && !clientInfo.isStreaming) {
+                        clientInfo.isStreaming = true;
+                        activeStreams.set(clientId, clientInfo);
+                        startWebcamPreview();
+                    }
+                } else if (data.type === 'stopPreview') {
+                    // Stop streaming for this client
+                    const clientInfo = activeStreams.get(clientId);
+                    if (clientInfo && clientInfo.isStreaming) {
+                        clientInfo.isStreaming = false;
+                        activeStreams.set(clientId, clientInfo);
+                        stopWebcamPreview();
+                    }
+                }
+            } catch (e) {
+                console.log(`Received non-JSON message: ${message}`);
+            }
+        });
+
+        // Handle client disconnect
+        ws.on('close', () => {
+            console.log(`Client disconnected (ID: ${clientId})`);
+
+            // Cleanup this client's streams
+            const clientInfo = activeStreams.get(clientId);
+            if (clientInfo && clientInfo.isStreaming) {
+                clientInfo.isStreaming = false;
+                stopWebcamPreview();
+            }
+
+            activeStreams.delete(clientId);
+        });
+    });
+}
+
+// Start webcam preview
+function startWebcamPreview() {
+    // Check if any clients are actively streaming
+    let hasActiveStreamers = false;
+    for (const [_, client] of activeStreams) {
+        if (client.isStreaming) {
+            hasActiveStreamers = true;
+            break;
+        }
+    }
+
+    // If preview is already running or no active clients, do nothing
+    if (previewInterval || !hasActiveStreamers) return;
+
+    console.log('Starting webcam preview...');
+
+    // Notify clients that preview is starting
+    broadcastToStreamingClients({
+        type: 'previewStatus',
+        status: 'starting',
+        message: 'Starting webcam preview...'
+    });
+
+    // Function to capture and send preview frame
+    const capturePreviewFrame = () => {
+        const timestamp = Date.now();
+        const previewPath = path.join(PREVIEW_DIR, `preview_${timestamp}.jpg`);
+
+        // Use fswebcam to capture image, optimized for your webcam's capabilities
+        // Use 640x480 at higher frame rate for smooth preview
+        exec(`fswebcam -d /dev/video0 -r 640x480 --fps 30 --no-banner ${previewPath}`, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Error capturing preview: ${error.message}`);
+                return;
+            }
+
+            // Check if file exists
+            if (!fs.existsSync(previewPath)) {
+                console.error('Preview file was not created');
+                return;
+            }
+
+            // Read the captured image
+            fs.readFile(previewPath, (err, imageData) => {
+                if (err) {
+                    console.error(`Error reading preview file: ${err.message}`);
+                    return;
+                }
+
+                // Send to all active clients
+                let activeClientCount = 0;
+                for (const [_, client] of activeStreams) {
+                    if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
+                        try {
+                            // Convert to base64 for sending via WebSocket
+                            const base64Image = imageData.toString('base64');
+                            client.ws.send(JSON.stringify({
+                                type: 'previewFrame',
+                                imageData: `data:image/jpeg;base64,${base64Image}`,
+                                timestamp
+                            }));
+                            activeClientCount++;
+                        } catch (err) {
+                            console.error(`Error sending preview to client: ${err.message}`);
+                        }
+                    }
+                }
+
+                // If no active clients, stop preview
+                if (activeClientCount === 0) {
+                    stopWebcamPreview();
+                }
+
+                // Delete the preview file to save space
+                fs.unlink(previewPath, () => {});
+            });
+        });
+    };
+
+    // Send initial preview status
+    broadcastToStreamingClients({
+        type: 'previewStatus',
+        status: 'active',
+        message: 'Webcam preview active'
+    });
+
+    // Start the preview interval (capture every 500ms)
+    previewInterval = setInterval(capturePreviewFrame, 500);
+
+    // Capture first frame immediately
+    capturePreviewFrame();
+}
+
+// Stop webcam preview
+function stopWebcamPreview() {
+    // Check if any clients are still streaming
+    let hasActiveStreamers = false;
+    for (const [_, client] of activeStreams) {
+        if (client.isStreaming) {
+            hasActiveStreamers = true;
+            break;
+        }
+    }
+
+    // If no active streamers and interval is running, stop it
+    if (!hasActiveStreamers && previewInterval) {
+        console.log('Stopping webcam preview (no active clients)');
+        clearInterval(previewInterval);
+        previewInterval = null;
+
+        // Cleanup any temporary preview files
+        fs.readdir(PREVIEW_DIR, (err, files) => {
+            if (err) return;
+            for (const file of files) {
+                if (file.startsWith('preview_')) {
+                    fs.unlink(path.join(PREVIEW_DIR, file), () => {});
+                }
+            }
+        });
+    }
+}
+
+// Helper function to broadcast to all streaming clients
+function broadcastToStreamingClients(message) {
+    for (const [_, client] of activeStreams) {
+        if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(JSON.stringify(message));
+        }
+    }
+}
+
 // API Endpoints
 app.get('/api/status', (req, res) => {
-    exec('gphoto2 --auto-detect', (error, stdout, stderr) => {
+    exec('v4l2-ctl --list-devices', (error, stdout, stderr) => {
         if (error) {
             return res.json({
                 status: 'error',
                 camera: false,
-                message: 'Camera not detected'
+                message: 'Webcam not detected'
             });
         }
 
@@ -121,7 +338,7 @@ app.get('/api/photos', (req, res) => {
     });
 });
 
-// Take a new photo - with improved error handling
+// Take a new photo - using webcam
 app.post('/api/photos/capture', (req, res) => {
     // Prevent multiple simultaneous capture requests
     if (captureInProgress.status) {
@@ -138,16 +355,28 @@ app.post('/api/photos/capture', (req, res) => {
     const filename = `wedding_${timestamp}.jpg`;
     const filepath = path.join(PHOTOS_DIR, filename);
 
-    console.log(`Taking photo: ${filename}`);
+    console.log(`Taking photo with webcam: ${filename}`);
 
-    // Build the gphoto2 command
-    const captureCommand = `gphoto2 --force-overwrite --capture-image-and-download --filename "${filepath}"`;
+    // Stop preview during capture
+    const wasPreviewActive = previewInterval !== null;
+    if (wasPreviewActive) {
+        clearInterval(previewInterval);
+        previewInterval = null;
+    }
+
+    // Build the fswebcam command with better quality settings
+    const captureCommand = `fswebcam -d /dev/video0 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
 
     exec(captureCommand, (error, stdout, stderr) => {
+        // Resume preview if it was active
+        if (wasPreviewActive) {
+            startWebcamPreview();
+        }
+
         captureInProgress.status = false;
 
-        if (error || stderr.includes('ERROR')) {
-            console.error(`Error capturing photo: ${error ? error.message : stderr}`);
+        if (error) {
+            console.error(`Error capturing photo: ${error.message}`);
             return res.status(500).json({
                 success: false,
                 error: 'Failed to capture photo'
@@ -215,8 +444,9 @@ app.post('/api/photos/print', (req, res) => {
     });
 });
 
-// Create HTTP server
+// Create HTTP server and attach WebSocket server
 const server = http.createServer(app);
+setupWebSocketServer(server);
 
 // Start the server
 server.listen(PORT, () => {
@@ -227,5 +457,8 @@ server.listen(PORT, () => {
 
 // Cleanup on server shutdown
 process.on('SIGINT', () => {
+    if (previewInterval) {
+        clearInterval(previewInterval);
+    }
     process.exit();
 });

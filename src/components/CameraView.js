@@ -5,10 +5,29 @@ import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
 
 const CameraView = () => {
-    const { takePhoto, loading, error } = useCamera();
+    const {
+        takePhoto,
+        loading,
+        error,
+        previewImage,
+        previewStatus,
+        startPreview,
+        stopPreview
+    } = useCamera();
+
     const navigate = useNavigate();
     const [countdown, setCountdown] = useState(null);
     const [isReady, setIsReady] = useState(true);
+
+    // Start webcam preview when component mounts
+    useEffect(() => {
+        startPreview();
+
+        // Stop preview when unmounting
+        return () => {
+            stopPreview();
+        };
+    }, [startPreview, stopPreview]);
 
     // Handle taking a photo with countdown
     const handleTakePhoto = () => {
@@ -68,6 +87,20 @@ const CameraView = () => {
         );
     }
 
+    // Get status message based on preview status
+    const getStatusMessage = () => {
+        switch (previewStatus) {
+            case 'connecting':
+                return 'Connecting to camera...';
+            case 'active':
+                return 'Camera connected';
+            case 'error':
+                return 'Camera error. Please try again.';
+            default:
+                return 'Camera not connected';
+        }
+    };
+
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10">
             {/* Back button */}
@@ -121,25 +154,58 @@ const CameraView = () => {
                         )}
                     </motion.div>
                 ) : (
-                    // Camera instruction view (no streaming preview)
+                    // Camera view with webcam preview
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         className="flex flex-col items-center"
                     >
-                        <div className="bg-black p-4 rounded-lg max-w-xl aspect-[4/3] mb-8 border-2 border-gray-800 flex items-center justify-center overflow-hidden relative">
-                            <div className="absolute inset-0 flex flex-col items-center justify-center text-white/80">
-                                <div className="w-20 h-20 mb-4 rounded-full bg-white/20 flex items-center justify-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-10 h-10">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
-                                    </svg>
-                                </div>
+                        <div className="bg-black p-4 rounded-lg w-full max-w-xl aspect-[4/3] mb-8 border-2 border-gray-800 flex items-center justify-center overflow-hidden relative">
+                            {/* Webcam preview image */}
+                            {previewImage && previewStatus === 'active' && (
+                                <img
+                                    src={previewImage}
+                                    alt="Webcam preview"
+                                    className="w-full h-full object-contain"
+                                />
+                            )}
 
-                                <p className="text-lg">
-                                    Stand in front of the camera and press the button below to take a photo
-                                </p>
-                            </div>
+                            {/* Preview status and indicators */}
+                            {(!previewImage || previewStatus !== 'active') && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center text-white/80">
+                                    <div className="w-20 h-20 mb-4 rounded-full bg-white/20 flex items-center justify-center">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-10 h-10">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                                        </svg>
+                                    </div>
+
+                                    {previewStatus === 'connecting' && (
+                                        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mb-2"></div>
+                                    )}
+
+                                    <p className="text-lg">
+                                        {getStatusMessage()}
+                                    </p>
+
+                                    {previewStatus === 'error' && (
+                                        <button
+                                            onClick={startPreview}
+                                            className="mt-4 py-2 px-4 bg-white/20 hover:bg-white/30 rounded text-sm"
+                                        >
+                                            Reconnect Camera
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Live indicator when preview is active */}
+                            {previewStatus === 'active' && (
+                                <div className="absolute top-2 right-2 flex items-center">
+                                    <span className="animate-pulse w-3 h-3 bg-red-500 rounded-full mr-2"></span>
+                                    <span className="text-xs text-white/70">LIVE</span>
+                                </div>
+                            )}
                         </div>
 
                         {error && (
@@ -150,13 +216,22 @@ const CameraView = () => {
 
                         <button
                             onClick={handleTakePhoto}
-                            disabled={!isReady || loading}
+                            disabled={!isReady || loading || previewStatus !== 'active'}
                             className={`btn btn-primary btn-christian w-64 text-center text-xl ${
-                                !isReady || loading ? 'opacity-50 cursor-not-allowed' : ''
+                                !isReady || loading || previewStatus !== 'active' ? 'opacity-50 cursor-not-allowed' : ''
                             }`}
                         >
                             {loading ? 'Processing...' : 'Take Photo'}
                         </button>
+
+                        {previewStatus !== 'active' && (
+                            <p className="mt-2 text-sm text-gray-500">
+                                {previewStatus === 'connecting'
+                                    ? 'Please wait for camera to connect...'
+                                    : 'Camera must be connected to take a photo'
+                                }
+                            </p>
+                        )}
                     </motion.div>
                 )}
             </div>
