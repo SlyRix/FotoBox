@@ -12,7 +12,7 @@ const WebSocket = require('ws');
 // Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
 try {
-    const gphotoVersion = exec('gphoto2 --version', (error, stdout) => {
+    exec('gphoto2 --version', (error, stdout) => {
         if (error) {
             console.log(`gphoto2 available: NO - ${error.message}`);
         } else {
@@ -28,6 +28,17 @@ const PORT = process.env.PORT || 5000;
 
 // Track ongoing captures to prevent conflicts
 const captureInProgress = { status: false };
+
+// Directory paths
+const PHOTOS_DIR = path.join(__dirname, 'public', 'photos');
+const QR_DIR = path.join(__dirname, 'public', 'qrcodes');
+
+// Create required directories
+[PHOTOS_DIR, QR_DIR].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+});
 
 // Middleware
 app.use(cors({
@@ -58,26 +69,17 @@ app.use(cors({
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Create photos directory if it doesn't exist
-const PHOTOS_DIR = path.join(__dirname, 'public', 'photos');
-if (!fs.existsSync(PHOTOS_DIR)) {
-    fs.mkdirSync(PHOTOS_DIR, { recursive: true });
-}
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', req.headers.origin);
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     res.header('Access-Control-Allow-Credentials', true);
     next();
 });
-// Create QR codes directory if it doesn't exist
-const QR_DIR = path.join(__dirname, 'public', 'qrcodes');
-if (!fs.existsSync(QR_DIR)) {
-    fs.mkdirSync(QR_DIR, { recursive: true });
-}
 
-// Simplified WebSocket server implementation
+// WebSocket server for video streaming
 let wsServer;
-let liveViewProcess = null;
+let videoStreamProcess = null;
+let activeStreams = new Map(); // Track active streaming clients
 
 // Initialize WebSocket server
 function setupWebSocketServer(server) {
@@ -87,7 +89,11 @@ function setupWebSocketServer(server) {
     console.log(`WebSocket server created: ${wsServer ? 'YES' : 'NO'}`);
 
     wsServer.on('connection', (ws, req) => {
-        console.log(`New WebSocket connection from ${req.socket.remoteAddress}`);
+        const clientId = Date.now().toString();
+        console.log(`New WebSocket connection from ${req.socket.remoteAddress} (ID: ${clientId})`);
+
+        // Store client in our map
+        activeStreams.set(clientId, { ws, isStreaming: false });
 
         // Send welcome message
         ws.send(JSON.stringify({
@@ -96,23 +102,200 @@ function setupWebSocketServer(server) {
             timestamp: Date.now()
         }));
 
-        // Handle client disconnect
-        ws.on('close', () => {
-            console.log('Client disconnected');
-        });
-
-        // Handle client messages (ping/pong for keepalive)
+        // Handle client messages
         ws.on('message', (message) => {
             try {
                 const data = JSON.parse(message);
+
                 if (data.type === 'ping') {
                     ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+                    return;
+                }
+
+                // Handle stream start/stop requests
+                if (data.type === 'startStream') {
+                    // Start streaming if not already streaming for this client
+                    const clientInfo = activeStreams.get(clientId);
+                    if (clientInfo && !clientInfo.isStreaming && !captureInProgress.status) {
+                        clientInfo.isStreaming = true;
+                        activeStreams.set(clientId, clientInfo);
+                        startVideoStream(clientId);
+                    }
+                } else if (data.type === 'stopStream') {
+                    // Stop streaming for this client
+                    const clientInfo = activeStreams.get(clientId);
+                    if (clientInfo && clientInfo.isStreaming) {
+                        clientInfo.isStreaming = false;
+                        activeStreams.set(clientId, clientInfo);
+                        stopVideoStream(clientId);
+                    }
                 }
             } catch (e) {
                 console.log(`Received non-JSON message: ${message}`);
             }
         });
+
+        // Handle client disconnect
+        ws.on('close', () => {
+            console.log(`Client disconnected (ID: ${clientId})`);
+
+            // Cleanup this client's streams
+            stopVideoStream(clientId);
+            activeStreams.delete(clientId);
+
+            // Check if we need to kill the shared stream
+            checkAndKillStream();
+        });
     });
+}
+
+// Check if any clients are still streaming, and if not, kill the stream
+function checkAndKillStream() {
+    let hasActiveStreamers = false;
+
+    for (const [_, clientInfo] of activeStreams) {
+        if (clientInfo.isStreaming) {
+            hasActiveStreamers = true;
+            break;
+        }
+    }
+
+    if (!hasActiveStreamers && videoStreamProcess) {
+        console.log('No active streamers, killing video stream process');
+        videoStreamProcess.kill();
+        videoStreamProcess = null;
+    }
+}
+
+// Start video streaming for a client
+function startVideoStream(clientId) {
+    const clientInfo = activeStreams.get(clientId);
+    if (!clientInfo) return;
+
+    console.log(`Starting video stream for client ${clientId}`);
+
+    // Notify client that stream is starting
+    clientInfo.ws.send(JSON.stringify({
+        type: 'streamStatus',
+        status: 'starting',
+        message: 'Starting camera stream...'
+    }));
+
+    // If a stream is already running, just mark this client as streaming
+    if (videoStreamProcess) {
+        console.log(`Stream already running, adding client ${clientId} to existing stream`);
+        clientInfo.ws.send(JSON.stringify({
+            type: 'streamStatus',
+            status: 'active',
+            message: 'Camera stream active'
+        }));
+        return;
+    }
+
+    // Start the gphoto2 capture-movie process
+    try {
+        console.log('Launching gphoto2 --capture-movie process');
+
+        // Use spawn to create a process we can get stdout from
+        videoStreamProcess = spawn('gphoto2', ['--capture-movie', '--stdout']);
+
+        // Handle process errors
+        videoStreamProcess.on('error', (err) => {
+            console.error(`Error starting video stream: ${err.message}`);
+            broadcastStreamError(`Failed to start camera stream: ${err.message}`);
+            videoStreamProcess = null;
+        });
+
+        // Handle process exit
+        videoStreamProcess.on('exit', (code, signal) => {
+            if (code !== 0 && code !== null) {
+                console.error(`Video stream process exited with code ${code}`);
+                broadcastStreamError(`Camera stream ended unexpectedly (code ${code})`);
+            } else if (signal) {
+                console.log(`Video stream process terminated due to signal: ${signal}`);
+            } else {
+                console.log('Video stream process ended normally');
+            }
+
+            videoStreamProcess = null;
+        });
+
+        // Handle standard error output
+        videoStreamProcess.stderr.on('data', (data) => {
+            const stderr = data.toString();
+            console.log(`Video stream stderr: ${stderr}`);
+
+            // Check for common errors
+            if (stderr.includes('ERROR') && !stderr.includes('select timeout')) {
+                broadcastStreamError(`Camera error: ${stderr}`);
+            }
+        });
+
+        // Process video frames from stdout
+        videoStreamProcess.stdout.on('data', (data) => {
+            // Send the video frame data to all active streaming clients
+            for (const [id, client] of activeStreams) {
+                if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
+                    try {
+                        // Send frame data as binary
+                        client.ws.send(data);
+                    } catch (err) {
+                        console.error(`Error sending frame to client ${id}: ${err.message}`);
+                    }
+                }
+            }
+        });
+
+        // Notify all streaming clients that stream is active
+        for (const [id, client] of activeStreams) {
+            if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
+                client.ws.send(JSON.stringify({
+                    type: 'streamStatus',
+                    status: 'active',
+                    message: 'Camera stream active'
+                }));
+            }
+        }
+    } catch (error) {
+        console.error(`Failed to start video stream: ${error.message}`);
+        broadcastStreamError(`Failed to start camera stream: ${error.message}`);
+        videoStreamProcess = null;
+    }
+}
+
+// Stop video streaming for a client
+function stopVideoStream(clientId) {
+    const clientInfo = activeStreams.get(clientId);
+    if (!clientInfo) return;
+
+    console.log(`Stopping video stream for client ${clientId}`);
+
+    // Mark this client as not streaming
+    clientInfo.isStreaming = false;
+
+    // Notify client that their stream is stopping
+    if (clientInfo.ws.readyState === WebSocket.OPEN) {
+        clientInfo.ws.send(JSON.stringify({
+            type: 'streamStatus',
+            status: 'stopped',
+            message: 'Camera stream stopped'
+        }));
+    }
+
+    // Check if we need to kill the shared stream process
+    checkAndKillStream();
+}
+
+// Broadcast stream error to all connected clients
+function broadcastStreamError(message) {
+    for (const [_, client] of activeStreams) {
+        if (client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(JSON.stringify({
+                type: 'streamError',
+                message: message
+            }));
+        }
+    }
 }
 
 // API Endpoints
@@ -173,6 +356,25 @@ app.post('/api/photos/capture', (req, res) => {
 
     captureInProgress.status = true;
 
+    // Stop video streaming during photo capture
+    const wasStreaming = videoStreamProcess !== null;
+    if (wasStreaming) {
+        console.log('Stopping video stream for photo capture');
+        videoStreamProcess.kill();
+        videoStreamProcess = null;
+
+        // Notify all clients that stream is paused for photo capture
+        for (const [_, client] of activeStreams) {
+            if (client.ws.readyState === WebSocket.OPEN) {
+                client.ws.send(JSON.stringify({
+                    type: 'streamStatus',
+                    status: 'paused',
+                    message: 'Camera stream paused for photo capture'
+                }));
+            }
+        }
+    }
+
     // Generate unique filename based on timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `wedding_${timestamp}.jpg`;
@@ -188,6 +390,9 @@ app.post('/api/photos/capture', (req, res) => {
 
         if (error || stderr.includes('ERROR')) {
             console.error(`Error capturing photo: ${error ? error.message : stderr}`);
+
+            // Don't automatically restart streaming
+            // We'll let the client decide when to restart the stream
 
             return res.status(500).json({
                 success: false,
@@ -212,6 +417,9 @@ app.post('/api/photos/capture', (req, res) => {
                 console.error(`Error generating QR code: ${qrErr.message}`);
             }
 
+            // Don't automatically restart streaming
+            // We'll let the client decide when to restart the stream
+
             res.json({
                 success: true,
                 photo: {
@@ -224,6 +432,27 @@ app.post('/api/photos/capture', (req, res) => {
         });
     });
 });
+
+// Helper function to restart video stream after photo capture
+function restartVideoStream() {
+    console.log('Restarting video stream after photo capture');
+
+    // Find any client that was streaming before
+    let restartForClientId = null;
+    for (const [id, client] of activeStreams) {
+        if (client.isStreaming) {
+            restartForClientId = id;
+            break;
+        }
+    }
+
+    // If we found a client, restart the stream
+    if (restartForClientId) {
+        setTimeout(() => {
+            startVideoStream(restartForClientId);
+        }, 1000); // Short delay to let the camera recover
+    }
+}
 
 // Delete a photo
 app.delete('/api/photos/:filename', (req, res) => {
@@ -269,8 +498,8 @@ server.listen(PORT, () => {
 
 // Cleanup on server shutdown
 process.on('SIGINT', () => {
-    if (liveViewProcess !== null) {
-        liveViewProcess.kill();
+    if (videoStreamProcess) {
+        videoStreamProcess.kill();
     }
     process.exit();
 });

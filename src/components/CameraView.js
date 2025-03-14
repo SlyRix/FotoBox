@@ -1,14 +1,40 @@
 // client/src/components/CameraView.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
 
 const CameraView = () => {
-    const { takePhoto, loading, error } = useCamera();
+    const {
+        takePhoto,
+        loading,
+        error,
+        streamStatus,
+        streamError,
+        startVideoStream,
+        stopVideoStream,
+        registerVideoElement
+    } = useCamera();
+
     const navigate = useNavigate();
     const [countdown, setCountdown] = useState(null);
     const [isReady, setIsReady] = useState(true);
+    const videoRef = useRef(null);
+
+    // Start video stream when component mounts
+    useEffect(() => {
+        startVideoStream();
+
+        // Register the video element
+        if (videoRef.current) {
+            registerVideoElement(videoRef.current);
+        }
+
+        // Stop stream when unmounting
+        return () => {
+            stopVideoStream();
+        };
+    }, [startVideoStream, stopVideoStream, registerVideoElement]);
 
     // Handle taking a photo with countdown
     const handleTakePhoto = () => {
@@ -68,6 +94,22 @@ const CameraView = () => {
         );
     }
 
+    // Get status message based on stream status
+    const getStatusMessage = () => {
+        switch (streamStatus) {
+            case 'connecting':
+                return 'Connecting to camera...';
+            case 'active':
+                return 'Camera connected';
+            case 'paused':
+                return 'Camera paused';
+            case 'error':
+                return streamError || 'Camera error';
+            default:
+                return 'Camera not connected';
+        }
+    };
+
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10">
             {/* Back button */}
@@ -121,26 +163,56 @@ const CameraView = () => {
                         )}
                     </motion.div>
                 ) : (
-                    // Camera ready state with placeholder
+                    // Camera view
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         className="flex flex-col items-center"
                     >
-                        <div className="bg-black p-4 rounded-lg w-full max-w-xl h-80 mb-8 border-2 border-gray-800 flex items-center justify-center overflow-hidden relative">
-                            {/* Simple camera placeholder */}
-                            <div className="text-center text-white/80">
-                                <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-white/20 flex items-center justify-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-10 h-10">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
-                                    </svg>
+                        <div className="bg-black p-4 rounded-lg w-full max-w-xl aspect-[4/3] mb-8 border-2 border-gray-800 flex items-center justify-center overflow-hidden relative">
+                            {/* Video element for live stream */}
+                            <img
+                                ref={videoRef}
+                                className={`w-full h-full object-contain ${streamStatus === 'active' ? 'opacity-100' : 'opacity-0'}`}
+                                alt="Live camera feed"
+                            />
+
+                            {/* Placeholder when stream is not active */}
+                            {streamStatus !== 'active' && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center text-white/80">
+                                    <div className="w-20 h-20 mb-4 rounded-full bg-white/20 flex items-center justify-center">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-10 h-10">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                                        </svg>
+                                    </div>
+
+                                    {streamStatus === 'connecting' && (
+                                        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mb-2"></div>
+                                    )}
+
+                                    <p className="text-lg">
+                                        {getStatusMessage()}
+                                    </p>
+
+                                    {streamStatus === 'error' && (
+                                        <button
+                                            onClick={startVideoStream}
+                                            className="mt-4 py-2 px-4 bg-white/20 hover:bg-white/30 rounded text-sm"
+                                        >
+                                            Reconnect Camera
+                                        </button>
+                                    )}
                                 </div>
-                                <p className="text-lg">Camera Ready</p>
-                                <p className="text-sm opacity-70 mt-2">
-                                    Stand here and press the button when you're ready to take a photo!
-                                </p>
-                            </div>
+                            )}
+
+                            {/* Live indicator when stream is active */}
+                            {streamStatus === 'active' && (
+                                <div className="absolute top-2 right-2 flex items-center">
+                                    <span className="animate-pulse w-3 h-3 bg-red-500 rounded-full mr-2"></span>
+                                    <span className="text-xs text-white/70">LIVE</span>
+                                </div>
+                            )}
                         </div>
 
                         {error && (
@@ -151,11 +223,22 @@ const CameraView = () => {
 
                         <button
                             onClick={handleTakePhoto}
-                            disabled={!isReady || loading}
-                            className={`btn btn-primary btn-christian w-64 text-center text-xl ${!isReady || loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            disabled={!isReady || loading || streamStatus !== 'active'}
+                            className={`btn btn-primary btn-christian w-64 text-center text-xl ${
+                                !isReady || loading || streamStatus !== 'active' ? 'opacity-50 cursor-not-allowed' : ''
+                            }`}
                         >
                             {loading ? 'Processing...' : 'Take Photo'}
                         </button>
+
+                        {streamStatus !== 'active' && (
+                            <p className="mt-2 text-sm text-gray-500">
+                                {streamStatus === 'connecting'
+                                    ? 'Please wait for camera to connect...'
+                                    : 'Camera must be connected to take a photo'
+                                }
+                            </p>
+                        )}
                     </motion.div>
                 )}
             </div>
