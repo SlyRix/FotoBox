@@ -1,11 +1,13 @@
 // server/index.js
 const express = require('express');
 const cors = require('cors');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
 const bodyParser = require('body-parser');
+const http = require('http');
+const WebSocket = require('ws');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -17,6 +19,7 @@ const captureInProgress = { status: false };
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
 // Create photos directory if it doesn't exist
 const PHOTOS_DIR = path.join(__dirname, 'public', 'photos');
 if (!fs.existsSync(PHOTOS_DIR)) {
@@ -27,6 +30,89 @@ if (!fs.existsSync(PHOTOS_DIR)) {
 const QR_DIR = path.join(__dirname, 'public', 'qrcodes');
 if (!fs.existsSync(QR_DIR)) {
     fs.mkdirSync(QR_DIR, { recursive: true });
+}
+
+// Live view WebSocket setup
+let wsServer;
+let liveViewProcess = null;
+let activeConnections = 0;
+
+// Initialize WebSocket server
+function setupWebSocketServer(server) {
+    wsServer = new WebSocket.Server({ server });
+
+    wsServer.on('connection', (ws) => {
+        console.log('New client connected to live view');
+        activeConnections++;
+
+        // Start live view stream if it's not already running
+        if (liveViewProcess === null) {
+            startLiveView();
+        }
+
+        ws.on('close', () => {
+            console.log('Client disconnected from live view');
+            activeConnections--;
+
+            // If no clients are connected, stop the live view process
+            if (activeConnections === 0 && liveViewProcess !== null) {
+                stopLiveView();
+            }
+        });
+    });
+}
+
+// Start the live view process
+function startLiveView() {
+    console.log('Starting live view stream...');
+
+    try {
+        // Using gphoto2 capture-movie mode to get live view frames
+        // --stdout: Output to stdout instead of to a file
+        // --frames: Number of frames to capture (0 = unlimited)
+        // --no-keep: Don't keep file on camera
+        // Using sudo because we've confirmed it needs elevated permissions
+        const captureCommand = 'sudo gphoto2 --stdout --capture-movie --frames=0 --no-keep';
+
+        liveViewProcess = spawn(captureCommand, { shell: true });
+
+        liveViewProcess.stdout.on('data', (data) => {
+            // Broadcast the frame data to all connected clients
+            if (wsServer) {
+                wsServer.clients.forEach((client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(data);
+                    }
+                });
+            }
+        });
+
+        liveViewProcess.stderr.on('data', (data) => {
+            console.error(`Live view stderr: ${data}`);
+        });
+
+        liveViewProcess.on('close', (code) => {
+            console.log(`Live view process exited with code ${code}`);
+            liveViewProcess = null;
+        });
+
+        liveViewProcess.on('error', (err) => {
+            console.error('Failed to start live view process:', err);
+            liveViewProcess = null;
+        });
+    } catch (error) {
+        console.error('Error starting live view:', error);
+        liveViewProcess = null;
+    }
+}
+
+// Stop the live view process
+function stopLiveView() {
+    if (liveViewProcess !== null) {
+        console.log('Stopping live view stream...');
+        liveViewProcess.kill('SIGTERM');
+        liveViewProcess = null;
+    }
 }
 
 // API Endpoints
@@ -76,6 +162,11 @@ app.post('/api/photos/capture', (req, res) => {
     const filepath = path.join(PHOTOS_DIR, filename);
 
     console.log(`${new Date().toISOString()}: Starting photo capture process...`);
+
+    // Stop live view process if it's running to avoid conflicts
+    if (liveViewProcess !== null) {
+        stopLiveView();
+    }
 
     // Build the gphoto2 command with necessary parameters
     const captureCommand = `gphoto2 --force-overwrite --capture-image-and-download --filename "${filepath}"`;
@@ -181,9 +272,41 @@ app.get('/api/status', (req, res) => {
     });
 });
 
+// Add API endpoint to check if live view is supported
+app.get('/api/liveview/check', (req, res) => {
+    exec('gphoto2 --abilities', (error, stdout, stderr) => {
+        if (error) {
+            return res.json({
+                supported: false,
+                message: 'Error checking camera capabilities'
+            });
+        }
+
+        // Check if the camera supports capture-movie (live view)
+        const supportsLiveView = stdout.includes('capture-movie');
+
+        res.json({
+            supported: supportsLiveView,
+            message: supportsLiveView
+                ? 'Camera supports live view'
+                : 'Camera does not support live view or is not properly connected'
+        });
+    });
+});
+
+// Create HTTP server and attach WebSocket server
+const server = http.createServer(app);
+setupWebSocketServer(server);
+
 // Start the server
-app.listen(PORT, () => {
+server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Photos directory: ${PHOTOS_DIR}`);
     console.log(`QR codes directory: ${QR_DIR}`);
+});
+
+// Cleanup on server shutdown
+process.on('SIGINT', () => {
+    stopLiveView();
+    process.exit();
 });

@@ -1,22 +1,121 @@
 // client/src/components/CameraView.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
+import { API_BASE_URL, API_ENDPOINT } from '../App';
 
 const CameraView = () => {
     const { takePhoto, loading, error } = useCamera();
     const navigate = useNavigate();
     const [countdown, setCountdown] = useState(null);
     const [isReady, setIsReady] = useState(true);
+    const [liveViewSupported, setLiveViewSupported] = useState(false);
+    const [liveViewConnected, setLiveViewConnected] = useState(false);
+    const [liveViewError, setLiveViewError] = useState(null);
 
-    // Handle the countdown and photo capture
+    const canvasRef = useRef(null);
+    const wsRef = useRef(null);
+    const imageRef = useRef(new Image());
+
+    // Check if the camera supports live view
+    useEffect(() => {
+        fetch(`${API_ENDPOINT}/liveview/check`)
+            .then(response => response.json())
+            .then(data => {
+                setLiveViewSupported(data.supported);
+                if (!data.supported) {
+                    setLiveViewError(data.message);
+                }
+            })
+            .catch(err => {
+                console.error('Error checking live view support:', err);
+                setLiveViewError('Failed to check live view support');
+            });
+    }, []);
+
+    // Initialize WebSocket connection for live view
+    useEffect(() => {
+        // Only attempt to connect if live view is supported and not already connected
+        if (liveViewSupported && !liveViewConnected && !countdown) {
+            // Clean up previous connection if it exists
+            if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+                wsRef.current.close();
+            }
+
+            // Create WebSocket URL (use wss for https, ws for http)
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${API_BASE_URL.replace(/^https?:\/\//, '')}/liveview`;
+
+            try {
+                const ws = new WebSocket(wsUrl);
+                wsRef.current = ws;
+
+                ws.onopen = () => {
+                    console.log('Live view WebSocket connected');
+                    setLiveViewConnected(true);
+                    setLiveViewError(null);
+                };
+
+                ws.onclose = () => {
+                    console.log('Live view WebSocket disconnected');
+                    setLiveViewConnected(false);
+                };
+
+                ws.onerror = (error) => {
+                    console.error('Live view WebSocket error:', error);
+                    setLiveViewError('Failed to connect to live view stream');
+                    setLiveViewConnected(false);
+                };
+
+                // Handle incoming live view frames
+                ws.onmessage = (event) => {
+                    // Convert binary data to a base64 string
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        // Set the image source with the received data
+                        imageRef.current.src = reader.result;
+
+                        // When the image is loaded, draw it to the canvas
+                        imageRef.current.onload = () => {
+                            const canvas = canvasRef.current;
+                            if (canvas) {
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(imageRef.current, 0, 0, canvas.width, canvas.height);
+                            }
+                        };
+                    };
+                    reader.readAsDataURL(event.data);
+                };
+            } catch (error) {
+                console.error('Error setting up WebSocket connection:', error);
+                setLiveViewError('Failed to set up live view connection');
+            }
+        }
+
+        // Cleanup WebSocket on component unmount or during countdown
+        return () => {
+            if (wsRef.current) {
+                wsRef.current.close();
+            }
+        };
+    }, [liveViewSupported, liveViewConnected, countdown, API_BASE_URL]);
+
+    // Handle taking a photo with countdown
     const handleTakePhoto = () => {
         setIsReady(false);
+
+        // Disconnect live view during countdown to avoid conflicts
+        if (wsRef.current) {
+            wsRef.current.close();
+            setLiveViewConnected(false);
+        }
+
         // Start countdown from 5
         setCountdown(5);
     };
 
+    // Handle countdown and photo capture
     useEffect(() => {
         let timer;
         if (countdown === null) return;
@@ -38,12 +137,12 @@ const CameraView = () => {
                     } else {
                         // Reset if there was an error
                         setIsReady(true);
-                        setCountdown(null); // Reset the countdown on error
+                        setCountdown(null);
                     }
                 } catch (err) {
                     console.error('Failed to take photo:', err);
                     setIsReady(true);
-                    setCountdown(null); // Reset the countdown on error
+                    setCountdown(null);
                 }
             };
 
@@ -119,23 +218,38 @@ const CameraView = () => {
                         )}
                     </motion.div>
                 ) : (
-                    // Camera ready state
+                    // Camera ready state with live view if available
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         className="flex flex-col items-center"
                     >
-                        <div className="bg-black/10 p-4 rounded-lg w-full max-w-xl h-80 mb-8 border-4 border-dashed border-white/50 flex items-center justify-center">
-                            <div className="text-center text-white/80">
-                                <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-white/20 flex items-center justify-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-10 h-10">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
-                                    </svg>
+                        <div className="bg-black/10 p-4 rounded-lg w-full max-w-xl h-80 mb-8 border-4 border-dashed border-white/50 flex items-center justify-center overflow-hidden">
+                            {liveViewSupported && !liveViewError ? (
+                                // Live view canvas
+                                <canvas
+                                    ref={canvasRef}
+                                    width="640"
+                                    height="480"
+                                    className="max-w-full max-h-full object-contain bg-black"
+                                />
+                            ) : (
+                                // Fallback when live view is not available
+                                <div className="text-center text-white/80">
+                                    <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-white/20 flex items-center justify-center">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-10 h-10">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                                        </svg>
+                                    </div>
+                                    <p className="text-lg">Camera View</p>
+                                    <p className="text-sm opacity-70 mt-2">
+                                        {liveViewError
+                                            ? liveViewError
+                                            : "Stand here and press the button when you're ready!"}
+                                    </p>
                                 </div>
-                                <p className="text-lg">Camera View</p>
-                                <p className="text-sm opacity-70 mt-2">Stand here and press the button when you're ready!</p>
-                            </div>
+                            )}
                         </div>
 
                         {error && (
