@@ -1,12 +1,27 @@
+// server/index.js
 const express = require('express');
 const cors = require('cors');
-const { exec, spawn } = require('child_process');
+const { exec, spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
 const bodyParser = require('body-parser');
 const http = require('http');
 const WebSocket = require('ws');
+
+// Setup diagnostics to test WebSocket functionality
+console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
+
+// Check if WebSocket module is properly loaded
+console.log(`WebSocket module loaded: ${typeof WebSocket !== 'undefined' ? 'YES' : 'NO'}`);
+
+// Check if gphoto2 is available on the system
+try {
+    const gphotoVersion = execSync('gphoto2 --version').toString().trim();
+    console.log(`gphoto2 available: YES - ${gphotoVersion.split('\n')[0]}`);
+} catch (err) {
+    console.log(`gphoto2 available: NO - ${err.message}`);
+}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -38,70 +53,143 @@ let activeConnections = 0;
 
 // Initialize WebSocket server
 function setupWebSocketServer(server) {
+    console.log('Setting up WebSocket server...');
+
     // Create WebSocket server without a specific path (connects at root level)
     wsServer = new WebSocket.Server({
         server: server
     });
 
-    wsServer.on('connection', (ws) => {
-        console.log('New client connected to live view');
+    console.log(`WebSocket server created successfully: ${wsServer ? 'YES' : 'NO'}`);
+
+    // Log when the server is listening
+    wsServer.on('listening', () => {
+        console.log('WebSocket server is now listening for connections');
+    });
+
+    // Added error handler for WebSocket server
+    wsServer.on('error', (error) => {
+        console.error('WebSocket SERVER ERROR:', error);
+    });
+
+    wsServer.on('connection', (ws, req) => {
+        // Log detailed connection info
+        console.log(`New WebSocket connection from ${req.socket.remoteAddress}`);
+        console.log(`Client headers: ${JSON.stringify(req.headers)}`);
         activeConnections++;
+        console.log(`Active connections: ${activeConnections}`);
 
         // Start live view stream if it's not already running
         if (liveViewProcess === null) {
+            console.log('Starting live view process due to new connection');
             startLiveView();
         }
 
-        ws.on('close', () => {
-            console.log('Client disconnected from live view');
+        // Log all incoming messages (might be useful for debugging)
+        ws.on('message', (message) => {
+            console.log(`Received message from client: ${message}`);
+        });
+
+        ws.on('close', (code, reason) => {
+            console.log(`Client disconnected with code ${code}, reason: ${reason || 'none provided'}`);
             activeConnections--;
+            console.log(`Active connections: ${activeConnections}`);
 
             // If no clients are connected, stop the live view process
             if (activeConnections === 0 && liveViewProcess !== null) {
+                console.log('No active connections, stopping live view');
                 stopLiveView();
             }
         });
+
+        ws.on('error', (error) => {
+            console.error('WebSocket client error:', error);
+        });
+
+        // Send a test message to confirm connection works
+        try {
+            ws.send(JSON.stringify({ type: 'info', message: 'Connection established successfully' }));
+            console.log('Sent welcome message to client');
+        } catch (e) {
+            console.error('Error sending welcome message:', e);
+        }
     });
 }
 
 // Start the live view process
 function startLiveView() {
+    console.log('========================================');
     console.log('Starting live view stream...');
 
+    // Test gphoto2 specifically for capture-movie capability
     try {
-        // Using gphoto2 capture-movie mode to get live view frames
-        // --stdout: Output to stdout instead of to a file
-        // --frames: Number of frames to capture (0 = unlimited)
-        // --no-keep: Don't keep file on camera
-        // Note: You might need to remove 'sudo' if running without proper permissions
-        const captureCommand = 'gphoto2 --stdout --capture-movie --frames=0 --no-keep';
+        const testOutput = execSync('gphoto2 --list-all-config | grep -i capture-movie').toString();
+        console.log('Camera supports capture-movie according to config:', testOutput);
+    } catch (err) {
+        console.warn('Could not verify capture-movie support:', err.message);
+        // Continue anyway as it might still work
+    }
 
-        liveViewProcess = spawn(captureCommand, { shell: true });
+    try {
+        // Using the command that works locally
+        const captureCommand = 'gphoto2 --stdout --capture-movie --frames=30';
+        console.log(`Executing command: ${captureCommand}`);
+
+        liveViewProcess = spawn(captureCommand, {
+            shell: true,
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        console.log(`Process spawned with PID: ${liveViewProcess.pid}`);
+
+        let dataReceived = false;
+        let errorOutput = '';
 
         liveViewProcess.stdout.on('data', (data) => {
-            console.log(`Received frame data: ${data.length} bytes`);
+            if (!dataReceived) {
+                dataReceived = true;
+                console.log(`First frame data received! Length: ${data.length} bytes`);
+            }
+
             // Broadcast the frame data to all connected clients
-            if (wsServer) {
+            if (wsServer && wsServer.clients) {
+                let clientCount = 0;
                 wsServer.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN) {
-                        client.send(data);
+                        try {
+                            client.send(data, { binary: true });
+                            clientCount++;
+                        } catch (e) {
+                            console.error('Error sending frame to client:', e);
+                        }
                     }
                 });
+
+                // Only log occasionally to avoid flooding console
+                if (Math.random() < 0.01) {
+                    console.log(`Sent frame to ${clientCount} clients`);
+                }
+            } else {
+                if (Math.random() < 0.01) {
+                    console.log('Frame received but no WebSocket server or clients available');
+                }
             }
         });
 
         liveViewProcess.stderr.on('data', (data) => {
-            console.error(`Live view stderr: ${data}`);
-            // Check for specific error messages
-            if (data.toString().includes('not supported') ||
-                data.toString().includes('error') ||
-                data.toString().includes('failed')) {
-                console.error('Camera does not support live view or encountered an error');
+            // Collect error output
+            errorOutput += data.toString();
+
+            // Only log after collecting some output to avoid fragmentation
+            if (errorOutput.length > 100 || errorOutput.includes('\n')) {
+                console.error(`Live view stderr: ${errorOutput}`);
+                errorOutput = '';
             }
         });
 
         liveViewProcess.on('close', (code) => {
             console.log(`Live view process exited with code ${code}`);
+            console.log(`Remaining error output: ${errorOutput}`);
             liveViewProcess = null;
         });
 
@@ -309,9 +397,9 @@ setupWebSocketServer(server);
 
 // Start the server
 server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Photos directory: ${PHOTOS_DIR}`);
-    console.log(`QR codes directory: ${QR_DIR}`);
+    console.log(`${new Date().toISOString()}: Server running on port ${PORT}`);
+    console.log(`${new Date().toISOString()}: Photos directory: ${PHOTOS_DIR}`);
+    console.log(`${new Date().toISOString()}: QR codes directory: ${QR_DIR}`);
 });
 
 // Cleanup on server shutdown
