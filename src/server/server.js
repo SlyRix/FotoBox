@@ -8,6 +8,17 @@ const QRCode = require('qrcode');
 const bodyParser = require('body-parser');
 const http = require('http');
 const WebSocket = require('ws');
+const streamLock = {
+    isLocked: false,
+    lock: function() {
+        if (this.isLocked) return false;
+        this.isLocked = true;
+        return true;
+    },
+    unlock: function() {
+        this.isLocked = false;
+    }
+};
 
 // Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
@@ -196,6 +207,26 @@ function startVideoStream(clientId) {
 
     console.log(`Starting video stream for client ${clientId}`);
 
+    // If already streaming, just return
+    if (clientInfo.isStreaming) {
+        console.log(`Client ${clientId} is already streaming`);
+        return;
+    }
+
+    // Check if we need to acquire the stream lock
+    if (!videoStreamProcess) {
+        // If there's no stream process running, we need to acquire the lock
+        if (!streamLock.lock()) {
+            console.log(`Stream operation in progress, queuing start request for client ${clientId}`);
+            setTimeout(() => startVideoStream(clientId), 2000);
+            return;
+        }
+    }
+
+    // Mark this client as streaming
+    clientInfo.isStreaming = true;
+    activeStreams.set(clientId, clientInfo);
+
     // Notify client that stream is starting
     clientInfo.ws.send(JSON.stringify({
         type: 'streamStatus',
@@ -206,6 +237,7 @@ function startVideoStream(clientId) {
     // If a stream is already running, just mark this client as streaming
     if (videoStreamProcess) {
         console.log(`Stream already running, adding client ${clientId} to existing stream`);
+        // Send "active" status to client
         clientInfo.ws.send(JSON.stringify({
             type: 'streamStatus',
             status: 'active',
@@ -216,158 +248,131 @@ function startVideoStream(clientId) {
 
     // Start the gphoto2 and ffmpeg process pipeline
     try {
-        console.log('Launching gphoto2...');
+        console.log('Starting gphoto2 process');
         const gphoto2Process = spawn('gphoto2', ['--capture-movie', '--stdout']);
 
-        // Add a short delay before starting ffmpeg
-        setTimeout(() => {
-            console.log('Launching ffmpeg...');
-            const ffmpegProcess = spawn('ffmpeg', [
-                '-f', 'mjpeg',           // Specify input format
-                '-i', 'pipe:0',          // Input from stdin
-                '-c:v', 'mjpeg',         // Output codec: mjpeg
-                '-q:v', '5',             // Quality (increased slightly for stability)
-                '-r', '15',              // Frame rate
-                '-s', '640x480',         // Resolution
-                '-fflags', 'nobuffer',   // Reduce buffering
-                '-flags', 'low_delay',   // Reduce latency
-                '-preset', 'ultrafast',  // Fastest encoding
-                '-tune', 'zerolatency',  // Minimize latency
-                '-f', 'mjpeg',           // Output format
-                'pipe:1'                 // Output to stdout
-            ]);
+        gphoto2Process.stderr.on('data', (data) => {
+            const stderr = data.toString();
+            console.log(`gphoto2 stderr: ${stderr}`);
 
-            // Connect the processes after ffmpeg is started
-            gphoto2Process.stdout.pipe(ffmpegProcess.stdin);
-
-            // This is our combined process
-            videoStreamProcess = {
-                gphoto2: gphoto2Process,
-                ffmpeg: ffmpegProcess,
-                kill: function () {
-                    gphoto2Process.kill();
-                    ffmpegProcess.kill();
-                }
-            };
-            gphoto2Process.stdout.on('error', (err) => {
-                console.error(`gphoto2 stdout pipe error: ${err.message}`);
-                broadcastStreamError(`Camera stream pipe error: ${err.message}`);
-            });
-            ffmpegProcess.stdin.on('error', (err) => {
-                console.error(`ffmpeg stdin pipe error: ${err.message}`);
-                // Don't kill the processes for EPIPE if they're otherwise still working
-                if (err.code !== 'EPIPE') {
-                    broadcastStreamError(`Video processing pipe error: ${err.message}`);
-                    if (videoStreamProcess) {
-                        videoStreamProcess.kill();
-                        videoStreamProcess = null;
-                    }
-                }
-            });
-            // Handle gphoto2 process errors
-            gphoto2Process.on('error', (err) => {
-                console.error(`Error starting gphoto2: ${err.message}`);
-                broadcastStreamError(`Failed to start camera: ${err.message}`);
-                if (videoStreamProcess) {
-                    videoStreamProcess.kill();
-                    videoStreamProcess = null;
-                }
-            });
-
-            // Handle ffmpeg process errors
-            ffmpegProcess.on('error', (err) => {
-                console.error(`Error starting ffmpeg: ${err.message}`);
-                broadcastStreamError(`Failed to process video stream: ${err.message}`);
-                if (videoStreamProcess) {
-                    videoStreamProcess.kill();
-                    videoStreamProcess = null;
-                }
-            });
-
-            // Handle gphoto2 process exit
-            gphoto2Process.on('exit', (code, signal) => {
-                if (code !== 0 && code !== null) {
-                    console.error(`gphoto2 process exited with code ${code}`);
-                    broadcastStreamError(`Camera stream ended unexpectedly (code ${code})`);
-                } else if (signal) {
-                    console.log(`gphoto2 process terminated due to signal: ${signal}`);
-                } else {
-                    console.log('gphoto2 process ended normally');
-                }
-
-                if (videoStreamProcess) {
-                    videoStreamProcess.kill();
-                    videoStreamProcess = null;
-                }
-            });
-
-            // Handle ffmpeg process exit
-            ffmpegProcess.on('exit', (code, signal) => {
-                if (code !== 0 && code !== null) {
-                    console.error(`ffmpeg process exited with code ${code}`);
-                } else if (signal) {
-                    console.log(`ffmpeg process terminated due to signal: ${signal}`);
-                } else {
-                    console.log('ffmpeg process ended normally');
-                }
-
-                if (videoStreamProcess) {
-                    videoStreamProcess = null;
-                }
-            });
-
-            // Handle standard error output from gphoto2
-            gphoto2Process.stderr.on('data', (data) => {
-                const stderr = data.toString();
-                console.log(`gphoto2 stderr: ${stderr}`);
-
-                // Check for common errors
-                if (stderr.includes('ERROR') && !stderr.includes('select timeout')) {
-                    broadcastStreamError(`Camera error: ${stderr}`);
-                }
-            });
-
-            // Handle standard error output from ffmpeg
-            ffmpegProcess.stderr.on('data', (data) => {
-                // ffmpeg outputs progress info to stderr, so only log it occasionally
-                if (Math.random() < 0.01) { // Log roughly 1% of messages to avoid flooding
-                    console.log(`ffmpeg info: ${data.toString().substring(0, 100)}...`);
-                }
-            });
-
-            // Process video frames from ffmpeg stdout
-            ffmpegProcess.stdout.on('data', (data) => {
-                // Send the video frame data to all active streaming clients
-                for (const [id, client] of activeStreams) {
-                    if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
-                        try {
-                            // Send frame data as binary
-                            client.ws.send(data);
-                        } catch (err) {
-                            console.error(`Error sending frame to client ${id}: ${err.message}`);
-                        }
-                    }
-                }
-            });
-
-            // Notify all streaming clients that stream is active
-            for (const [id, client] of activeStreams) {
-                if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
-                    client.ws.send(JSON.stringify({
-                        type: 'streamStatus',
-                        status: 'active',
-                        message: 'Camera stream active'
-                    }));
-                }
+            // Only start ffmpeg when gphoto2 is ready
+            if (stderr.includes('Capturing preview frames')) {
+                startFFmpeg(gphoto2Process, clientId);
             }
-        }, 1000);
+        });
+
+        gphoto2Process.on('error', (err) => {
+            console.error(`Error starting gphoto2: ${err.message}`);
+            broadcastStreamError(`Failed to start camera: ${err.message}`);
+            streamLock.unlock();
+        });
+
+        gphoto2Process.on('exit', (code, signal) => {
+            console.log(`gphoto2 process exited with code ${code !== null ? code : 'null'}, signal: ${signal || 'none'}`);
+            streamLock.unlock();
+        });
+
+        // Store the process temporarily
+        videoStreamProcess = {
+            gphoto2: gphoto2Process,
+            ffmpeg: null,
+            kill: function() {
+                if (this.gphoto2) this.gphoto2.kill();
+                if (this.ffmpeg) this.ffmpeg.kill();
+            }
+        };
+
     } catch (error) {
         console.error(`Failed to start video stream: ${error.message}`);
         broadcastStreamError(`Failed to start camera stream: ${error.message}`);
+        streamLock.unlock();
+    }
+}
+
+// Separate function to start ffmpeg
+function startFFmpeg(gphoto2Process, clientId) {
+    try {
+        console.log('Starting ffmpeg process');
+        const ffmpegProcess = spawn('ffmpeg', [
+            '-f', 'mjpeg',           // Input format
+            '-i', 'pipe:0',          // Input from stdin
+            '-c:v', 'mjpeg',         // Output codec
+            '-q:v', '5',             // Quality
+            '-r', '15',              // Frame rate
+            '-s', '640x480',         // Resolution
+            '-fflags', 'nobuffer',   // Reduce buffering
+            '-flags', 'low_delay',   // Reduce latency
+            '-f', 'mjpeg',           // Output format
+            'pipe:1'                 // Output to stdout
+        ]);
+
+        // Set up error handling for ffmpeg input pipe
+        ffmpegProcess.stdin.on('error', (err) => {
+            console.error(`ffmpeg stdin pipe error: ${err.message}`);
+            // Only terminate if it's not an EPIPE error
+            if (err.code !== 'EPIPE') {
+                if (videoStreamProcess) {
+                    videoStreamProcess.kill();
+                    videoStreamProcess = null;
+                }
+                streamLock.unlock();
+            }
+        });
+
+        // Connect the processes
+        gphoto2Process.stdout.pipe(ffmpegProcess.stdin);
+
+        ffmpegProcess.on('error', (err) => {
+            console.error(`Error starting ffmpeg: ${err.message}`);
+            broadcastStreamError(`Failed to process video stream: ${err.message}`);
+            streamLock.unlock();
+        });
+
+        ffmpegProcess.on('exit', (code, signal) => {
+            console.log(`ffmpeg process exited with code ${code !== null ? code : 'null'}, signal: ${signal || 'none'}`);
+            if (videoStreamProcess) {
+                videoStreamProcess.ffmpeg = null;
+            }
+        });
+
+        // Process video frames
+        ffmpegProcess.stdout.on('data', (data) => {
+            // Broadcast frame to all streaming clients
+            for (const [id, client] of activeStreams) {
+                if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
+                    try {
+                        client.ws.send(data);
+                    } catch (err) {
+                        console.error(`Error sending frame to client ${id}: ${err.message}`);
+                    }
+                }
+            }
+        });
+
+        // Store ffmpeg process in videoStreamProcess
+        if (videoStreamProcess) {
+            videoStreamProcess.ffmpeg = ffmpegProcess;
+        }
+
+        // Notify all streaming clients that stream is active
+        for (const [id, client] of activeStreams) {
+            if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
+                client.ws.send(JSON.stringify({
+                    type: 'streamStatus',
+                    status: 'active',
+                    message: 'Camera stream active'
+                }));
+            }
+        }
+
+    } catch (error) {
+        console.error(`Failed to start ffmpeg: ${error.message}`);
+        broadcastStreamError(`Failed to start video processing: ${error.message}`);
         if (videoStreamProcess) {
             videoStreamProcess.kill();
             videoStreamProcess = null;
         }
+        streamLock.unlock();
     }
 }
 
