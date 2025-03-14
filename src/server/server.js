@@ -81,67 +81,93 @@ let liveViewProcess = null;
 let activeConnections = 0;
 
 // Initialize WebSocket server
+// Replace your WebSocket server setup with this:
 function setupWebSocketServer(server) {
-    console.log('Setting up WebSocket server...');
+    console.log('=== SETTING UP WEBSOCKET SERVER ===');
 
-    // Create WebSocket server without a specific path (connects at root level)
+    // Create WebSocket server
     wsServer = new WebSocket.Server({
-        server: server
+        server: server,
+        // Don't specify a path to use root level connection
     });
 
-    console.log(`WebSocket server created successfully: ${wsServer ? 'YES' : 'NO'}`);
+    console.log(`WebSocket server created on port ${PORT}: ${wsServer ? 'YES' : 'NO'}`);
 
-    // Log when the server is listening
+    // Log server events
     wsServer.on('listening', () => {
-        console.log('WebSocket server is now listening for connections');
+        console.log(`WebSocket server now listening on port ${PORT}`);
     });
 
-    // Added error handler for WebSocket server
     wsServer.on('error', (error) => {
-        console.error('WebSocket SERVER ERROR:', error);
+        console.error('⚠️ WebSocket SERVER ERROR:', error.message);
     });
 
+    // Handle client connections
     wsServer.on('connection', (ws, req) => {
-        // Log detailed connection info
-        console.log(`New WebSocket connection from ${req.socket.remoteAddress}`);
-        console.log(`Client headers: ${JSON.stringify(req.headers)}`);
+        // Enhanced connection logging
+        const clientIp = req.socket.remoteAddress;
+        const origin = req.headers.origin || 'Unknown';
+
+        console.log(`➕ NEW WebSocket connection from ${clientIp} (Origin: ${origin})`);
+        console.log(`Headers: ${JSON.stringify(req.headers)}`);
+
         activeConnections++;
         console.log(`Active connections: ${activeConnections}`);
 
-        // Start live view stream if it's not already running
+        // Start live view if needed
         if (liveViewProcess === null) {
-            console.log('Starting live view process due to new connection');
+            console.log('Starting live view due to new connection');
+            resetLiveViewRetries(); // Reset retries on new connection
             startLiveView();
         }
 
-        // Log all incoming messages (might be useful for debugging)
+        // Send welcome message to confirm connection
+        try {
+            ws.send(JSON.stringify({
+                type: 'info',
+                message: 'Connection established successfully',
+                timestamp: Date.now()
+            }));
+            console.log('Sent welcome message to client');
+        } catch (e) {
+            console.error('Error sending welcome message:', e.message);
+        }
+
+        // Handle client messages
         ws.on('message', (message) => {
-            console.log(`Received message from client: ${message}`);
+            try {
+                const parsedMessage = JSON.parse(message);
+                console.log(`Received client message: ${JSON.stringify(parsedMessage)}`);
+
+                // Handle ping messages to keep connection alive
+                if (parsedMessage.type === 'ping') {
+                    ws.send(JSON.stringify({
+                        type: 'pong',
+                        timestamp: Date.now()
+                    }));
+                }
+            } catch (e) {
+                console.log(`Received raw message: ${message}`);
+            }
         });
 
+        // Handle disconnection
         ws.on('close', (code, reason) => {
-            console.log(`Client disconnected with code ${code}, reason: ${reason || 'none provided'}`);
+            console.log(`➖ Client disconnected with code ${code}, reason: ${reason || 'none provided'}`);
             activeConnections--;
             console.log(`Active connections: ${activeConnections}`);
 
-            // If no clients are connected, stop the live view process
+            // Stop live view if no clients connected
             if (activeConnections === 0 && liveViewProcess !== null) {
                 console.log('No active connections, stopping live view');
                 stopLiveView();
             }
         });
 
+        // Handle errors
         ws.on('error', (error) => {
-            console.error('WebSocket client error:', error);
+            console.error('WebSocket client error:', error.message);
         });
-
-        // Send a test message to confirm connection works
-        try {
-            ws.send(JSON.stringify({ type: 'info', message: 'Connection established successfully' }));
-            console.log('Sent welcome message to client');
-        } catch (e) {
-            console.error('Error sending welcome message:', e);
-        }
     });
 }
 

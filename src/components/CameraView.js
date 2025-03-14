@@ -102,55 +102,122 @@ const CameraView = () => {
     const maxReconnectAttempts = 5;
     const reconnectCooldown = 3000; // 3 seconds
 
+// Update this function in your CameraView.js
+
     const initializeWebSocket = useCallback(() => {
         if (countdown !== null) return;
 
-        // Prevent infinite retries
+        // Don't try if max attempts reached
         if (connectionAttempts >= maxReconnectAttempts) {
-            console.error(`[WebSocket] Max reconnect attempts reached (${maxReconnectAttempts}).`);
-            setLiveViewError('Failed to connect to live view. Please try again later or restart the camera.');
+            console.error(`[WebSocket] Max attempts reached (${maxReconnectAttempts})`);
+            setLiveViewError('Failed to connect after multiple attempts. Please try again later.');
             return;
         }
 
-        console.log(`[WebSocket] Attempting connection (#${connectionAttempts + 1})...`);
-        setConnectionAttempts((prev) => prev + 1);
-
+        // Close any existing connection
         if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
             console.log("[WebSocket] Closing existing connection");
             wsRef.current.close();
         }
 
-        // Use secure WebSocket when on HTTPS, otherwise use regular WebSocket
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsHost = API_BASE_URL.replace(/^https?:\/\//, '');
-        const wsUrl = `${protocol}//${wsHost}`;
+        // Create the WebSocket URL - IMPORTANT: WebSocket protocol must match the page protocol
+        const isSecure = window.location.protocol === 'https:';
+        const protocol = isSecure ? 'wss:' : 'ws:';
+
+        // Try connecting to the same host as the backend API
+        const urlParts = new URL(API_BASE_URL);
+        const host = urlParts.host; // Get just the host part, not protocol
+        const wsUrl = `${protocol}//${host}`;
+
+        console.log(`[WebSocket] Connecting to: ${wsUrl}`);
+        setConnectionAttempts(prev => prev + 1);
 
         try {
+            // Create WebSocket connection
             const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
 
-            // Setup the WebSocket handlers for frame processing
-            setupWebSocketHandlers(ws, canvasRef);
-
+            // Connection opened
             ws.onopen = () => {
-                console.log("%c[WebSocket] Connection OPENED successfully!", "color: green; font-weight: bold");
+                console.log("%c[WebSocket] Connection OPENED!", "color: green; font-weight: bold");
                 setLiveViewConnected(true);
                 setLiveViewError(null);
-                setConnectionAttempts(0); // Reset attempts on success
+                setConnectionAttempts(0); // Reset counter on success
                 setReconnecting(false);
+
+                // Send an initial ping to verify connection
+                ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+
+                // Set up ping interval to keep connection alive
+                const pingInterval = setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+                    } else {
+                        clearInterval(pingInterval);
+                    }
+                }, 30000); // Ping every 30 seconds
+
+                // Store interval ID for cleanup
+                return () => clearInterval(pingInterval);
             };
 
+            // Handle messages from server
+            ws.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+
+                    // Handle different message types
+                    if (message.type === 'frame') {
+                        // Update stats
+                        setFrameCount(prev => prev + 1);
+                        setLastFrameTime(Date.now());
+
+                        // Draw the frame on canvas
+                        const img = new Image();
+                        img.onload = () => {
+                            const canvas = canvasRef.current;
+                            if (!canvas) return;
+
+                            const ctx = canvas.getContext('2d');
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                            // Calculate dimensions to maintain aspect ratio
+                            const scale = Math.min(
+                                canvas.width / img.width,
+                                canvas.height / img.height
+                            );
+
+                            const x = (canvas.width - img.width * scale) / 2;
+                            const y = (canvas.height - img.height * scale) / 2;
+
+                            ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+                        };
+
+                        img.src = `data:image/jpeg;base64,${message.data}`;
+                    } else if (message.type === 'info') {
+                        console.log('[WebSocket] Server info:', message.message);
+                    } else if (message.type === 'pong') {
+                        console.log('[WebSocket] Received pong from server');
+                    }
+                } catch (error) {
+                    console.error('Error processing WebSocket message:', error);
+                }
+            };
+
+            // Connection closed
             ws.onclose = (event) => {
-                console.log(`%c[WebSocket] Connection CLOSED: Code=${event.code}, Reason="${event.reason || 'none'}"`, "color: orange; font-weight: bold");
+                console.log(`%c[WebSocket] Connection CLOSED: Code=${event.code}, Reason="${event.reason || 'none'}"`, "color: orange;");
                 setLiveViewConnected(false);
 
-                if (event.code === 1006 || event.code === 1005) {
-                    console.warn('[WebSocket] Abnormal closure, retrying...');
+                // Handle abnormal closures (codes 1001, 1006, etc.)
+                if (event.code !== 1000) {
+                    console.warn('[WebSocket] Abnormal closure, will retry...');
                     setReconnecting(true);
+                    setLiveViewError(`Connection closed (${event.code}). Reconnecting...`);
 
-                    // Use exponential backoff for retries
+                    // Use exponential backoff
                     const delay = Math.min(1000 * Math.pow(1.5, connectionAttempts), reconnectCooldown);
-                    console.log(`[WebSocket] Reconnecting in ${delay / 1000} seconds...`);
+                    console.log(`[WebSocket] Reconnecting in ${delay/1000} seconds...`);
 
                     reconnectTimeoutRef.current = setTimeout(() => {
                         initializeWebSocket();
@@ -158,22 +225,23 @@ const CameraView = () => {
                 }
             };
 
+            // Connection error
             ws.onerror = (error) => {
                 console.error("%c[WebSocket] ERROR occurred!", "color: red; font-weight: bold");
                 console.error("[WebSocket] Error details:", error);
-                setLiveViewError('Connection error. Retrying...');
+                setLiveViewError('Connection error. Will retry automatically.');
             };
 
         } catch (error) {
             console.error('[WebSocket] Setup error:', error);
-            setLiveViewError(`Failed to set up WebSocket: ${error.message}`);
+            setLiveViewError(`Setup error: ${error.message}`);
 
-            // Try to reconnect after a delay
+            // Try again after delay
             reconnectTimeoutRef.current = setTimeout(() => {
                 initializeWebSocket();
             }, reconnectCooldown);
         }
-    }, [API_BASE_URL, countdown, connectionAttempts, maxReconnectAttempts, reconnectCooldown]);
+    }, [API_BASE_URL, connectionAttempts, maxReconnectAttempts, reconnectCooldown, countdown]);
 
     // Add cleanup on component unmount
     useEffect(() => {
@@ -247,6 +315,7 @@ const CameraView = () => {
 
         return () => clearTimeout(timer);
     }, [countdown, takePhoto, navigate, initializeWebSocket]);
+
     function setupWebSocketHandlers(ws, canvasRef) {
         ws.binaryType = 'arraybuffer';
 
