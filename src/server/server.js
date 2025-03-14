@@ -118,80 +118,60 @@ function setupWebSocketServer(server) {
 
 // Start the live view process
 function startLiveView() {
-    console.log('========================================');
-    console.log('Starting live view stream...');
+    if (liveViewRetries >= maxLiveViewRetries) {
+        console.log(`Max live view retries reached (${maxLiveViewRetries}). Waiting...`);
+        return;
+    }
 
+    console.log('========================================');
+    console.log(`Starting live view stream (Attempt #${liveViewRetries + 1})...`);
 
     try {
-        // Using the command that works locally
         const captureCommand = 'gphoto2 --stdout --capture-movie --frames=30';
         console.log(`Executing command: ${captureCommand}`);
 
         liveViewProcess = spawn(captureCommand, {
             shell: true,
-            stdio: ['ignore', 'pipe', 'pipe']
+            stdio: ['ignore', 'pipe', 'pipe'],
         });
 
         console.log(`Process spawned with PID: ${liveViewProcess.pid}`);
+        liveViewRetries++;
 
-        let dataReceived = false;
         let errorOutput = '';
 
-        liveViewProcess.stdout.on('data', (data) => {
-            if (!dataReceived) {
-                dataReceived = true;
-                console.log(`First frame data received! Length: ${data.length} bytes`);
-            }
-
-            // Broadcast the frame data to all connected clients
-            if (wsServer && wsServer.clients) {
-                let clientCount = 0;
-                wsServer.clients.forEach((client) => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        try {
-                            client.send(data, { binary: true });
-                            clientCount++;
-                        } catch (e) {
-                            console.error('Error sending frame to client:', e);
-                        }
-                    }
-                });
-
-                // Only log occasionally to avoid flooding console
-                if (Math.random() < 0.01) {
-                    console.log(`Sent frame to ${clientCount} clients`);
-                }
-            } else {
-                if (Math.random() < 0.01) {
-                    console.log('Frame received but no WebSocket server or clients available');
-                }
-            }
-        });
-
         liveViewProcess.stderr.on('data', (data) => {
-            // Collect error output
             errorOutput += data.toString();
 
-            // Only log after collecting some output to avoid fragmentation
-            if (errorOutput.length > 100 || errorOutput.includes('\n')) {
-                console.error(`Live view stderr: ${errorOutput}`);
-                errorOutput = '';
+            if (errorOutput.includes('Could not claim the USB device')) {
+                console.error('Live view failed: Camera is busy. Retrying after cooldown...');
+                stopLiveView();
+
+                setTimeout(() => {
+                    startLiveView();
+                }, liveViewCooldown);
             }
         });
 
         liveViewProcess.on('close', (code) => {
             console.log(`Live view process exited with code ${code}`);
-            console.log(`Remaining error output: ${errorOutput}`);
-            liveViewProcess = null;
+            if (code !== 0 && liveViewRetries < maxLiveViewRetries) {
+                console.log(`Retrying live view in ${liveViewCooldown / 1000} seconds...`);
+                setTimeout(startLiveView, liveViewCooldown);
+            }
         });
 
         liveViewProcess.on('error', (err) => {
             console.error('Failed to start live view process:', err);
-            liveViewProcess = null;
+            liveViewRetries++;
+            if (liveViewRetries < maxLiveViewRetries) {
+                console.log(`Retrying live view in ${liveViewCooldown / 1000} seconds...`);
+                setTimeout(startLiveView, liveViewCooldown);
+            }
         });
+
     } catch (error) {
         console.error('Error starting live view:', error);
-        liveViewProcess = null;
     }
 }
 

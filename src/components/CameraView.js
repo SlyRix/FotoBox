@@ -1,5 +1,5 @@
-// client/src/components/CameraView.js - Updated WebSocket handling for live view
-import React, { useState, useEffect, useRef } from 'react';
+// client/src/components/CameraView.js
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
@@ -15,102 +15,196 @@ const CameraView = () => {
     const [liveViewError, setLiveViewError] = useState(null);
     const [frameCount, setFrameCount] = useState(0);
     const [lastFrameTime, setLastFrameTime] = useState(null);
+    const [showDebug, setShowDebug] = useState(false); // Toggle for debug info
+    const [connectionAttempts, setConnectionAttempts] = useState(0);
+    const [reconnecting, setReconnecting] = useState(false);
 
     const canvasRef = useRef(null);
     const wsRef = useRef(null);
     const imageRef = useRef(new Image());
+    const reconnectTimeoutRef = useRef(null);
 
-    // Debug mode with additional logging
-    const DEBUG = true;
+    // Helper function to decode WebSocket close codes
+    const getWebSocketCloseReason = (code) => {
+        const reasons = {
+            1000: "Normal closure",
+            1001: "Going away",
+            1002: "Protocol error",
+            1003: "Unsupported data",
+            1004: "Reserved",
+            1005: "No status received",
+            1006: "Abnormal closure - connection failed",
+            1007: "Invalid frame payload data",
+            1008: "Policy violation",
+            1009: "Message too big",
+            1010: "Missing extension",
+            1011: "Internal server error",
+            1012: "Service restart",
+            1013: "Try again later",
+            1014: "Bad gateway",
+            1015: "TLS handshake error"
+        };
+        return reasons[code] || `Unknown reason (${code})`;
+    };
 
     // Check if the camera supports live view
     useEffect(() => {
-        if (DEBUG) console.log("Checking if camera supports live view...");
+        console.log("%c[Camera] Checking if camera supports live view...", "color: purple; font-weight: bold");
+        // Set loading state while we check
+        setLiveViewError("Checking camera capabilities...");
+
         fetch(`${API_ENDPOINT}/liveview/check`)
             .then(response => response.json())
             .then(data => {
-                if (DEBUG) console.log("Live view support check result:", data);
-                setLiveViewSupported(data.supported);
-                if (!data.supported) {
-                    setLiveViewError(data.message);
+                console.log("%c[Camera] Live view support check result:", "color: purple", data);
+
+                if (data.supported) {
+                    console.log("%c[Camera] Live view is supported!", "color: green; font-weight: bold");
+                    setLiveViewSupported(true);
+                    setLiveViewError(null);
+
+                    // Since we know it's supported, attempt to connect right away
+                    initializeWebSocket();
+                } else {
+                    console.log("%c[Camera] Live view is not supported", "color: orange; font-weight: bold");
+                    setLiveViewSupported(false);
+                    setLiveViewError(data.message || "Camera doesn't support live view");
                 }
             })
             .catch(err => {
-                console.error('Error checking live view support:', err);
-                setLiveViewError('Failed to check live view support');
+                console.error('%c[Camera] Error checking live view support:', "color: red", err);
+                setLiveViewError('Failed to check live view support. Server might be unavailable.');
+                setLiveViewSupported(false);
             });
-    }, []);
+    }, [API_ENDPOINT]);
 
-    // Initialize WebSocket connection for live view
-    useEffect(() => {
-        // Only attempt to connect if live view is supported and countdown is not active
-        if (liveViewSupported && !countdown) {
-            if (DEBUG) console.log("Attempting to connect to WebSocket for live view...");
+    // Improved WebSocket initialization function
+    const initializeWebSocket = useCallback(() => {
+        // Don't attempt connection during countdown
+        if (countdown !== null) return;
 
-            // Clean up previous connection if it exists
-            if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-                wsRef.current.close();
-            }
+        // Track connection attempts
+        setConnectionAttempts(prev => prev + 1);
 
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsHost = API_BASE_URL.replace(/^https?:\/\//, '');
-            const wsUrl = `${wsProtocol}//${wsHost}`;
+        if (reconnecting) {
+            console.log(`[WebSocket] Reconnection attempt #${connectionAttempts}...`);
+        } else {
+            console.log("%c[WebSocket] Initializing connection...", "color: blue; font-weight: bold");
+        }
 
-            if (DEBUG) console.log("Connecting to WebSocket at:", wsUrl);
+        // Clean up previous connection if it exists
+        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+            console.log("[WebSocket] Closing existing connection");
+            wsRef.current.close();
+        }
 
-            try {
-                const ws = new WebSocket(wsUrl);
-                wsRef.current = ws;
+        // Clear any pending reconnect timeouts
+        if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+        }
 
-                ws.binaryType = 'arraybuffer'; // Ensure we're receiving binary data as ArrayBuffer
+        // IMPORTANT: Always use WSS with HTTPS sites
+        const wsProtocol = 'wss:';
+        const wsHost = API_BASE_URL.replace(/^https?:\/\//, '').replace(/\/api$/, '');
+        const wsUrl = `${wsProtocol}//${wsHost}`;
 
-                ws.onopen = () => {
-                    if (DEBUG) console.log('✅ Live view WebSocket connected successfully');
-                    setLiveViewConnected(true);
-                    setLiveViewError(null);
-                    setFrameCount(0);
-                    setLastFrameTime(Date.now());
-                };
+        console.log(`[WebSocket] Connecting to: ${wsUrl}`);
 
-                ws.onclose = (event) => {
-                    if (DEBUG) console.log('Live view WebSocket disconnected', event.code, event.reason);
+        try {
+            const ws = new WebSocket(wsUrl);
+            wsRef.current = ws;
+
+            // Set binary type explicitly
+            ws.binaryType = 'arraybuffer';
+            console.log(`[WebSocket] Binary type set to: ${ws.binaryType}`);
+
+            // Connection opened
+            ws.onopen = () => {
+                console.log("%c[WebSocket] Connection OPENED successfully!", "color: green; font-weight: bold");
+                setLiveViewConnected(true);
+                setLiveViewError(null);
+                setReconnecting(false);
+                // Reset frame count on new connection
+                setFrameCount(0);
+                setLastFrameTime(Date.now());
+            };
+
+            // Connection closed
+            ws.onclose = (event) => {
+                console.log(`%c[WebSocket] Connection CLOSED: Code=${event.code}, Reason="${event.reason || 'none'}"`,
+                    "color: orange; font-weight: bold");
+                console.log(`[WebSocket] Close code meaning: ${getWebSocketCloseReason(event.code)}`);
+
+                // Only update UI state if we were previously connected
+                // This prevents flickering during initial connection attempts
+                if (liveViewConnected) {
                     setLiveViewConnected(false);
-                    // Try to reconnect after a delay unless we're in countdown mode
-                    if (!countdown) {
-                        setTimeout(() => {
-                            if (DEBUG) console.log('Attempting to reconnect WebSocket...');
-                            setLiveViewConnected(false);
-                        }, 2000);
+                }
+
+                // On first connection attempt with code 1005/1006, try reconnecting immediately
+                // These codes often happen during initial proxy negotiation
+                const isInitialConnectionIssue =
+                    (connectionAttempts <= 2) && (event.code === 1005 || event.code === 1006);
+
+                // Try to reconnect unless we're in countdown mode
+                if (!countdown) {
+                    if (isInitialConnectionIssue) {
+                        // Immediate reconnect for first attempt with common proxy error
+                        console.log("[WebSocket] Initial connection closed, reconnecting immediately...");
+                        initializeWebSocket();
+                    } else {
+                        // For other errors or subsequent attempts, use exponential backoff
+                        const delay = Math.min(1000 * Math.pow(1.5, Math.min(connectionAttempts, 5)), 10000);
+                        console.log(`[WebSocket] Scheduling reconnection in ${delay}ms...`);
+                        setReconnecting(true);
+
+                        reconnectTimeoutRef.current = setTimeout(() => {
+                            console.log("[WebSocket] Attempting to reconnect...");
+                            initializeWebSocket();
+                        }, delay);
                     }
-                };
+                }
+            };
 
-                ws.onerror = (error) => {
-                    console.error('❌ Live view WebSocket error:', error);
-                    setLiveViewError('Connection error. Server might be unavailable.');
-                    setLiveViewConnected(false);
-                };
+            // Connection error
+            ws.onerror = (error) => {
+                console.error("%c[WebSocket] ERROR occurred!", "color: red; font-weight: bold");
+                console.error("[WebSocket] Error details:", error);
 
-                // Handle incoming live view frames
-                ws.onmessage = (event) => {
-                    // Update frame counter for monitoring
+                setLiveViewError('Connection error. Check browser console for details.');
+            };
+
+            // Handle incoming messages
+            ws.onmessage = (event) => {
+                // Process frames and update UI
+                // Check if it's a text message (like the welcome message) or binary frame data
+                if (typeof event.data === 'string') {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log("[WebSocket] Received text message:", data);
+                    } catch (e) {
+                        console.log("[WebSocket] Received string data (not JSON):", event.data);
+                    }
+                } else {
+                    // This is binary frame data
                     setFrameCount(prev => prev + 1);
                     setLastFrameTime(Date.now());
 
-                    try {
-                        // Converting ArrayBuffer to Blob
-                        const blob = new Blob([event.data], { type: 'image/jpeg' });
+                    // Log frame data occasionally
+                    if (frameCount % 30 === 0) {
+                        console.log(`[WebSocket] Received frame #${frameCount}: ${event.data.byteLength} bytes`);
+                    }
 
-                        // Create a URL for the blob
+                    try {
+                        // Process the binary data
+                        const blob = new Blob([event.data], { type: 'image/jpeg' });
                         const url = URL.createObjectURL(blob);
 
-                        // Set the image source and handle its loading
                         imageRef.current.onload = () => {
-                            // Draw to canvas when image is loaded
                             const canvas = canvasRef.current;
                             if (canvas) {
                                 const ctx = canvas.getContext('2d');
-
-                                // Clear the canvas first
                                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
                                 // Calculate scaling to maintain aspect ratio while filling canvas
@@ -134,26 +228,37 @@ const CameraView = () => {
                             }
                         };
 
-                        // Set the image source to trigger loading
+                        imageRef.current.onerror = (imgError) => {
+                            console.error("[WebSocket] Error loading image:", imgError);
+                            URL.revokeObjectURL(url);
+                        };
+
                         imageRef.current.src = url;
                     } catch (error) {
-                        console.error('Error processing camera frame:', error);
+                        console.error('[WebSocket] Error processing frame:', error);
                     }
-                };
-            } catch (error) {
-                console.error('Error setting up WebSocket connection:', error);
-                setLiveViewError(`Failed to connect: ${error.message}`);
-            }
+                }
+            };
+        } catch (error) {
+            console.error('[WebSocket] Setup error:', error);
+            setLiveViewError(`Failed to set up WebSocket: ${error.message}`);
         }
+    }, [API_BASE_URL, countdown, connectionAttempts, liveViewConnected, reconnecting]);
 
-        // Cleanup WebSocket on component unmount or during countdown
+    // Add cleanup on component unmount
+    useEffect(() => {
         return () => {
+            // Clean up WebSocket
             if (wsRef.current) {
-                if (DEBUG) console.log('Closing WebSocket connection on cleanup');
                 wsRef.current.close();
             }
+
+            // Clean up any pending timeouts
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+            }
         };
-    }, [liveViewSupported, countdown, API_BASE_URL]);
+    }, []);
 
     // Handle taking a photo with countdown
     const handleTakePhoto = () => {
@@ -161,7 +266,7 @@ const CameraView = () => {
 
         // Disconnect live view during countdown to avoid conflicts
         if (wsRef.current) {
-            if (DEBUG) console.log('Closing WebSocket before taking photo');
+            console.log('[WebSocket] Closing WebSocket before taking photo');
             wsRef.current.close();
             setLiveViewConnected(false);
         }
@@ -185,7 +290,7 @@ const CameraView = () => {
             // Take photo after showing the smile message
             const capturePhoto = async () => {
                 try {
-                    if (DEBUG) console.log('Taking photo...');
+                    console.log('Taking photo...');
                     const photo = await takePhoto();
                     if (photo) {
                         // Navigate to preview page
@@ -194,11 +299,15 @@ const CameraView = () => {
                         // Reset if there was an error
                         setIsReady(true);
                         setCountdown(null);
+                        // Restart WebSocket connection after photo error
+                        initializeWebSocket();
                     }
                 } catch (err) {
                     console.error('Failed to take photo:', err);
                     setIsReady(true);
                     setCountdown(null);
+                    // Restart WebSocket connection after photo error
+                    initializeWebSocket();
                 }
             };
 
@@ -207,7 +316,16 @@ const CameraView = () => {
         }
 
         return () => clearTimeout(timer);
-    }, [countdown, takePhoto, navigate]);
+    }, [countdown, takePhoto, navigate, initializeWebSocket]);
+
+    // Calculate FPS (when frames are being received)
+    const getFps = () => {
+        if (!lastFrameTime || frameCount === 0) return 'N/A';
+        const secondsActive = (Date.now() - lastFrameTime) / 1000;
+        // Only show FPS if we received a frame in the last 3 seconds
+        if (secondsActive > 3) return 'Inactive';
+        return (frameCount / secondsActive).toFixed(1);
+    };
 
     // Early return for loading state
     if (loading && countdown === null) {
@@ -221,15 +339,6 @@ const CameraView = () => {
         );
     }
 
-    // Calculate FPS (when frames are being received)
-    const getFps = () => {
-        if (!lastFrameTime || frameCount === 0) return 'N/A';
-        const secondsActive = (Date.now() - lastFrameTime) / 1000;
-        // Only show FPS if we received a frame in the last 3 seconds
-        if (secondsActive > 3) return 'Inactive';
-        return (frameCount / secondsActive).toFixed(1);
-    };
-
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10">
             {/* Back button */}
@@ -238,6 +347,14 @@ const CameraView = () => {
                 className="absolute top-8 left-8 text-christian-accent hover:text-wedding-love transition-colors"
             >
                 ← Back
+            </button>
+
+            {/* Debug toggle */}
+            <button
+                onClick={() => setShowDebug(!showDebug)}
+                className="absolute top-8 right-8 text-sm text-gray-500 hover:text-gray-700"
+            >
+                {showDebug ? 'Hide Debug' : 'Show Debug'}
             </button>
 
             <div className="z-10 text-center">
@@ -289,7 +406,7 @@ const CameraView = () => {
                         animate={{ opacity: 1 }}
                         className="flex flex-col items-center"
                     >
-                        <div className="bg-black p-4 rounded-lg w-full max-w-xl h-80 mb-8 border-2 border-gray-800 flex items-center justify-center overflow-hidden">
+                        <div className="bg-black p-4 rounded-lg w-full max-w-xl h-80 mb-8 border-2 border-gray-800 flex items-center justify-center overflow-hidden relative">
                             {liveViewSupported && !liveViewError ? (
                                 liveViewConnected ? (
                                     <>
@@ -301,8 +418,8 @@ const CameraView = () => {
                                             className="max-w-full max-h-full object-contain bg-black"
                                         />
 
-                                        {/* FPS Counter for debugging */}
-                                        {DEBUG && (
+                                        {/* FPS Counter */}
+                                        {showDebug && (
                                             <div className="absolute top-2 right-2 text-white bg-black/50 px-2 py-1 rounded text-xs">
                                                 FPS: {getFps()} | Frames: {frameCount}
                                             </div>
@@ -312,7 +429,8 @@ const CameraView = () => {
                                     // Show connecting message
                                     <div className="text-center text-white/80">
                                         <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mx-auto mb-4"></div>
-                                        <p>Connecting to camera live view...</p>
+                                        <p>{reconnecting ? 'Reconnecting to camera...' : 'Connecting to camera live view...'}</p>
+                                        <p className="text-xs mt-1 text-white/50">Attempt #{connectionAttempts}</p>
                                         {liveViewError && (
                                             <p className="text-red-300 mt-2 text-sm">{liveViewError}</p>
                                         )}
@@ -337,14 +455,18 @@ const CameraView = () => {
                             )}
                         </div>
 
-                        {DEBUG && (
+                        {/* Debug info */}
+                        {showDebug && (
                             <div className="mb-4 p-3 bg-gray-100 text-gray-700 rounded-lg text-sm text-left w-full max-w-xl">
                                 <h3 className="font-bold">Debug Info:</h3>
                                 <ul className="list-disc pl-5 mt-1">
                                     <li>Live view supported: {liveViewSupported ? 'Yes' : 'No'}</li>
                                     <li>WebSocket connected: {liveViewConnected ? 'Yes' : 'No'}</li>
+                                    <li>Connection attempts: {connectionAttempts}</li>
+                                    <li>Reconnecting: {reconnecting ? 'Yes' : 'No'}</li>
                                     <li>Frames received: {frameCount}</li>
                                     <li>FPS: {getFps()}</li>
+                                    <li>WebSocket URL: wss://{API_BASE_URL.replace(/^https?:\/\//, '').replace(/\/api$/, '')}</li>
                                     {liveViewError && <li className="text-red-500">Error: {liveViewError}</li>}
                                 </ul>
                             </div>
@@ -363,6 +485,16 @@ const CameraView = () => {
                         >
                             {loading ? 'Processing...' : 'Take Photo'}
                         </button>
+
+                        {/* Manual reconnect button for troubleshooting */}
+                        {showDebug && liveViewSupported && (
+                            <button
+                                onClick={initializeWebSocket}
+                                className="mt-4 text-sm underline text-gray-500 hover:text-gray-700"
+                            >
+                                Manually reconnect WebSocket
+                            </button>
+                        )}
                     </motion.div>
                 )}
             </div>
