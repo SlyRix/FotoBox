@@ -150,7 +150,7 @@ function startLiveView() {
     console.log(`Starting live view stream (Attempt #${liveViewRetries + 1})...`);
 
     try {
-        const captureCommand = 'gphoto2 --stdout --capture-movie --frames=10';
+        const captureCommand = 'gphoto2 --stdout --capture-movie';
         console.log(`Executing command: ${captureCommand}`);
 
         liveViewProcess = spawn(captureCommand, {
@@ -373,10 +373,6 @@ app.get('/api/status', (req, res) => {
 // Add API endpoint to check if live view is supported
 app.get('/api/liveview/check', (req, res) => {
     console.log('Checking camera live view support with direct test...');
-
-    const testProcess = spawn('gphoto2', ['--stdout', '--capture-movie', '--frames=1'], {
-        timeout: 5000 // 5 second timeout
-    });
 
     let dataReceived = false;
     let errorOutput = '';
