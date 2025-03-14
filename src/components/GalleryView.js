@@ -3,13 +3,13 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
+import { API_BASE_URL } from '../App';
 
 const GalleryView = () => {
     const { photos, fetchPhotos, loading } = useCamera();
     const navigate = useNavigate();
     const [selectedPhoto, setSelectedPhoto] = useState(null);
     //TODO: Add Global API URL for all files
-    const API = "http://192.168.1.70:5000"
 
     useEffect(() => {
         // Fetch photos when component mounts
@@ -82,7 +82,7 @@ const GalleryView = () => {
                             >
                                 <div className="aspect-[4/3] w-full overflow-hidden">
                                     <img
-                                        src={`${API}${photo.url}`}
+                                        src={`${API_BASE_URL}${photo.url}`}
                                         alt={`Wedding photo ${photo.filename}`}
                                         className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
                                     />
@@ -131,7 +131,7 @@ const GalleryView = () => {
 
                             <div className="p-4">
                                 <img
-                                    src={`${API}${selectedPhoto.url}`}
+                                    src={`${API_BASE_URL}${selectedPhoto.url}`}
                                     alt={`Wedding photo ${selectedPhoto.filename}`}
                                     className="w-full h-auto max-h-[70vh] object-contain"
                                 />
@@ -144,7 +144,7 @@ const GalleryView = () => {
 
                                     <div className="flex mt-4 sm:mt-0 space-x-3">
                                         <a
-                                            href={`${API}${selectedPhoto.url}`}
+                                            href={`${API_BASE_URL}${selectedPhoto.url}`}
                                             download
                                             className="btn btn-outline btn-christian-outline text-sm py-2"
                                             onClick={(e) => e.stopPropagation()}

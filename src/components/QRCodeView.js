@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
+import { API_BASE_URL } from '../App';
 
 const QRCodeView = () => {
     const { currentPhoto, printPhoto } = useCamera();
@@ -11,7 +12,6 @@ const QRCodeView = () => {
     const [isPrinting, setIsPrinting] = useState(false);
     const [printMessage, setPrintMessage] = useState('');
     //TODO: Add Global API URL for all files
-    const API = "http://192.168.1.70:5000";
     // If no photo is available, redirect to camera
     if (!currentPhoto) {
         navigate('/camera');
@@ -19,8 +19,8 @@ const QRCodeView = () => {
     }
 
     // Construct the image and QR code URLs
-    const imageUrl = `${API}${currentPhoto.url}`;
-    const qrCodeUrl = `${API}${currentPhoto.qrUrl}`;
+    const imageUrl = `${API_BASE_URL}${currentPhoto.url}`;
+    const qrCodeUrl = `${API_BASE_URL}${currentPhoto.qrUrl}`;
 
     // Handle the print request
     const handlePrint = async () => {
