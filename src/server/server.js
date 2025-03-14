@@ -101,27 +101,7 @@ function setupWebSocketServer(server) {
                 stopLiveView();
             }
         });
-        function stopLiveView() {
-            if (liveViewProcess) {
-                console.log('Stopping live view process...');
 
-                // Send a termination signal
-                liveViewProcess.kill('SIGINT');  // You can use 'SIGTERM' or 'SIGKILL' if necessary
-
-                // Wait for the process to exit or timeout
-                liveViewProcess.on('exit', (code) => {
-                    if (code === 0) {
-                        console.log('Live view process ended successfully.');
-                    } else {
-                        console.log(`Live view process ended with error code: ${code}`);
-                    }
-                });
-
-                liveViewProcess = null;  // Clean up after killing the process
-            } else {
-                console.log('No live view process to stop.');
-            }
-        }
         ws.on('error', (error) => {
             console.error('WebSocket client error:', error);
         });
@@ -134,6 +114,27 @@ function setupWebSocketServer(server) {
             console.error('Error sending welcome message:', e);
         }
     });
+}
+function stopLiveView() {
+    if (liveViewProcess) {
+        console.log('Stopping live view process...');
+
+        // Send a termination signal
+        liveViewProcess.kill('SIGINT');  // You can use 'SIGTERM' or 'SIGKILL' if necessary
+
+        // Wait for the process to exit or timeout
+        liveViewProcess.on('exit', (code) => {
+            if (code === 0) {
+                console.log('Live view process ended successfully.');
+            } else {
+                console.log(`Live view process ended with error code: ${code}`);
+            }
+        });
+
+        liveViewProcess = null;  // Clean up after killing the process
+    } else {
+        console.log('No live view process to stop.');
+    }
 }
 let liveViewRetries = 0;
 const maxLiveViewRetries = 5;
