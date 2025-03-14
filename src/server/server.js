@@ -374,7 +374,7 @@ app.get('/api/status', (req, res) => {
 app.get('/api/liveview/check', (req, res) => {
     console.log('Checking camera live view support with direct test...');
 
-    const testProcess = spawn('gphoto2', ['--stdout', '--capture-movie' ,'--frame=1'], {
+    const testProcess = spawn('gphoto2', ['--stdout', '--capture-movie', '--frames=1'], {
         timeout: 5000 // 5 second timeout
     });
 
