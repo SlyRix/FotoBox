@@ -1,274 +1,18 @@
 // client/src/components/CameraView.js
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
-import { API_BASE_URL, API_ENDPOINT } from '../App';
 
 const CameraView = () => {
     const { takePhoto, loading, error } = useCamera();
     const navigate = useNavigate();
     const [countdown, setCountdown] = useState(null);
     const [isReady, setIsReady] = useState(true);
-    const [liveViewSupported, setLiveViewSupported] = useState(false);
-    const [liveViewConnected, setLiveViewConnected] = useState(false);
-    const [liveViewError, setLiveViewError] = useState(null);
-    const [frameCount, setFrameCount] = useState(0);
-    const [lastFrameTime, setLastFrameTime] = useState(null);
-    const [showDebug, setShowDebug] = useState(false); // Toggle for debug info
-    const [connectionAttempts, setConnectionAttempts] = useState(0);
-    const [reconnecting, setReconnecting] = useState(false);
-
-    const canvasRef = useRef(null);
-    const wsRef = useRef(null);
-    const imageRef = useRef(new Image());
-    const reconnectTimeoutRef = useRef(null);
-
-    // Helper function to decode WebSocket close codes
-    const getWebSocketCloseReason = (code) => {
-        const reasons = {
-            1000: "Normal closure",
-            1001: "Going away",
-            1002: "Protocol error",
-            1003: "Unsupported data",
-            1004: "Reserved",
-            1005: "No status received",
-            1006: "Abnormal closure - connection failed",
-            1007: "Invalid frame payload data",
-            1008: "Policy violation",
-            1009: "Message too big",
-            1010: "Missing extension",
-            1011: "Internal server error",
-            1012: "Service restart",
-            1013: "Try again later",
-            1014: "Bad gateway",
-            1015: "TLS handshake error"
-        };
-        return reasons[code] || `Unknown reason (${code})`;
-    };
-
-    // Reset live view connection
-    const resetLiveViewConnection = () => {
-        fetch(`${API_ENDPOINT}/liveview/reset`, {
-            method: 'POST'
-        })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    setConnectionAttempts(0);
-                    setLiveViewError('Connection reset. Attempting to reconnect...');
-                    setTimeout(() => {
-                        initializeWebSocket();
-                    }, 1000);
-                }
-            })
-            .catch(error => {
-                console.error('Error resetting live view:', error);
-            });
-    };
-
-    // Check if the camera supports live view
-    useEffect(() => {
-        console.log("%c[Camera] Checking if camera supports live view...", "color: purple; font-weight: bold");
-        // Set loading state while we check
-        setLiveViewError("Checking camera capabilities...");
-
-        fetch(`${API_ENDPOINT}/liveview/check`)
-            .then(response => response.json())
-            .then(data => {
-                console.log("%c[Camera] Live view support check result:", "color: purple", data);
-
-                if (data.supported) {
-                    console.log("%c[Camera] Live view is supported!", "color: green; font-weight: bold");
-                    setLiveViewSupported(true);
-                    setLiveViewError(null);
-
-                    // Since we know it's supported, attempt to connect right away
-                    initializeWebSocket();
-                } else {
-                    console.log("%c[Camera] Live view is not supported", "color: orange; font-weight: bold");
-                    setLiveViewSupported(false);
-                    setLiveViewError(data.message || "Camera doesn't support live view");
-                }
-            })
-            .catch(err => {
-                console.error('%c[Camera] Error checking live view support:', "color: red", err);
-                setLiveViewError('Failed to check live view support. Server might be unavailable.');
-                setLiveViewSupported(false);
-            });
-    }, [API_ENDPOINT]);
-
-    // Improved WebSocket initialization function
-    const maxReconnectAttempts = 5;
-    const reconnectCooldown = 3000; // 3 seconds
-
-// Update this function in your CameraView.js
-
-    const initializeWebSocket = useCallback(() => {
-        if (countdown !== null) return;
-
-        // Don't try if max attempts reached
-        if (connectionAttempts >= maxReconnectAttempts) {
-            console.error(`[WebSocket] Max attempts reached (${maxReconnectAttempts})`);
-            setLiveViewError('Failed to connect after multiple attempts. Please try again later.');
-            return;
-        }
-
-        // Close any existing connection
-        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-            console.log("[WebSocket] Closing existing connection");
-            wsRef.current.close();
-        }
-
-        // Create the WebSocket URL - IMPORTANT: WebSocket protocol must match the page protocol
-        const isSecure = window.location.protocol === 'https:';
-        const protocol = isSecure ? 'wss:' : 'ws:';
-
-        // Try connecting to the same host as the backend API
-        const urlParts = new URL(API_BASE_URL);
-        const host = urlParts.host; // Get just the host part, not protocol
-        const wsUrl = `${protocol}//${host}`;
-
-        console.log(`[WebSocket] Connecting to: ${wsUrl}`);
-        setConnectionAttempts(prev => prev + 1);
-
-        try {
-            // Create WebSocket connection
-            const ws = new WebSocket(wsUrl);
-            wsRef.current = ws;
-
-            // Connection opened
-            ws.onopen = () => {
-                console.log("%c[WebSocket] Connection OPENED!", "color: green; font-weight: bold");
-                setLiveViewConnected(true);
-                setLiveViewError(null);
-                setConnectionAttempts(0); // Reset counter on success
-                setReconnecting(false);
-
-                // Send an initial ping to verify connection
-                ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
-
-                // Set up ping interval to keep connection alive
-                const pingInterval = setInterval(() => {
-                    if (ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
-                    } else {
-                        clearInterval(pingInterval);
-                    }
-                }, 30000); // Ping every 30 seconds
-
-                // Store interval ID for cleanup
-                return () => clearInterval(pingInterval);
-            };
-
-            // Handle messages from server
-            ws.onmessage = (event) => {
-                try {
-                    const message = JSON.parse(event.data);
-
-                    // Handle different message types
-                    if (message.type === 'frame') {
-                        // Update stats
-                        setFrameCount(prev => prev + 1);
-                        setLastFrameTime(Date.now());
-
-                        // Draw the frame on canvas
-                        const img = new Image();
-                        img.onload = () => {
-                            const canvas = canvasRef.current;
-                            if (!canvas) return;
-
-                            const ctx = canvas.getContext('2d');
-                            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                            // Calculate dimensions to maintain aspect ratio
-                            const scale = Math.min(
-                                canvas.width / img.width,
-                                canvas.height / img.height
-                            );
-
-                            const x = (canvas.width - img.width * scale) / 2;
-                            const y = (canvas.height - img.height * scale) / 2;
-
-                            ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
-                        };
-
-                        img.src = `data:image/jpeg;base64,${message.data}`;
-                    } else if (message.type === 'info') {
-                        console.log('[WebSocket] Server info:', message.message);
-                    } else if (message.type === 'pong') {
-                        console.log('[WebSocket] Received pong from server');
-                    }
-                } catch (error) {
-                    console.error('Error processing WebSocket message:', error);
-                }
-            };
-
-            // Connection closed
-            ws.onclose = (event) => {
-                console.log(`%c[WebSocket] Connection CLOSED: Code=${event.code}, Reason="${event.reason || 'none'}"`, "color: orange;");
-                setLiveViewConnected(false);
-
-                // Handle abnormal closures (codes 1001, 1006, etc.)
-                if (event.code !== 1000) {
-                    console.warn('[WebSocket] Abnormal closure, will retry...');
-                    setReconnecting(true);
-                    setLiveViewError(`Connection closed (${event.code}). Reconnecting...`);
-
-                    // Use exponential backoff
-                    const delay = Math.min(1000 * Math.pow(1.5, connectionAttempts), reconnectCooldown);
-                    console.log(`[WebSocket] Reconnecting in ${delay/1000} seconds...`);
-
-                    reconnectTimeoutRef.current = setTimeout(() => {
-                        initializeWebSocket();
-                    }, delay);
-                }
-            };
-
-            // Connection error
-            ws.onerror = (error) => {
-                console.error("%c[WebSocket] ERROR occurred!", "color: red; font-weight: bold");
-                console.error("[WebSocket] Error details:", error);
-                setLiveViewError('Connection error. Will retry automatically.');
-            };
-
-        } catch (error) {
-            console.error('[WebSocket] Setup error:', error);
-            setLiveViewError(`Setup error: ${error.message}`);
-
-            // Try again after delay
-            reconnectTimeoutRef.current = setTimeout(() => {
-                initializeWebSocket();
-            }, reconnectCooldown);
-        }
-    }, [API_BASE_URL, connectionAttempts, maxReconnectAttempts, reconnectCooldown, countdown]);
-
-    // Add cleanup on component unmount
-    useEffect(() => {
-        return () => {
-            // Clean up WebSocket
-            if (wsRef.current) {
-                wsRef.current.close();
-            }
-
-            // Clean up any pending timeouts
-            if (reconnectTimeoutRef.current) {
-                clearTimeout(reconnectTimeoutRef.current);
-            }
-        };
-    }, []);
 
     // Handle taking a photo with countdown
     const handleTakePhoto = () => {
         setIsReady(false);
-
-        // Disconnect live view during countdown to avoid conflicts
-        if (wsRef.current) {
-            console.log('[WebSocket] Closing WebSocket before taking photo');
-            wsRef.current.close();
-            setLiveViewConnected(false);
-        }
-
         // Start countdown from 5
         setCountdown(5);
     };
@@ -297,15 +41,11 @@ const CameraView = () => {
                         // Reset if there was an error
                         setIsReady(true);
                         setCountdown(null);
-                        // Restart WebSocket connection after photo error
-                        initializeWebSocket();
                     }
                 } catch (err) {
                     console.error('Failed to take photo:', err);
                     setIsReady(true);
                     setCountdown(null);
-                    // Restart WebSocket connection after photo error
-                    initializeWebSocket();
                 }
             };
 
@@ -314,88 +54,7 @@ const CameraView = () => {
         }
 
         return () => clearTimeout(timer);
-    }, [countdown, takePhoto, navigate, initializeWebSocket]);
-
-    function setupWebSocketHandlers(ws, canvasRef) {
-        ws.binaryType = 'arraybuffer';
-
-        ws.onmessage = (event) => {
-            try {
-                // Parse the incoming JSON message
-                const message = JSON.parse(event.data);
-
-                // Check if this is a frame message
-                if (message.type === 'frame') {
-                    // Update stats
-                    setFrameCount(prevCount => prevCount + 1);
-                    setLastFrameTime(Date.now());
-
-                    // Create an image from the base64 data
-                    const img = new Image();
-                    img.onload = () => {
-                        // Draw the image to the canvas when it loads
-                        const canvas = canvasRef.current;
-                        if (canvas) {
-                            const ctx = canvas.getContext('2d');
-                            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                            // Calculate dimensions to maintain aspect ratio
-                            const scale = Math.min(
-                                canvas.width / img.width,
-                                canvas.height / img.height
-                            );
-
-                            const x = (canvas.width - img.width * scale) / 2;
-                            const y = (canvas.height - img.height * scale) / 2;
-
-                            ctx.drawImage(
-                                img,
-                                x, y,
-                                img.width * scale,
-                                img.height * scale
-                            );
-                        }
-                    };
-
-                    // Set the source to the base64 data
-                    img.src = `data:image/jpeg;base64,${message.data}`;
-                } else if (message.type === 'info') {
-                    // Handle info messages
-                    console.log('WebSocket info:', message.message);
-                }
-            } catch (error) {
-                console.error('Error processing WebSocket message:', error);
-            }
-        };
-    }
-    const resetServerRetryCounter = async () => {
-        try {
-            const response = await fetch(`${API_ENDPOINT}/liveview/reset`, {
-                method: 'POST'
-            });
-
-            if (response.ok) {
-                console.log('Successfully reset server retry counter');
-                // Reset our own counters
-                setConnectionAttempts(0);
-                // Try connecting again
-                initializeWebSocket();
-            } else {
-                console.error('Failed to reset server retry counter');
-            }
-        } catch (error) {
-            console.error('Error resetting server retry counter:', error);
-        }
-    };
-
-    // Calculate FPS (when frames are being received)
-    const getFps = () => {
-        if (!lastFrameTime || frameCount === 0) return 'N/A';
-        const secondsActive = (Date.now() - lastFrameTime) / 1000;
-        // Only show FPS if we received a frame in the last 3 seconds
-        if (secondsActive > 3) return 'Inactive';
-        return (frameCount / secondsActive).toFixed(1);
-    };
+    }, [countdown, takePhoto, navigate]);
 
     // Early return for loading state
     if (loading && countdown === null) {
@@ -417,14 +76,6 @@ const CameraView = () => {
                 className="absolute top-8 left-8 text-christian-accent hover:text-wedding-love transition-colors"
             >
                 ← Back
-            </button>
-
-            {/* Debug toggle */}
-            <button
-                onClick={() => setShowDebug(!showDebug)}
-                className="absolute top-8 right-8 text-sm text-gray-500 hover:text-gray-700"
-            >
-                {showDebug ? 'Hide Debug' : 'Show Debug'}
             </button>
 
             <div className="z-10 text-center">
@@ -470,85 +121,27 @@ const CameraView = () => {
                         )}
                     </motion.div>
                 ) : (
-                    // Camera ready state with live view if available
+                    // Camera ready state with placeholder
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         className="flex flex-col items-center"
                     >
                         <div className="bg-black p-4 rounded-lg w-full max-w-xl h-80 mb-8 border-2 border-gray-800 flex items-center justify-center overflow-hidden relative">
-                            {liveViewSupported && !liveViewError ? (
-                                liveViewConnected ? (
-                                    <>
-                                        {/* Live view canvas */}
-                                        <canvas
-                                            ref={canvasRef}
-                                            width="640"
-                                            height="480"
-                                            className="max-w-full max-h-full object-contain bg-black"
-                                        />
-
-                                        {/* FPS Counter */}
-                                        {showDebug && (
-                                            <div className="absolute top-2 right-2 text-white bg-black/50 px-2 py-1 rounded text-xs">
-                                                FPS: {getFps()} | Frames: {frameCount}
-                                            </div>
-                                        )}
-                                    </>
-                                ) : (
-                                    // Show connecting message
-                                    <div className="text-center text-white/80">
-                                        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mx-auto mb-4"></div>
-                                        <p>{reconnecting ? 'Reconnecting to camera...' : 'Connecting to camera live view...'}</p>
-                                        <p className="text-xs mt-1 text-white/50">Attempt #{connectionAttempts}</p>
-                                        {liveViewError && (
-                                            <p className="text-red-300 mt-2 text-sm">{liveViewError}</p>
-                                        )}
-                                    </div>
-                                )
-                            ) : (
-                                // Fallback when live view is not available
-                                <div className="text-center text-white/80">
-                                    <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-white/20 flex items-center justify-center">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-10 h-10">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
-                                        </svg>
-                                    </div>
-                                    <p className="text-lg">Camera View</p>
-                                    <p className="text-sm opacity-70 mt-2">
-                                        {liveViewError
-                                            ? `Live view not available: ${liveViewError}`
-                                            : "Stand here and press the button when you're ready!"}
-                                    </p>
+                            {/* Simple camera placeholder */}
+                            <div className="text-center text-white/80">
+                                <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-white/20 flex items-center justify-center">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-10 h-10">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                                    </svg>
                                 </div>
-                            )}
-                        </div>
-
-                        {/* Debug info */}
-                        {showDebug && (
-                            <div className="mb-4 p-3 bg-gray-100 text-gray-700 rounded-lg text-sm text-left w-full max-w-xl">
-                                <h3 className="font-bold">Debug Info:</h3>
-                                <ul className="list-disc pl-5 mt-1">
-                                    <li>Live view supported: {liveViewSupported ? 'Yes' : 'No'}</li>
-                                    <li>WebSocket connected: {liveViewConnected ? 'Yes' : 'No'}</li>
-                                    <li>Connection attempts: {connectionAttempts}</li>
-                                    <li>Reconnecting: {reconnecting ? 'Yes' : 'No'}</li>
-                                    <li>Frames received: {frameCount}</li>
-                                    <li>FPS: {getFps()}</li>
-                                    <li>WebSocket URL: wss://{API_BASE_URL.replace(/^https?:\/\//, '')}</li>
-                                    {liveViewError && <li className="text-red-500">Error: {liveViewError}</li>}
-                                </ul>
-
-                                {/* Reset connection button for troubleshooting */}
-                                <button
-                                    onClick={resetLiveViewConnection}
-                                    className="mt-2 text-sm px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-                                >
-                                    Reset Live View Connection
-                                </button>
+                                <p className="text-lg">Camera Ready</p>
+                                <p className="text-sm opacity-70 mt-2">
+                                    Stand here and press the button when you're ready to take a photo!
+                                </p>
                             </div>
-                        )}
+                        </div>
 
                         {error && (
                             <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
@@ -563,31 +156,9 @@ const CameraView = () => {
                         >
                             {loading ? 'Processing...' : 'Take Photo'}
                         </button>
-
-                        {/* Manual reconnect button for troubleshooting */}
-                        {showDebug && liveViewSupported && (
-                            <button
-                                onClick={initializeWebSocket}
-                                className="mt-4 text-sm underline text-gray-500 hover:text-gray-700"
-                            >
-                                Manually reconnect WebSocket
-                            </button>
-                        )}
                     </motion.div>
                 )}
             </div>
-            {connectionAttempts >= maxReconnectAttempts && (
-                <div className="mt-4 text-center">
-                    <p className="text-red-500 mb-2">Maximum connection attempts reached.</p>
-                    <button
-                        onClick={resetServerRetryCounter}
-                        className="btn btn-outline btn-hindu-outline text-sm py-2"
-                    >
-                        Reset and Try Again
-                    </button>
-                </div>
-            )}
-
         </div>
     );
 };
