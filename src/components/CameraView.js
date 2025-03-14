@@ -79,171 +79,71 @@ const CameraView = () => {
     }, [API_ENDPOINT]);
 
     // Improved WebSocket initialization function
+    const maxReconnectAttempts = 5;
+    const reconnectCooldown = 3000; // 3 seconds
+
     const initializeWebSocket = useCallback(() => {
-        // Don't attempt connection during countdown
         if (countdown !== null) return;
 
-        // Track connection attempts
-        setConnectionAttempts(prev => prev + 1);
-
-        if (reconnecting) {
-            console.log(`[WebSocket] Reconnection attempt #${connectionAttempts}...`);
-        } else {
-            console.log("%c[WebSocket] Initializing connection...", "color: blue; font-weight: bold");
+        // Prevent infinite retries
+        if (connectionAttempts >= maxReconnectAttempts) {
+            console.error(`[WebSocket] Max reconnect attempts reached (${maxReconnectAttempts}).`);
+            setLiveViewError('Failed to connect to live view. Please try again later or restart the camera.');
+            return;
         }
 
-        // Clean up previous connection if it exists
+        console.log(`[WebSocket] Attempting connection (#${connectionAttempts + 1})...`);
+        setConnectionAttempts((prev) => prev + 1);
+
         if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
             console.log("[WebSocket] Closing existing connection");
             wsRef.current.close();
         }
 
-        // Clear any pending reconnect timeouts
-        if (reconnectTimeoutRef.current) {
-            clearTimeout(reconnectTimeoutRef.current);
-            reconnectTimeoutRef.current = null;
-        }
-
-        // IMPORTANT: Always use WSS with HTTPS sites
         const wsProtocol = 'wss:';
         const wsHost = API_BASE_URL.replace(/^https?:\/\//, '').replace(/\/api$/, '');
         const wsUrl = `${wsProtocol}//${wsHost}`;
 
-        console.log(`[WebSocket] Connecting to: ${wsUrl}`);
-
         try {
             const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
-
-            // Set binary type explicitly
             ws.binaryType = 'arraybuffer';
-            console.log(`[WebSocket] Binary type set to: ${ws.binaryType}`);
 
-            // Connection opened
             ws.onopen = () => {
                 console.log("%c[WebSocket] Connection OPENED successfully!", "color: green; font-weight: bold");
                 setLiveViewConnected(true);
                 setLiveViewError(null);
-                setReconnecting(false);
-                // Reset frame count on new connection
-                setFrameCount(0);
-                setLastFrameTime(Date.now());
+                setConnectionAttempts(0); // Reset attempts on success
             };
 
-            // Connection closed
             ws.onclose = (event) => {
-                console.log(`%c[WebSocket] Connection CLOSED: Code=${event.code}, Reason="${event.reason || 'none'}"`,
-                    "color: orange; font-weight: bold");
-                console.log(`[WebSocket] Close code meaning: ${getWebSocketCloseReason(event.code)}`);
+                console.log(`%c[WebSocket] Connection CLOSED: Code=${event.code}, Reason="${event.reason || 'none'}"`, "color: orange; font-weight: bold");
 
-                // Only update UI state if we were previously connected
-                // This prevents flickering during initial connection attempts
-                if (liveViewConnected) {
+                if (event.code === 1006 || event.code === 1005) {
+                    console.warn('[WebSocket] Abnormal closure, retrying...');
                     setLiveViewConnected(false);
-                }
 
-                // On first connection attempt with code 1005/1006, try reconnecting immediately
-                // These codes often happen during initial proxy negotiation
-                const isInitialConnectionIssue =
-                    (connectionAttempts <= 2) && (event.code === 1005 || event.code === 1006);
+                    // Use exponential backoff for retries
+                    const delay = Math.min(1000 * Math.pow(1.5, connectionAttempts), reconnectCooldown);
+                    console.log(`[WebSocket] Reconnecting in ${delay / 1000} seconds...`);
 
-                // Try to reconnect unless we're in countdown mode
-                if (!countdown) {
-                    if (isInitialConnectionIssue) {
-                        // Immediate reconnect for first attempt with common proxy error
-                        console.log("[WebSocket] Initial connection closed, reconnecting immediately...");
+                    setTimeout(() => {
                         initializeWebSocket();
-                    } else {
-                        // For other errors or subsequent attempts, use exponential backoff
-                        const delay = Math.min(1000 * Math.pow(1.5, Math.min(connectionAttempts, 5)), 10000);
-                        console.log(`[WebSocket] Scheduling reconnection in ${delay}ms...`);
-                        setReconnecting(true);
-
-                        reconnectTimeoutRef.current = setTimeout(() => {
-                            console.log("[WebSocket] Attempting to reconnect...");
-                            initializeWebSocket();
-                        }, delay);
-                    }
+                    }, delay);
                 }
             };
 
-            // Connection error
             ws.onerror = (error) => {
                 console.error("%c[WebSocket] ERROR occurred!", "color: red; font-weight: bold");
                 console.error("[WebSocket] Error details:", error);
-
-                setLiveViewError('Connection error. Check browser console for details.');
+                setLiveViewError('Connection error. Retrying...');
             };
 
-            // Handle incoming messages
-            ws.onmessage = (event) => {
-                // Process frames and update UI
-                // Check if it's a text message (like the welcome message) or binary frame data
-                if (typeof event.data === 'string') {
-                    try {
-                        const data = JSON.parse(event.data);
-                        console.log("[WebSocket] Received text message:", data);
-                    } catch (e) {
-                        console.log("[WebSocket] Received string data (not JSON):", event.data);
-                    }
-                } else {
-                    // This is binary frame data
-                    setFrameCount(prev => prev + 1);
-                    setLastFrameTime(Date.now());
-
-                    // Log frame data occasionally
-                    if (frameCount % 30 === 0) {
-                        console.log(`[WebSocket] Received frame #${frameCount}: ${event.data.byteLength} bytes`);
-                    }
-
-                    try {
-                        // Process the binary data
-                        const blob = new Blob([event.data], { type: 'image/jpeg' });
-                        const url = URL.createObjectURL(blob);
-
-                        imageRef.current.onload = () => {
-                            const canvas = canvasRef.current;
-                            if (canvas) {
-                                const ctx = canvas.getContext('2d');
-                                ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                                // Calculate scaling to maintain aspect ratio while filling canvas
-                                const hRatio = canvas.width / imageRef.current.width;
-                                const vRatio = canvas.height / imageRef.current.height;
-                                const ratio = Math.min(hRatio, vRatio);
-
-                                // Center the image
-                                const centerX = (canvas.width - imageRef.current.width * ratio) / 2;
-                                const centerY = (canvas.height - imageRef.current.height * ratio) / 2;
-
-                                // Draw the image with proper scaling
-                                ctx.drawImage(
-                                    imageRef.current,
-                                    0, 0, imageRef.current.width, imageRef.current.height,
-                                    centerX, centerY, imageRef.current.width * ratio, imageRef.current.height * ratio
-                                );
-
-                                // Clean up the blob URL to avoid memory leaks
-                                URL.revokeObjectURL(url);
-                            }
-                        };
-
-                        imageRef.current.onerror = (imgError) => {
-                            console.error("[WebSocket] Error loading image:", imgError);
-                            URL.revokeObjectURL(url);
-                        };
-
-                        imageRef.current.src = url;
-                    } catch (error) {
-                        console.error('[WebSocket] Error processing frame:', error);
-                    }
-                }
-            };
         } catch (error) {
             console.error('[WebSocket] Setup error:', error);
             setLiveViewError(`Failed to set up WebSocket: ${error.message}`);
         }
-    }, [API_BASE_URL, countdown, connectionAttempts, liveViewConnected, reconnecting]);
+    }, [API_BASE_URL, countdown, connectionAttempts]);
 
     // Add cleanup on component unmount
     useEffect(() => {

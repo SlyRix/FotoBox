@@ -115,7 +115,9 @@ function setupWebSocketServer(server) {
         }
     });
 }
-
+let liveViewRetries = 0;
+const maxLiveViewRetries = 5;
+const liveViewCooldown = 3000;
 // Start the live view process
 function startLiveView() {
     if (liveViewRetries >= maxLiveViewRetries) {
