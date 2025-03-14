@@ -1,4 +1,4 @@
-// client/src/components/CameraView.js
+// Updated CameraView.js with fixed stream URL
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
@@ -9,26 +9,44 @@ const CameraView = () => {
         takePhoto,
         loading,
         error,
-        previewImage,
-        previewStatus,
-        startPreview,
-        stopPreview,
         cameraInfo
     } = useCamera();
 
     const navigate = useNavigate();
     const [countdown, setCountdown] = useState(null);
     const [isReady, setIsReady] = useState(true);
+    const [streamActive, setStreamActive] = useState(false);
 
-    // Start webcam preview when component mounts
+    // Hard-coded stream URL that we know works
+    const STREAM_URL = "https://fotobox-sh.slyrix.com//?action=stream";
+    const SNAPSHOT_URL = "https://fotobox-sh.slyrix.com/?action=snapshot";
+
+    // Check if webcam stream is available on mount
     useEffect(() => {
-        startPreview();
-
-        // Stop preview when unmounting
-        return () => {
-            stopPreview();
+        // We'll use a simple image load test to see if the stream is active
+        const img = new Image();
+        img.onload = () => {
+            console.log("Stream connection successful!");
+            setStreamActive(true);
         };
-    }, [startPreview, stopPreview]);
+        img.onerror = () => {
+            console.error("Failed to connect to stream");
+            setStreamActive(false);
+        };
+
+        // Add timestamp to avoid caching
+        img.src = `${SNAPSHOT_URL}&t=${Date.now()}`;
+
+        // Poll every 5 seconds to check if stream becomes available
+        const interval = setInterval(() => {
+            const newImg = new Image();
+            newImg.onload = () => setStreamActive(true);
+            newImg.onerror = () => setStreamActive(false);
+            newImg.src = `${SNAPSHOT_URL}&t=${Date.now()}`;
+        }, 5000);
+
+        return () => clearInterval(interval);
+    }, []);
 
     // Handle taking a photo with countdown
     const handleTakePhoto = () => {
@@ -88,24 +106,6 @@ const CameraView = () => {
         );
     }
 
-    // Get status message based on preview status
-    const getStatusMessage = () => {
-        switch (previewStatus) {
-            case 'connecting':
-                return 'Connecting to camera...';
-            case 'active':
-                return cameraInfo.cameraAvailable
-                    ? 'Preview active, using DSLR for final photo'
-                    : 'Camera connected';
-            case 'paused':
-                return 'Camera paused (taking photo)';
-            case 'error':
-                return 'Camera error. Please try again.';
-            default:
-                return 'Camera not connected';
-        }
-    };
-
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10">
             {/* Back button */}
@@ -159,24 +159,22 @@ const CameraView = () => {
                         )}
                     </motion.div>
                 ) : (
-                    // Camera view with webcam preview
+                    // Camera view with mjpeg stream
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         className="flex flex-col items-center"
                     >
                         <div className="bg-black p-4 rounded-lg w-full max-w-xl aspect-[4/3] mb-8 border-2 border-gray-800 flex items-center justify-center overflow-hidden relative">
-                            {/* Webcam preview image */}
-                            {previewImage && previewStatus === 'active' && (
+                            {streamActive ? (
+                                // MJPEG Stream - using direct IP address
                                 <img
-                                    src={previewImage}
-                                    alt="Webcam preview"
-                                    className="w-full h-full object-contain"
+                                    src={STREAM_URL}
+                                    alt="Webcam stream"
+                                    className="w-full h-full object-cover"
                                 />
-                            )}
-
-                            {/* Preview status and indicators */}
-                            {(!previewImage || previewStatus !== 'active') && (
+                            ) : (
+                                // Display message if stream is not available
                                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white/80">
                                     <div className="w-20 h-20 mb-4 rounded-full bg-white/20 flex items-center justify-center">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-10 h-10">
@@ -184,36 +182,25 @@ const CameraView = () => {
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
                                         </svg>
                                     </div>
-
-                                    {previewStatus === 'connecting' && (
-                                        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mb-2"></div>
-                                    )}
-
                                     <p className="text-lg">
-                                        {getStatusMessage()}
+                                        Webcam stream not available
                                     </p>
-
-                                    {previewStatus === 'error' && (
-                                        <button
-                                            onClick={startPreview}
-                                            className="mt-4 py-2 px-4 bg-white/20 hover:bg-white/30 rounded text-sm"
-                                        >
-                                            Reconnect Camera
-                                        </button>
-                                    )}
+                                    <p className="text-sm mt-2">
+                                        Please make sure the webcam server is running
+                                    </p>
                                 </div>
                             )}
 
-                            {/* Live indicator when preview is active */}
-                            {previewStatus === 'active' && (
+                            {/* Live indicator when stream is active */}
+                            {streamActive && (
                                 <div className="absolute top-2 right-2 flex items-center">
                                     <span className="animate-pulse w-3 h-3 bg-red-500 rounded-full mr-2"></span>
                                     <span className="text-xs text-white/70">LIVE</span>
                                 </div>
                             )}
 
-                            {/* DSLR indicator when both webcam and camera are available */}
-                            {cameraInfo.cameraAvailable && cameraInfo.webcamAvailable && previewStatus === 'active' && (
+                            {/* DSLR indicator when camera is available */}
+                            {cameraInfo.cameraAvailable && streamActive && (
                                 <div className="absolute bottom-2 left-2 flex items-center bg-black/50 rounded-full px-2 py-1">
                                     <span className="text-xs text-green-400">DSLR Ready</span>
                                 </div>
@@ -228,29 +215,24 @@ const CameraView = () => {
 
                         <button
                             onClick={handleTakePhoto}
-                            disabled={!isReady || loading || previewStatus !== 'active'}
+                            disabled={!isReady || loading || !streamActive}
                             className={`btn btn-primary btn-christian w-64 text-center text-xl ${
-                                !isReady || loading || previewStatus !== 'active' ? 'opacity-50 cursor-not-allowed' : ''
+                                !isReady || loading || !streamActive ? 'opacity-50 cursor-not-allowed' : ''
                             }`}
                         >
                             {loading ? 'Processing...' : 'Take Photo'}
                         </button>
 
-                        {previewStatus !== 'active' && (
-                            <p className="mt-2 text-sm text-gray-500">
-                                {previewStatus === 'connecting'
-                                    ? 'Please wait for camera to connect...'
-                                    : 'Camera must be connected to take a photo'
-                                }
+                        {!streamActive && (
+                            <p className="mt-2 text-sm text-red-500">
+                                Please start the webcam stream server
                             </p>
                         )}
 
                         {/* Camera info message */}
-                        {previewStatus === 'active' && (
-                            <p className="mt-2 text-sm text-gray-500">
-                                {cameraInfo.statusMessage}
-                            </p>
-                        )}
+                        <p className="mt-2 text-sm text-gray-500">
+                            {cameraInfo.statusMessage}
+                        </p>
                     </motion.div>
                 )}
             </div>
