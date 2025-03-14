@@ -30,7 +30,31 @@ const PORT = process.env.PORT || 5000;
 const captureInProgress = { status: false };
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: function(origin, callback) {
+        // Allow requests with no origin (like mobile apps, curl requests)
+        if (!origin) return callback(null, true);
+
+        // List of allowed origins
+        const allowedOrigins = [
+            'http://localhost:3000',
+            'https://localhost:3000',
+            'http://fotobox.slyrix.com',
+            'https://fotobox.slyrix.com'
+        ];
+
+        if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+            callback(null, true);
+        } else {
+            console.log('CORS blocked request from:', origin);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
+    credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204
+}));
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -39,7 +63,12 @@ const PHOTOS_DIR = path.join(__dirname, 'public', 'photos');
 if (!fs.existsSync(PHOTOS_DIR)) {
     fs.mkdirSync(PHOTOS_DIR, { recursive: true });
 }
-
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', req.headers.origin);
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.header('Access-Control-Allow-Credentials', true);
+    next();
+});
 // Create QR codes directory if it doesn't exist
 const QR_DIR = path.join(__dirname, 'public', 'qrcodes');
 if (!fs.existsSync(QR_DIR)) {
@@ -136,16 +165,6 @@ function stopLiveView() {
     } else {
         console.log('No live view process to stop.');
     }
-}
-
-let liveViewRetries = 0;
-const maxLiveViewRetries = 5;
-const liveViewCooldown = 3000;
-
-// Function to reset live view retries
-function resetLiveViewRetries() {
-    console.log('Resetting live view retry counter');
-    liveViewRetries = 0;
 }
 
 // Start the live view process
@@ -454,15 +473,6 @@ app.post('/api/photos/print', (req, res) => {
     res.json({
         success: true,
         message: 'Print request received. Printing functionality will be implemented later.'
-    });
-});
-
-// Reset live view retries endpoint
-app.post('/api/liveview/reset', (req, res) => {
-    resetLiveViewRetries();
-    res.json({
-        success: true,
-        message: 'Live view retry counter has been reset'
     });
 });
 
