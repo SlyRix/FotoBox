@@ -223,19 +223,21 @@ function startVideoStream(clientId) {
         setTimeout(() => {
             console.log('Launching ffmpeg...');
             const ffmpegProcess = spawn('ffmpeg', [
-                '-i', 'pipe:0',
-                '-f', 'mjpeg',
-                '-q:v', '3',
-                '-r', '15',
-                '-s', '640x480',
-                '-preset', 'ultrafast',
-                '-tune', 'zerolatency',
-                'pipe:1'
+                '-f', 'mjpeg',           // Specify input format
+                '-i', 'pipe:0',          // Input from stdin
+                '-c:v', 'mjpeg',         // Output codec: mjpeg
+                '-q:v', '5',             // Quality (increased slightly for stability)
+                '-r', '15',              // Frame rate
+                '-s', '640x480',         // Resolution
+                '-fflags', 'nobuffer',   // Reduce buffering
+                '-flags', 'low_delay',   // Reduce latency
+                '-preset', 'ultrafast',  // Fastest encoding
+                '-tune', 'zerolatency',  // Minimize latency
+                '-f', 'mjpeg',           // Output format
+                'pipe:1'                 // Output to stdout
             ]);
 
             // Connect the processes after ffmpeg is started
-            gphoto2Process.stdout.pipe(ffmpegProcess.stdin);
-            // Connect the processes: gphoto2 stdout -> ffmpeg stdin
             gphoto2Process.stdout.pipe(ffmpegProcess.stdin);
 
             // This is our combined process
@@ -247,7 +249,21 @@ function startVideoStream(clientId) {
                     ffmpegProcess.kill();
                 }
             };
-
+            gphoto2Process.stdout.on('error', (err) => {
+                console.error(`gphoto2 stdout pipe error: ${err.message}`);
+                broadcastStreamError(`Camera stream pipe error: ${err.message}`);
+            });
+            ffmpegProcess.stdin.on('error', (err) => {
+                console.error(`ffmpeg stdin pipe error: ${err.message}`);
+                // Don't kill the processes for EPIPE if they're otherwise still working
+                if (err.code !== 'EPIPE') {
+                    broadcastStreamError(`Video processing pipe error: ${err.message}`);
+                    if (videoStreamProcess) {
+                        videoStreamProcess.kill();
+                        videoStreamProcess = null;
+                    }
+                }
+            });
             // Handle gphoto2 process errors
             gphoto2Process.on('error', (err) => {
                 console.error(`Error starting gphoto2: ${err.message}`);
