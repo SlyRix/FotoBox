@@ -1,4 +1,4 @@
-// Simplified CameraView.js with cleaner UI for guests
+// Improved CameraView.js with larger UI for iPad and camera visibility during countdown
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
@@ -87,111 +87,103 @@ const CameraView = () => {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-wedding-love mx-auto mb-4"></div>
-                    <p className="text-xl text-gray-700">Loading camera...</p>
+                    <div className="animate-spin rounded-full h-24 w-24 border-t-8 border-b-8 border-wedding-love mx-auto mb-6"></div>
+                    <p className="text-3xl text-gray-700">Loading camera...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen flex flex-col items-center justify-center bg-wedding-background relative">
-            {/* Simple back button */}
-            <button
-                onClick={() => navigate('/')}
-                className="absolute top-6 left-6 flex items-center text-christian-accent hover:text-wedding-love transition-colors"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
-                </svg>
-                Back
-            </button>
-
-            <div className="z-10 text-center px-4 w-full max-w-2xl">
-                <AnimatePresence mode="wait">
-                    {countdown !== null ? (
-                        // Countdown display
-                        <motion.div
-                            key="countdown"
-                            initial={{ scale: 0.8, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.8, opacity: 0 }}
-                            className="flex flex-col items-center"
-                        >
-                            <div className="bg-white/90 p-8 rounded-full w-48 h-48 flex items-center justify-center mb-8 shadow-lg">
-                                {typeof countdown === 'string' ? (
-                                    // "SMILE!" display
-                                    <motion.span
-                                        key="smile"
-                                        initial={{ scale: 0.8, opacity: 0 }}
-                                        animate={{ scale: 1, opacity: 1 }}
-                                        className="text-4xl font-bold text-wedding-love"
-                                    >
-                                        {countdown}!
-                                    </motion.span>
-                                ) : (
-                                    // Number countdown display
-                                    <motion.span
-                                        key={countdown}
-                                        initial={{ scale: 1.5, opacity: 0 }}
-                                        animate={{ scale: 1, opacity: 1 }}
-                                        exit={{ scale: 0.5, opacity: 0 }}
-                                        className="text-7xl font-bold text-wedding-love"
-                                    >
-                                        {countdown}
-                                    </motion.span>
-                                )}
-                            </div>
-                        </motion.div>
-                    ) : (
-                        // Camera view with mjpeg stream
-                        <motion.div
-                            key="camera"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex flex-col items-center"
-                        >
-                            <h2 className="text-2xl md:text-3xl font-display text-christian-text mb-6">
-                                Ready for your photo!
-                            </h2>
-
-                            <div className="w-full max-w-xl aspect-[4/3] mb-8 overflow-hidden rounded-lg border-4 border-wedding-gold/20 shadow-lg relative">
-                                {/* Camera view */}
-                                <div className="absolute inset-0 bg-black flex items-center justify-center">
-                                    {streamActive ? (
-                                        // MJPEG Stream
-                                        <img
-                                            src={STREAM_URL}
-                                            alt="Camera preview"
-                                            className="w-full h-full object-cover"
-                                        />
-                                    ) : (
-                                        // Display message if stream is not available
-                                        <div className="flex flex-col items-center justify-center text-white/80 h-full">
-                                            <div className="text-5xl mb-4">📷</div>
-                                            <p className="text-lg">
-                                                Camera loading...
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <motion.button
-                                whileTap={{ scale: 0.95 }}
-                                onClick={handleTakePhoto}
-                                disabled={!isReady || loading || !streamActive}
-                                className={`btn btn-primary btn-christian w-64 text-center text-xl font-semibold shadow-lg ${
-                                    !isReady || loading || !streamActive ? 'opacity-70 cursor-not-allowed' : ''
-                                }`}
-                            >
-                                Take Photo
-                            </motion.button>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+        <div className="min-h-screen flex flex-col relative">
+            {/* Full-width camera view - optimized for landscape */}
+            <div className="absolute inset-0 bg-black">
+                {streamActive ? (
+                    <img
+                        src={STREAM_URL}
+                        alt="Camera preview"
+                        className="w-full h-full object-contain"
+                    />
+                ) : (
+                    <div className="flex flex-col items-center justify-center text-white/80 h-full">
+                        <div className="text-8xl mb-6">📷</div>
+                        <p className="text-4xl">
+                            Camera loading...
+                        </p>
+                    </div>
+                )}
             </div>
+
+            {/* Overlay UI elements - optimized for landscape */}
+            <div className="absolute inset-0 pointer-events-none">
+                {/* Top left - back button */}
+                <div className="absolute top-4 left-4">
+                    <button
+                        onClick={() => navigate('/')}
+                        className="flex items-center justify-center bg-hindu-secondary text-white hover:bg-hindu-accent transition-colors text-xl py-4 px-6 rounded-full shadow-lg pointer-events-auto"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+
+                {/* Title at top */}
+                <div className="absolute top-4 left-0 right-0 text-center pointer-events-none">
+                    <div className="inline-block bg-hindu-secondary/80 text-white px-6 py-2 rounded-full">
+                        <h2 className="text-2xl font-display">Ready for your photo!</h2>
+                    </div>
+                </div>
+
+                {/* Bottom area - take photo button */}
+                <div className="absolute bottom-8 left-0 right-0 flex justify-center">
+                    <motion.button
+                        whileTap={{ scale: 0.95 }}
+                        onClick={handleTakePhoto}
+                        disabled={!isReady || loading || !streamActive}
+                        className={`btn btn-primary btn-hindu py-10 px-10 text-center text-4xl font-semibold shadow-xl rounded-full pointer-events-auto w-64 ${
+                            !isReady || loading || !streamActive ? 'opacity-70 cursor-not-allowed' : ''
+                        }`}
+                    >
+                        Take Photo
+                    </motion.button>
+                </div>
+            </div>
+
+            {/* Overlay the countdown on top of everything */}
+            <AnimatePresence>
+                {countdown !== null && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 flex items-center justify-center bg-black/30 z-20 pointer-events-none"
+                    >
+                        <div className="bg-white/90 p-10 rounded-full w-64 h-64 flex items-center justify-center shadow-lg">
+                            {typeof countdown === 'string' ? (
+                                <motion.span
+                                    key="smile"
+                                    initial={{ scale: 0.8, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    className="text-6xl font-bold text-wedding-love"
+                                >
+                                    {countdown}!
+                                </motion.span>
+                            ) : (
+                                <motion.span
+                                    key={countdown}
+                                    initial={{ scale: 1.5, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    exit={{ scale: 0.5, opacity: 0 }}
+                                    className="text-9xl font-bold text-wedding-love"
+                                >
+                                    {countdown}
+                                </motion.span>
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };

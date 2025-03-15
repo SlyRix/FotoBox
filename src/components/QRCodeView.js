@@ -87,11 +87,6 @@ const QRCodeView = () => {
                                     className="w-48 h-48"
                                 />
                             </div>
-
-                            <p className="text-sm text-gray-500 mb-4 text-center">
-                                You can also access all photos from our wedding at<br />
-                                <span className="font-semibold">http://fotobooth.rushelsivani.wedding</span>
-                            </p>
                         </div>
                     </div>
 
