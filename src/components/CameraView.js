@@ -1,17 +1,11 @@
-// Updated CameraView.js with fixed stream URL
+// Simplified CameraView.js with cleaner UI for guests
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const CameraView = () => {
-    const {
-        takePhoto,
-        loading,
-        error,
-        cameraInfo
-    } = useCamera();
-
+    const { takePhoto, loading } = useCamera();
     const navigate = useNavigate();
     const [countdown, setCountdown] = useState(null);
     const [isReady, setIsReady] = useState(true);
@@ -23,21 +17,16 @@ const CameraView = () => {
 
     // Check if webcam stream is available on mount
     useEffect(() => {
-        // We'll use a simple image load test to see if the stream is active
         const img = new Image();
         img.onload = () => {
-            console.log("Stream connection successful!");
             setStreamActive(true);
         };
         img.onerror = () => {
-            console.error("Failed to connect to stream");
             setStreamActive(false);
         };
-
-        // Add timestamp to avoid caching
         img.src = `${SNAPSHOT_URL}&t=${Date.now()}`;
 
-        // Poll every 5 seconds to check if stream becomes available
+        // Poll occasionally to check if stream becomes available
         const interval = setInterval(() => {
             const newImg = new Image();
             newImg.onload = () => setStreamActive(true);
@@ -64,13 +53,12 @@ const CameraView = () => {
             // Continue countdown
             timer = setTimeout(() => setCountdown(countdown - 1), 1000);
         } else if (countdown === 0) {
-            // Show "SMILEEE!" message
-            setCountdown("SMILEEE!");
+            // Show "SMILE!" message
+            setCountdown("SMILE!");
 
             // Take photo after showing the smile message
             const capturePhoto = async () => {
                 try {
-                    console.log('Taking photo...');
                     const photo = await takePhoto();
                     if (photo) {
                         // Navigate to preview page
@@ -87,7 +75,7 @@ const CameraView = () => {
                 }
             };
 
-            // Short delay to show the "SMILEEE!" message before taking the photo
+            // Short delay to show the "SMILE!" message
             setTimeout(capturePhoto, 500);
         }
 
@@ -97,7 +85,7 @@ const CameraView = () => {
     // Early return for loading state
     if (loading && countdown === null) {
         return (
-            <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10">
+            <div className="min-h-screen flex flex-col items-center justify-center">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-wedding-love mx-auto mb-4"></div>
                     <p className="text-xl text-gray-700">Loading camera...</p>
@@ -107,134 +95,102 @@ const CameraView = () => {
     }
 
     return (
-        <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10">
-            {/* Back button */}
+        <div className="min-h-screen flex flex-col items-center justify-center bg-wedding-background relative">
+            {/* Simple back button */}
             <button
                 onClick={() => navigate('/')}
-                className="absolute top-8 left-8 text-christian-accent hover:text-wedding-love transition-colors"
+                className="absolute top-6 left-6 flex items-center text-christian-accent hover:text-wedding-love transition-colors"
             >
-                ← Back
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
+                </svg>
+                Back
             </button>
 
-            <div className="z-10 text-center">
-                {countdown !== null ? (
-                    // Countdown display
-                    <motion.div
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        className="flex flex-col items-center"
-                    >
-                        <div className="bg-white/90 p-8 rounded-full w-64 h-64 flex items-center justify-center mb-8 shadow-lg">
-                            {typeof countdown === 'string' ? (
-                                // "SMILEEE!" display
-                                <motion.div
-                                    key="smile"
-                                    initial={{ scale: 0.5, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    className="flex flex-col items-center"
-                                >
-                                    <span className="text-5xl font-bold text-wedding-love">
-                                        SMILEEE!
-                                    </span>
-                                    <span className="text-3xl mt-2">
-                                        😊📸
-                                    </span>
-                                </motion.div>
-                            ) : (
-                                // Number countdown display
-                                <motion.span
-                                    key={countdown}
-                                    initial={{ scale: 2, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    exit={{ scale: 0.5, opacity: 0 }}
-                                    className="text-8xl font-bold text-wedding-love"
-                                >
-                                    {countdown}
-                                </motion.span>
-                            )}
-                        </div>
-
-                        {typeof countdown !== 'string' && (
-                            <h2 className="text-2xl font-bold">Get ready to smile!</h2>
-                        )}
-                    </motion.div>
-                ) : (
-                    // Camera view with mjpeg stream
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="flex flex-col items-center"
-                    >
-                        <div className="bg-black p-4 rounded-lg w-full max-w-xl aspect-[4/3] mb-8 border-2 border-gray-800 flex items-center justify-center overflow-hidden relative">
-                            {streamActive ? (
-                                // MJPEG Stream - using direct IP address
-                                <img
-                                    src={STREAM_URL}
-                                    alt="Webcam stream"
-                                    className="w-full h-full object-cover"
-                                />
-                            ) : (
-                                // Display message if stream is not available
-                                <div className="absolute inset-0 flex flex-col items-center justify-center text-white/80">
-                                    <div className="w-20 h-20 mb-4 rounded-full bg-white/20 flex items-center justify-center">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-10 h-10">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
-                                        </svg>
-                                    </div>
-                                    <p className="text-lg">
-                                        Webcam stream not available
-                                    </p>
-                                    <p className="text-sm mt-2">
-                                        Please make sure the webcam server is running
-                                    </p>
-                                </div>
-                            )}
-
-                            {/* Live indicator when stream is active */}
-                            {streamActive && (
-                                <div className="absolute top-2 right-2 flex items-center">
-                                    <span className="animate-pulse w-3 h-3 bg-red-500 rounded-full mr-2"></span>
-                                    <span className="text-xs text-white/70">LIVE</span>
-                                </div>
-                            )}
-
-                            {/* DSLR indicator when camera is available */}
-                            {cameraInfo.cameraAvailable && streamActive && (
-                                <div className="absolute bottom-2 left-2 flex items-center bg-black/50 rounded-full px-2 py-1">
-                                    <span className="text-xs text-green-400">DSLR Ready</span>
-                                </div>
-                            )}
-                        </div>
-
-                        {error && (
-                            <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
-                                {error}
-                            </div>
-                        )}
-
-                        <button
-                            onClick={handleTakePhoto}
-                            disabled={!isReady || loading || !streamActive}
-                            className={`btn btn-primary btn-christian w-64 text-center text-xl ${
-                                !isReady || loading || !streamActive ? 'opacity-50 cursor-not-allowed' : ''
-                            }`}
+            <div className="z-10 text-center px-4 w-full max-w-2xl">
+                <AnimatePresence mode="wait">
+                    {countdown !== null ? (
+                        // Countdown display
+                        <motion.div
+                            key="countdown"
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.8, opacity: 0 }}
+                            className="flex flex-col items-center"
                         >
-                            {loading ? 'Processing...' : 'Take Photo'}
-                        </button>
+                            <div className="bg-white/90 p-8 rounded-full w-48 h-48 flex items-center justify-center mb-8 shadow-lg">
+                                {typeof countdown === 'string' ? (
+                                    // "SMILE!" display
+                                    <motion.span
+                                        key="smile"
+                                        initial={{ scale: 0.8, opacity: 0 }}
+                                        animate={{ scale: 1, opacity: 1 }}
+                                        className="text-4xl font-bold text-wedding-love"
+                                    >
+                                        {countdown}!
+                                    </motion.span>
+                                ) : (
+                                    // Number countdown display
+                                    <motion.span
+                                        key={countdown}
+                                        initial={{ scale: 1.5, opacity: 0 }}
+                                        animate={{ scale: 1, opacity: 1 }}
+                                        exit={{ scale: 0.5, opacity: 0 }}
+                                        className="text-7xl font-bold text-wedding-love"
+                                    >
+                                        {countdown}
+                                    </motion.span>
+                                )}
+                            </div>
+                        </motion.div>
+                    ) : (
+                        // Camera view with mjpeg stream
+                        <motion.div
+                            key="camera"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="flex flex-col items-center"
+                        >
+                            <h2 className="text-2xl md:text-3xl font-display text-christian-text mb-6">
+                                Ready for your photo!
+                            </h2>
 
-                        {!streamActive && (
-                            <p className="mt-2 text-sm text-red-500">
-                                Please start the webcam stream server
-                            </p>
-                        )}
+                            <div className="w-full max-w-xl aspect-[4/3] mb-8 overflow-hidden rounded-lg border-4 border-wedding-gold/20 shadow-lg relative">
+                                {/* Camera view */}
+                                <div className="absolute inset-0 bg-black flex items-center justify-center">
+                                    {streamActive ? (
+                                        // MJPEG Stream
+                                        <img
+                                            src={STREAM_URL}
+                                            alt="Camera preview"
+                                            className="w-full h-full object-cover"
+                                        />
+                                    ) : (
+                                        // Display message if stream is not available
+                                        <div className="flex flex-col items-center justify-center text-white/80 h-full">
+                                            <div className="text-5xl mb-4">📷</div>
+                                            <p className="text-lg">
+                                                Camera loading...
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
 
-                        {/* Camera info message */}
-                        <p className="mt-2 text-sm text-gray-500">
-                            {cameraInfo.statusMessage}
-                        </p>
-                    </motion.div>
-                )}
+                            <motion.button
+                                whileTap={{ scale: 0.95 }}
+                                onClick={handleTakePhoto}
+                                disabled={!isReady || loading || !streamActive}
+                                className={`btn btn-primary btn-christian w-64 text-center text-xl font-semibold shadow-lg ${
+                                    !isReady || loading || !streamActive ? 'opacity-70 cursor-not-allowed' : ''
+                                }`}
+                            >
+                                Take Photo
+                            </motion.button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
         </div>
     );
