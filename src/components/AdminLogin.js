@@ -18,7 +18,7 @@ const AdminLogin = () => {
         // Simple timeout to simulate authentication
         setTimeout(() => {
             // Example admin password - in production, use proper authentication
-            if (password === 'weddingadmin2025') {
+            if (password === '123') {
                 // Store admin status in sessionStorage
                 sessionStorage.setItem('isAdmin', 'true');
                 navigate('/admin');
