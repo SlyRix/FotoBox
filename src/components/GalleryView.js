@@ -9,7 +9,21 @@ const GalleryView = () => {
     const { photos, fetchPhotos, loading } = useCamera();
     const navigate = useNavigate();
     const [selectedPhoto, setSelectedPhoto] = useState(null);
-    //TODO: Add Global API URL for all files
+    const [currentPage, setCurrentPage] = useState(1);
+    const [photosPerPage] = useState(16); // Showing 16 photos per page (4x4 grid)
+
+    // Calculate pagination
+    const indexOfLastPhoto = currentPage * photosPerPage;
+    const indexOfFirstPhoto = indexOfLastPhoto - photosPerPage;
+    const currentPhotos = photos.slice(indexOfFirstPhoto, indexOfLastPhoto);
+    const totalPages = Math.ceil(photos.length / photosPerPage);
+
+    // Function to change page
+    const paginate = (pageNumber) => {
+        setCurrentPage(pageNumber);
+        // Scroll to top when changing pages
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
 
     useEffect(() => {
         // Fetch photos when component mounts
@@ -70,10 +84,10 @@ const GalleryView = () => {
                     </div>
                 )}
 
-                {/* Photo grid */}
+                {/* Photo grid using thumbnails */}
                 {!loading && photos.length > 0 && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {photos.map((photo) => (
+                        {currentPhotos.map((photo) => (
                             <motion.div
                                 key={photo.filename}
                                 whileHover={{ scale: 1.02 }}
@@ -82,9 +96,10 @@ const GalleryView = () => {
                             >
                                 <div className="aspect-[4/3] w-full overflow-hidden">
                                     <img
-                                        src={`${API_BASE_URL}${photo.url}`}
+                                        src={`${API_BASE_URL}${photo.thumbnailUrl || photo.url}`}
                                         alt={`Wedding photo ${photo.filename}`}
                                         className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
+                                        loading="lazy"
                                     />
                                 </div>
                                 <div className="p-2 text-xs text-gray-500">
@@ -92,6 +107,72 @@ const GalleryView = () => {
                                 </div>
                             </motion.div>
                         ))}
+                    </div>
+                )}
+
+                {/* Pagination controls */}
+                {!loading && photos.length > photosPerPage && (
+                    <div className="mt-8 flex justify-center">
+                        <div className="flex space-x-2">
+                            <button
+                                onClick={() => paginate(currentPage > 1 ? currentPage - 1 : currentPage)}
+                                disabled={currentPage === 1}
+                                className={`px-3 py-1 rounded border ${
+                                    currentPage === 1
+                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                        : 'bg-white text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                &laquo; Prev
+                            </button>
+
+                            {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                .filter(num => {
+                                    // Only show a few page numbers around the current page
+                                    const showDirectly = Math.abs(num - currentPage) <= 1;
+                                    const isFirstOrLast = num === 1 || num === totalPages;
+                                    return showDirectly || isFirstOrLast;
+                                })
+                                .map((number) => {
+                                    // If there's a gap, show ellipsis
+                                    const prevNum = number - 1;
+                                    const showEllipsisBefore =
+                                        prevNum > 1 &&
+                                        !Array.from({ length: totalPages }, (_, i) => i + 1)
+                                            .filter(n => Math.abs(n - currentPage) <= 1 || n === 1 || n === totalPages)
+                                            .includes(prevNum);
+
+                                    return (
+                                        <React.Fragment key={number}>
+                                            {showEllipsisBefore && (
+                                                <span className="px-3 py-1 text-gray-500">...</span>
+                                            )}
+                                            <button
+                                                onClick={() => paginate(number)}
+                                                className={`px-3 py-1 rounded border ${
+                                                    currentPage === number
+                                                        ? 'bg-christian-accent text-white'
+                                                        : 'bg-white text-gray-700 hover:bg-gray-50'
+                                                }`}
+                                            >
+                                                {number}
+                                            </button>
+                                        </React.Fragment>
+                                    );
+                                })}
+
+                            <button
+                                onClick={() => paginate(currentPage < totalPages ? currentPage + 1 : currentPage)}
+                                disabled={currentPage === totalPages}
+                                className={`px-3 py-1 rounded border ${
+                                    currentPage === totalPages
+                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                        : 'bg-white text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                Next &raquo;
+                            </button>
+                        </div>
                     </div>
                 )}
 
@@ -107,7 +188,7 @@ const GalleryView = () => {
                     </div>
                 )}
 
-                {/* Lightbox */}
+                {/* Lightbox - use original image */}
                 {selectedPhoto && (
                     <div
                         className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
