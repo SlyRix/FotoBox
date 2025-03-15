@@ -8,6 +8,8 @@ const QRCode = require('qrcode');
 const bodyParser = require('body-parser');
 const http = require('http');
 const WebSocket = require('ws');
+const compression = require('compression'); // Add compression
+const sharp = require('sharp'); // Add sharp for image processing
 
 // Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
@@ -50,9 +52,10 @@ const captureInProgress = {status: false};
 const PHOTOS_DIR = path.join(__dirname, 'public', 'photos');
 const QR_DIR = path.join(__dirname, 'public', 'qrcodes');
 const PREVIEW_DIR = path.join(__dirname, 'public', 'preview');
+const THUMBNAILS_DIR = path.join(__dirname, 'public', 'thumbnails');
 
 // Create required directories
-[PHOTOS_DIR, QR_DIR, PREVIEW_DIR].forEach(dir => {
+[PHOTOS_DIR, QR_DIR, PREVIEW_DIR, THUMBNAILS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, {recursive: true});
     }
@@ -84,8 +87,22 @@ app.use(cors({
     preflightContinue: false,
     optionsSuccessStatus: 204
 }));
+
+// Add compression middleware
+app.use(compression());
+
 app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, 'public')));
+
+// Serve static files with caching
+app.use(express.static(path.join(__dirname, 'public'), {
+    maxAge: '1d', // Cache static assets for 1 day
+    setHeaders: (res, path) => {
+        // Set longer cache for photos and thumbnails
+        if (path.endsWith('.jpg') || path.endsWith('.jpeg') || path.endsWith('.png')) {
+            res.setHeader('Cache-Control', 'public, max-age=604800'); // 1 week
+        }
+    }
+}));
 
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', req.headers.origin);
@@ -378,6 +395,37 @@ function broadcastToStreamingClients(message) {
     }
 }
 
+// Thumbnail generation function
+async function generateThumbnail(sourceFilePath, filename) {
+    // Create thumbnails directory if it doesn't exist
+    if (!fs.existsSync(THUMBNAILS_DIR)) {
+        fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
+    }
+
+    const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${filename}`);
+
+    // Generate thumbnail only if it doesn't already exist
+    if (!fs.existsSync(thumbnailPath)) {
+        try {
+            await sharp(sourceFilePath)
+                .resize(300, 225, { // 4:3 aspect ratio thumbnail
+                    fit: 'cover',
+                    position: 'center'
+                })
+                .jpeg({ quality: 80, progressive: true })
+                .toFile(thumbnailPath);
+
+            console.log(`Thumbnail created: ${thumbnailPath}`);
+            return `/thumbnails/thumb_${filename}`;
+        } catch (err) {
+            console.error(`Error generating thumbnail: ${err.message}`);
+            return null;
+        }
+    }
+
+    return `/thumbnails/thumb_${filename}`;
+}
+
 // API Endpoints
 app.get('/api/status', (req, res) => {
     // Check webcam status
@@ -441,6 +489,7 @@ app.get('/api/photos', (req, res) => {
             return {
                 filename: file,
                 url: `/photos/${file}`,
+                thumbnailUrl: `/thumbnails/thumb_${file}`, // Add thumbnail URL
                 qrUrl: `/qrcodes/qr_${file.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`,
                 timestamp: stats.mtime.getTime()
             };
@@ -528,11 +577,15 @@ app.post('/api/photos/capture', (req, res) => {
 });
 
 // Helper function to generate QR code and send response
-function generateQRAndRespond(req, res, filename, timestamp) {
+async function generateQRAndRespond(req, res, filename, timestamp) {
     // Generate QR code for this photo
     const photoUrl = `http://${req.headers.host}/photos/${filename}`;
     const qrFilename = `qr_${timestamp}.png`;
     const qrFilepath = path.join(QR_DIR, qrFilename);
+
+    // Generate thumbnail
+    const filepath = path.join(PHOTOS_DIR, filename);
+    const thumbnailUrl = await generateThumbnail(filepath, filename);
 
     QRCode.toFile(qrFilepath, photoUrl, {
         color: {
@@ -549,6 +602,7 @@ function generateQRAndRespond(req, res, filename, timestamp) {
             photo: {
                 filename,
                 url: `/photos/${filename}`,
+                thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
                 qrUrl: `/qrcodes/${qrFilename}`,
                 timestamp: Date.now()
             }
@@ -560,10 +614,21 @@ function generateQRAndRespond(req, res, filename, timestamp) {
 app.delete('/api/photos/:filename', (req, res) => {
     const filename = req.params.filename;
     const filepath = path.join(PHOTOS_DIR, filename);
+    const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${filename}`);
 
+    // Delete the original photo
     fs.unlink(filepath, (err) => {
         if (err) {
             return res.status(500).json({error: 'Failed to delete photo'});
+        }
+
+        // Also try to delete the thumbnail if it exists
+        if (fs.existsSync(thumbnailPath)) {
+            fs.unlink(thumbnailPath, (thumbErr) => {
+                if (thumbErr) {
+                    console.error(`Failed to delete thumbnail: ${thumbErr}`);
+                }
+            });
         }
 
         res.json({success: true, message: 'Photo deleted successfully'});
@@ -585,6 +650,47 @@ app.post('/api/photos/print', (req, res) => {
         success: true,
         message: 'Print request received. Printing functionality will be implemented later.'
     });
+});
+
+// Route to generate thumbnails for all existing photos
+app.get('/api/admin/generate-thumbnails', async (req, res) => {
+    // In a real app, check admin authentication here
+
+    try {
+        const files = fs.readdirSync(PHOTOS_DIR);
+        const photoFiles = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file));
+
+        // Send immediate response
+        res.json({
+            success: true,
+            message: `Started processing ${photoFiles.length} photos. This may take several minutes.`
+        });
+
+        // Process in background
+        let processed = 0;
+        let failed = 0;
+
+        for (const file of photoFiles) {
+            try {
+                const filepath = path.join(PHOTOS_DIR, file);
+                await generateThumbnail(filepath, file);
+                processed++;
+
+                // Log progress every 10 photos
+                if (processed % 10 === 0) {
+                    console.log(`Thumbnail generation progress: ${processed}/${photoFiles.length}`);
+                }
+            } catch (err) {
+                failed++;
+                console.error(`Failed to create thumbnail for ${file}: ${err.message}`);
+            }
+        }
+
+        console.log(`Thumbnail generation complete. Processed: ${processed}, Failed: ${failed}`);
+    } catch (error) {
+        console.error(`Error in thumbnail generation: ${error.message}`);
+        // Response already sent, so just log the error
+    }
 });
 
 // Create HTTP server and attach WebSocket server

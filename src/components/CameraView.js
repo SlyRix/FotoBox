@@ -1,191 +1,256 @@
-// Improved CameraView.js with larger UI for iPad and camera visibility during countdown
-import React, { useState, useEffect } from 'react';
+// client/src/components/GalleryView.js
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { API_BASE_URL } from '../App';
 
-const CameraView = () => {
-    const { takePhoto, loading } = useCamera();
+const GalleryView = () => {
+    const { photos, fetchPhotos, loading } = useCamera();
     const navigate = useNavigate();
-    const [countdown, setCountdown] = useState(null);
-    const [isReady, setIsReady] = useState(true);
-    const [streamActive, setStreamActive] = useState(false);
+    const [selectedPhoto, setSelectedPhoto] = useState(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [photosPerPage] = useState(16); // Showing 16 photos per page (4x4 grid)
 
-    // Hard-coded stream URL that we know works
-    const STREAM_URL = "https://fotobox-sh.slyrix.com//?action=stream";
-    const SNAPSHOT_URL = "https://fotobox-sh.slyrix.com/?action=snapshot";
+    // Calculate pagination
+    const indexOfLastPhoto = currentPage * photosPerPage;
+    const indexOfFirstPhoto = indexOfLastPhoto - photosPerPage;
+    const currentPhotos = photos.slice(indexOfFirstPhoto, indexOfLastPhoto);
+    const totalPages = Math.ceil(photos.length / photosPerPage);
 
-    // Check if webcam stream is available on mount
-    useEffect(() => {
-        const img = new Image();
-        img.onload = () => {
-            setStreamActive(true);
-        };
-        img.onerror = () => {
-            setStreamActive(false);
-        };
-        img.src = `${SNAPSHOT_URL}&t=${Date.now()}`;
-
-        // Poll occasionally to check if stream becomes available
-        const interval = setInterval(() => {
-            const newImg = new Image();
-            newImg.onload = () => setStreamActive(true);
-            newImg.onerror = () => setStreamActive(false);
-            newImg.src = `${SNAPSHOT_URL}&t=${Date.now()}`;
-        }, 5000);
-
-        return () => clearInterval(interval);
-    }, []);
-
-    // Handle taking a photo with countdown
-    const handleTakePhoto = () => {
-        setIsReady(false);
-        // Start countdown from 5
-        setCountdown(5);
+    // Function to change page
+    const paginate = (pageNumber) => {
+        setCurrentPage(pageNumber);
+        // Scroll to top when changing pages
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    // Handle countdown and photo capture
     useEffect(() => {
-        let timer;
-        if (countdown === null) return;
+        // Fetch photos when component mounts
+        fetchPhotos();
+    }, [fetchPhotos]);
 
-        if (countdown > 0) {
-            // Continue countdown
-            timer = setTimeout(() => setCountdown(countdown - 1), 1000);
-        } else if (countdown === 0) {
-            // Show "SMILE!" message
-            setCountdown("SMILE!");
+    // Handle selecting a photo for the lightbox
+    const openLightbox = (photo) => {
+        setSelectedPhoto(photo);
+    };
 
-            // Take photo after showing the smile message
-            const capturePhoto = async () => {
-                try {
-                    const photo = await takePhoto();
-                    if (photo) {
-                        // Navigate to preview page
-                        navigate('/preview');
-                    } else {
-                        // Reset if there was an error
-                        setIsReady(true);
-                        setCountdown(null);
-                    }
-                } catch (err) {
-                    console.error('Failed to take photo:', err);
-                    setIsReady(true);
-                    setCountdown(null);
-                }
-            };
+    // Handle closing the lightbox
+    const closeLightbox = () => {
+        setSelectedPhoto(null);
+    };
 
-            // Short delay to show the "SMILE!" message
-            setTimeout(capturePhoto, 500);
-        }
-
-        return () => clearTimeout(timer);
-    }, [countdown, takePhoto, navigate]);
-
-    // Early return for loading state
-    if (loading && countdown === null) {
-        return (
-            <div className="min-h-screen flex flex-col items-center justify-center">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-24 w-24 border-t-8 border-b-8 border-wedding-love mx-auto mb-6"></div>
-                    <p className="text-3xl text-gray-700">Loading camera...</p>
-                </div>
-            </div>
-        );
-    }
+    // Format date for display
+    const formatDate = (timestamp) => {
+        return new Date(timestamp).toLocaleString();
+    };
 
     return (
-        <div className="min-h-screen flex flex-col relative">
-            {/* Full-width camera view - optimized for landscape */}
-            <div className="absolute inset-0 bg-black">
-                {streamActive ? (
-                    <img
-                        src={STREAM_URL}
-                        alt="Camera preview"
-                        className="w-full h-full object-contain"
-                    />
-                ) : (
-                    <div className="flex flex-col items-center justify-center text-white/80 h-full">
-                        <div className="text-8xl mb-6">📷</div>
-                        <p className="text-4xl">
-                            Camera loading...
-                        </p>
-                    </div>
-                )}
-            </div>
-
-            {/* Overlay UI elements - optimized for landscape */}
-            <div className="absolute inset-0 pointer-events-none">
-                {/* Top left - back button */}
-                <div className="absolute top-4 left-4">
+        <div className="min-h-screen bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
+            <div className="container mx-auto max-w-6xl">
+                {/* Header */}
+                <div className="my-8 text-center">
                     <button
                         onClick={() => navigate('/')}
-                        className="flex items-center justify-center bg-hindu-secondary text-white hover:bg-hindu-accent transition-colors text-xl py-4 px-6 rounded-full shadow-lg pointer-events-auto"
+                        className="absolute top-8 left-8 text-christian-accent hover:text-wedding-love transition-colors"
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
-                        </svg>
+                        ← Back to Home
                     </button>
+
+                    <h1 className="text-3xl md:text-4xl font-bold mb-2">Wedding Photo Gallery</h1>
+                    <p className="text-gray-600">All the beautiful moments captured at our wedding</p>
                 </div>
 
-                {/* Title at top */}
-                <div className="absolute top-4 left-0 right-0 text-center pointer-events-none">
-                    <div className="inline-block bg-hindu-secondary/80 text-white px-6 py-2 rounded-full">
-                        <h2 className="text-2xl font-display">Ready for your photo!</h2>
+                {/* Loading state */}
+                {loading && (
+                    <div className="text-center py-12">
+                        <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-wedding-love mx-auto mb-4"></div>
+                        <p>Loading photos...</p>
                     </div>
-                </div>
-
-                {/* Bottom area - take photo button */}
-                <div className="absolute bottom-8 left-0 right-0 flex justify-center">
-                    <motion.button
-                        whileTap={{ scale: 0.95 }}
-                        onClick={handleTakePhoto}
-                        disabled={!isReady || loading || !streamActive}
-                        className={`btn btn-primary btn-hindu py-10 px-10 text-center text-4xl font-semibold shadow-xl rounded-full pointer-events-auto w-64 ${
-                            !isReady || loading || !streamActive ? 'opacity-70 cursor-not-allowed' : ''
-                        }`}
-                    >
-                        Take Photo
-                    </motion.button>
-                </div>
-            </div>
-
-            {/* Overlay the countdown on top of everything */}
-            <AnimatePresence>
-                {countdown !== null && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="absolute inset-0 flex items-center justify-center bg-black/30 z-20 pointer-events-none"
-                    >
-                        <div className="bg-white/90 p-10 rounded-full w-64 h-64 flex items-center justify-center shadow-lg">
-                            {typeof countdown === 'string' ? (
-                                <motion.span
-                                    key="smile"
-                                    initial={{ scale: 0.8, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    className="text-6xl font-bold text-wedding-love"
-                                >
-                                    {countdown}!
-                                </motion.span>
-                            ) : (
-                                <motion.span
-                                    key={countdown}
-                                    initial={{ scale: 1.5, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    exit={{ scale: 0.5, opacity: 0 }}
-                                    className="text-9xl font-bold text-wedding-love"
-                                >
-                                    {countdown}
-                                </motion.span>
-                            )}
-                        </div>
-                    </motion.div>
                 )}
-            </AnimatePresence>
+
+                {/* Empty state */}
+                {!loading && photos.length === 0 && (
+                    <div className="text-center py-12 bg-white/70 rounded-lg shadow">
+                        <div className="mb-4 text-5xl">📷</div>
+                        <h3 className="text-xl font-bold mb-2">No Photos Yet</h3>
+                        <p className="text-gray-600 mb-6">Be the first to capture a memory!</p>
+                        <button
+                            onClick={() => navigate('/camera')}
+                            className="btn btn-primary btn-christian"
+                        >
+                            Take a Photo
+                        </button>
+                    </div>
+                )}
+
+                {/* Photo grid using thumbnails */}
+                {!loading && photos.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {currentPhotos.map((photo) => (
+                            <motion.div
+                                key={photo.filename}
+                                whileHover={{ scale: 1.02 }}
+                                className="bg-white rounded-lg shadow-md overflow-hidden cursor-pointer"
+                                onClick={() => openLightbox(photo)}
+                            >
+                                <div className="aspect-[4/3] w-full overflow-hidden">
+                                    <img
+                                        src={`${API_BASE_URL}${photo.thumbnailUrl || photo.url}`}
+                                        alt={`Wedding photo ${photo.filename}`}
+                                        className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
+                                        loading="lazy"
+                                    />
+                                </div>
+                                <div className="p-2 text-xs text-gray-500">
+                                    {formatDate(photo.timestamp)}
+                                </div>
+                            </motion.div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Pagination controls */}
+                {!loading && photos.length > photosPerPage && (
+                    <div className="mt-8 flex justify-center">
+                        <div className="flex space-x-2">
+                            <button
+                                onClick={() => paginate(currentPage > 1 ? currentPage - 1 : currentPage)}
+                                disabled={currentPage === 1}
+                                className={`px-3 py-1 rounded border ${
+                                    currentPage === 1
+                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                        : 'bg-white text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                &laquo; Prev
+                            </button>
+
+                            {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                .filter(num => {
+                                    // Only show a few page numbers around the current page
+                                    const showDirectly = Math.abs(num - currentPage) <= 1;
+                                    const isFirstOrLast = num === 1 || num === totalPages;
+                                    return showDirectly || isFirstOrLast;
+                                })
+                                .map((number) => {
+                                    // If there's a gap, show ellipsis
+                                    const prevNum = number - 1;
+                                    const showEllipsisBefore =
+                                        prevNum > 1 &&
+                                        !Array.from({ length: totalPages }, (_, i) => i + 1)
+                                            .filter(n => Math.abs(n - currentPage) <= 1 || n === 1 || n === totalPages)
+                                            .includes(prevNum);
+
+                                    return (
+                                        <React.Fragment key={number}>
+                                            {showEllipsisBefore && (
+                                                <span className="px-3 py-1 text-gray-500">...</span>
+                                            )}
+                                            <button
+                                                onClick={() => paginate(number)}
+                                                className={`px-3 py-1 rounded border ${
+                                                    currentPage === number
+                                                        ? 'bg-christian-accent text-white'
+                                                        : 'bg-white text-gray-700 hover:bg-gray-50'
+                                                }`}
+                                            >
+                                                {number}
+                                            </button>
+                                        </React.Fragment>
+                                    );
+                                })}
+
+                            <button
+                                onClick={() => paginate(currentPage < totalPages ? currentPage + 1 : currentPage)}
+                                disabled={currentPage === totalPages}
+                                className={`px-3 py-1 rounded border ${
+                                    currentPage === totalPages
+                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                        : 'bg-white text-gray-700 hover:bg-gray-50'
+                                }`}
+                            >
+                                Next &raquo;
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Take another photo button */}
+                {!loading && photos.length > 0 && (
+                    <div className="mt-8 text-center">
+                        <button
+                            onClick={() => navigate('/camera')}
+                            className="btn btn-primary btn-christian"
+                        >
+                            Take Another Photo
+                        </button>
+                    </div>
+                )}
+
+                {/* Lightbox - use original image */}
+                {selectedPhoto && (
+                    <div
+                        className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+                        onClick={closeLightbox}
+                    >
+                        <div
+                            className="max-w-4xl w-full bg-white rounded-lg overflow-hidden shadow-2xl"
+                            onClick={e => e.stopPropagation()}
+                        >
+                            <div className="p-4 bg-gray-800 text-white flex justify-between items-center">
+                                <h3 className="text-lg font-medium">Photo Details</h3>
+                                <button
+                                    onClick={closeLightbox}
+                                    className="text-white/80 hover:text-white"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div className="p-4">
+                                <img
+                                    src={`${API_BASE_URL}${selectedPhoto.url}`}
+                                    alt={`Wedding photo ${selectedPhoto.filename}`}
+                                    className="w-full h-auto max-h-[70vh] object-contain"
+                                />
+
+                                <div className="mt-4 flex flex-wrap justify-between items-center">
+                                    <div className="text-sm text-gray-600">
+                                        <p>Taken: {formatDate(selectedPhoto.timestamp)}</p>
+                                        <p>Filename: {selectedPhoto.filename}</p>
+                                    </div>
+
+                                    <div className="flex mt-4 sm:mt-0 space-x-3">
+                                        <a
+                                            href={`${API_BASE_URL}${selectedPhoto.url}`}
+                                            download
+                                            className="btn btn-outline btn-christian-outline text-sm py-2"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            Download
+                                        </a>
+
+                                        <button
+                                            onClick={() => {
+                                                navigate('/qrcode');
+                                                closeLightbox();
+                                            }}
+                                            className="btn btn-primary btn-hindu text-sm py-2"
+                                        >
+                                            Get QR Code
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
     );
 };
 
-export default CameraView;
+export default GalleryView;

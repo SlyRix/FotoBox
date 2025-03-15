@@ -267,7 +267,8 @@ export const CameraProvider = ({ children }) => {
             // Make sure the full URL is set for each photo
             const photosWithFullUrls = data.map(photo => ({
                 ...photo,
-                fullUrl: `${API_BASE_URL}${photo.url}`
+                fullUrl: `${API_BASE_URL}${photo.url}`,
+                fullThumbnailUrl: `${API_BASE_URL}${photo.thumbnailUrl || photo.url}`
             }));
 
             setPhotos(photosWithFullUrls);
@@ -304,7 +305,8 @@ export const CameraProvider = ({ children }) => {
                 // Add the full URL to the photo object
                 const photoWithFullUrl = {
                     ...result.photo,
-                    fullUrl: `${API_BASE_URL}${result.photo.url}`
+                    fullUrl: `${API_BASE_URL}${result.photo.url}`,
+                    fullThumbnailUrl: `${API_BASE_URL}${result.photo.thumbnailUrl || result.photo.url}`
                 };
 
                 setCurrentPhoto(photoWithFullUrl);
@@ -377,6 +379,23 @@ export const CameraProvider = ({ children }) => {
         }
     }, []);
 
+    // Regenerate thumbnails for all photos
+    const regenerateThumbnails = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_ENDPOINT}/admin/generate-thumbnails`);
+
+            if (!response.ok) {
+                throw new Error(`Server responded with status: ${response.status}`);
+            }
+
+            const result = await response.json();
+            return result;
+        } catch (error) {
+            console.error('Error regenerating thumbnails:', error);
+            return { success: false, error: error.message };
+        }
+    }, []);
+
     const value = {
         currentPhoto,
         setCurrentPhoto,
@@ -387,6 +406,7 @@ export const CameraProvider = ({ children }) => {
         takePhoto,
         deletePhoto,
         printPhoto,
+        regenerateThumbnails,
         apiBaseUrl: API_BASE_URL,
         // Preview related values
         previewImage,
@@ -404,3 +424,5 @@ export const CameraProvider = ({ children }) => {
         </CameraContext.Provider>
     );
 };
+
+export default CameraProvider;

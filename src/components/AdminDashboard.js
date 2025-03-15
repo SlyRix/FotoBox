@@ -12,6 +12,19 @@ const AdminDashboard = () => {
     const [cameraStatus, setCameraStatus] = useState('Loading...');
     const navigate = useNavigate();
 
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1);
+    const [photosPerPage] = useState(20);
+
+    // Calculate pagination
+    const indexOfLastPhoto = currentPage * photosPerPage;
+    const indexOfFirstPhoto = indexOfLastPhoto - photosPerPage;
+    const currentPhotos = photos.slice(indexOfFirstPhoto, indexOfLastPhoto);
+    const totalPages = Math.ceil(photos.length / photosPerPage);
+
+    // Function to change page
+    const paginate = (pageNumber) => setCurrentPage(pageNumber);
+
     // Check admin authentication
     useEffect(() => {
         const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
@@ -65,6 +78,21 @@ const AdminDashboard = () => {
             }
         } else {
             setDeleteConfirm(filename);
+        }
+    };
+
+    // Handle regenerating thumbnails for all photos
+    const handleRegenerateThumbnails = () => {
+        if (window.confirm("This will regenerate thumbnails for all photos and may take some time. Continue?")) {
+            fetch(`${API_BASE_URL}/api/admin/generate-thumbnails`)
+                .then(response => response.json())
+                .then(data => {
+                    alert(data.message || "Thumbnail generation started.");
+                })
+                .catch(error => {
+                    console.error('Error starting thumbnail generation:', error);
+                    alert("Error starting thumbnail generation.");
+                });
         }
     };
 
@@ -126,6 +154,13 @@ const AdminDashboard = () => {
                     >
                         Return to Home
                     </button>
+
+                    <button
+                        onClick={handleRegenerateThumbnails}
+                        className="btn btn-outline btn-hindu-outline"
+                    >
+                        Regenerate Thumbnails
+                    </button>
                 </div>
 
                 {/* Photos gallery */}
@@ -162,10 +197,10 @@ const AdminDashboard = () => {
                         </div>
                     )}
 
-                    {/* Photo grid */}
+                    {/* Photo grid with thumbnails */}
                     {!loading && !error && photos.length > 0 && (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                            {photos.map((photo) => (
+                            {currentPhotos.map((photo) => (
                                 <motion.div
                                     key={photo.filename}
                                     whileHover={{ scale: 1.03 }}
@@ -174,9 +209,10 @@ const AdminDashboard = () => {
                                 >
                                     <div className="aspect-[4/3] w-full overflow-hidden">
                                         <img
-                                            src={`${API_BASE_URL}${photo.url}`}
+                                            src={`${API_BASE_URL}${photo.thumbnailUrl || photo.url}`}
                                             alt={`Wedding photo ${photo.filename}`}
                                             className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
+                                            loading="lazy"
                                         />
                                     </div>
                                     <div className="p-2 text-xs text-gray-500">
@@ -184,6 +220,72 @@ const AdminDashboard = () => {
                                     </div>
                                 </motion.div>
                             ))}
+                        </div>
+                    )}
+
+                    {/* Pagination controls */}
+                    {!loading && !error && photos.length > 0 && (
+                        <div className="mt-6 flex justify-center">
+                            <div className="flex space-x-2">
+                                <button
+                                    onClick={() => paginate(currentPage > 1 ? currentPage - 1 : currentPage)}
+                                    disabled={currentPage === 1}
+                                    className={`px-3 py-1 rounded border ${
+                                        currentPage === 1
+                                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                            : 'bg-white text-gray-700 hover:bg-gray-50'
+                                    }`}
+                                >
+                                    &laquo; Prev
+                                </button>
+
+                                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                    .filter(num => {
+                                        // Only show a few page numbers around the current page
+                                        const showDirectly = Math.abs(num - currentPage) <= 1;
+                                        const isFirstOrLast = num === 1 || num === totalPages;
+                                        return showDirectly || isFirstOrLast;
+                                    })
+                                    .map((number) => {
+                                        // If there's a gap, show ellipsis
+                                        const prevNum = number - 1;
+                                        const showEllipsisBefore =
+                                            prevNum > 1 &&
+                                            !Array.from({ length: totalPages }, (_, i) => i + 1)
+                                                .filter(n => Math.abs(n - currentPage) <= 1 || n === 1 || n === totalPages)
+                                                .includes(prevNum);
+
+                                        return (
+                                            <React.Fragment key={number}>
+                                                {showEllipsisBefore && (
+                                                    <span className="px-3 py-1 text-gray-500">...</span>
+                                                )}
+                                                <button
+                                                    onClick={() => paginate(number)}
+                                                    className={`px-3 py-1 rounded border ${
+                                                        currentPage === number
+                                                            ? 'bg-christian-accent text-white'
+                                                            : 'bg-white text-gray-700 hover:bg-gray-50'
+                                                    }`}
+                                                >
+                                                    {number}
+                                                </button>
+                                            </React.Fragment>
+                                        );
+                                    })}
+
+                                <button
+                                    onClick={() => paginate(currentPage < totalPages ? currentPage + 1 : currentPage)}
+                                    disabled={currentPage === totalPages}
+                                    className={`px-3 py-1 rounded border ${
+                                        currentPage === totalPages
+                                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                            : 'bg-white text-gray-700 hover:bg-gray-50'
+                                    }`}
+                                >
+                                    Next &raquo;
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -214,11 +316,13 @@ const AdminDashboard = () => {
                         </div>
 
                         <div className="p-4">
-                            <img
-                                src={`${API_BASE_URL}${selectedPhoto.url}`}
-                                alt={`Wedding photo ${selectedPhoto.filename}`}
-                                className="w-full h-auto max-h-[70vh] object-contain"
-                            />
+                            <div className="relative">
+                                <img
+                                    src={`${API_BASE_URL}${selectedPhoto.url}`}
+                                    alt={`Wedding photo ${selectedPhoto.filename}`}
+                                    className="w-full h-auto max-h-[70vh] object-contain"
+                                />
+                            </div>
 
                             <div className="mt-4 flex flex-wrap justify-between items-center">
                                 <div className="text-sm text-gray-600">
