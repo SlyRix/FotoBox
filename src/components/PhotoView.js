@@ -1,4 +1,4 @@
-// Fixed src/components/PhotoView.js with improved error handling
+// Updated PhotoView.js with improved download functionality
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -10,6 +10,15 @@ const PhotoView = () => {
     const [photo, setPhoto] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [isMobile, setIsMobile] = useState(false);
+    const [isIOS, setIsIOS] = useState(false);
+
+    // Detect mobile and iOS devices
+    useEffect(() => {
+        const userAgent = navigator.userAgent.toLowerCase();
+        setIsMobile(/android|iphone|ipad|ipod/.test(userAgent));
+        setIsIOS(/iphone|ipad|ipod/.test(userAgent));
+    }, []);
 
     // Fetch the specific photo data
     useEffect(() => {
@@ -49,6 +58,29 @@ const PhotoView = () => {
 
         fetchPhoto();
     }, [photoId]);
+
+    // Handle share functionality for mobile devices
+    const handleShareImage = async () => {
+        if (navigator.share) {
+            try {
+                const response = await fetch(photo.fullUrl);
+                const blob = await response.blob();
+                const file = new File([blob], photo.filename, { type: blob.type });
+
+                await navigator.share({
+                    files: [file],
+                    title: 'Wedding Photo',
+                });
+            } catch (error) {
+                console.error('Error sharing:', error);
+                // Fallback to opening in new tab
+                window.open(photo.fullUrl, '_blank');
+            }
+        } else {
+            // Fallback for browsers that don't support sharing
+            window.open(photo.fullUrl, '_blank');
+        }
+    };
 
     // Format date for display
     const formatDate = (timestamp) => {
@@ -130,20 +162,57 @@ const PhotoView = () => {
                         </p>
                     </div>
 
-                    {/* Buttons */}
-                    <div className="flex flex-col sm:flex-row justify-center gap-4">
-                        <a
-                            href={photo.fullUrl}
-                            download
-                            className="btn btn-primary btn-christian text-center"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                        >
-                            Download Photo
-                        </a>
-                    </div>
+                    {/* Download options - different UI based on device */}
+                    {isIOS ? (
+                        <div className="space-y-4">
+                            {/* Share button for iOS */}
+                            <button
+                                onClick={handleShareImage}
+                                className="btn btn-primary btn-christian text-center w-full"
+                            >
+                                Save to Photos
+                            </button>
+                            <div className="mt-2 p-3 bg-yellow-50 text-yellow-700 rounded-lg text-sm">
+                                <p className="font-medium">To save this photo to your device:</p>
+                                <ol className="list-decimal pl-5 mt-1">
+                                    <li>Tap the "Save to Photos" button above</li>
+                                    <li>Select "Save Image" from the menu</li>
+                                </ol>
+                                <p className="mt-1">If that doesn't work:</p>
+                                <ol className="list-decimal pl-5 mt-1">
+                                    <li>Press and hold on the photo above</li>
+                                    <li>Select "Save to Photos" from the menu</li>
+                                </ol>
+                            </div>
+                        </div>
+                    ) : isMobile ? (
+                        <div className="space-y-4">
+                            {/* Download for Android */}
+                            <a
+                                href={photo.fullUrl}
+                                download={photo.filename || "wedding-photo.jpg"}
+                                className="btn btn-primary btn-christian text-center block w-full"
+                            >
+                                Download Photo
+                            </a>
+                            <p className="text-sm text-gray-600 text-center">
+                                If download doesn't start, tap and hold on the photo above and select "Download Image"
+                            </p>
+                        </div>
+                    ) : (
+                        /* Desktop download button */
+                        <div className="flex justify-center">
+                            <a
+                                href={photo.fullUrl}
+                                download={photo.filename || "wedding-photo.jpg"}
+                                className="btn btn-primary btn-christian text-center"
+                            >
+                                Download Photo
+                            </a>
+                        </div>
+                    )}
 
-                    {/* Optional: Social sharing buttons */}
+                    {/* Social sharing section */}
                     <div className="mt-8 text-center text-gray-600">
                         <p className="mb-3">Thank you for celebrating with us!</p>
                         <p className="text-sm">Share your memories with #RushelAndSivani2025</p>

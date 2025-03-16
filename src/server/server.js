@@ -425,6 +425,21 @@ async function generateThumbnail(sourceFilePath, filename) {
 
     return `/thumbnails/thumb_${filename}`;
 }
+app.get('/photos/:filename', (req, res) => {
+    const filename = req.params.filename;
+    const filepath = path.join(PHOTOS_DIR, filename);
+
+    if (!fs.existsSync(filepath)) {
+        return res.status(404).send('Photo not found');
+    }
+
+    // Set proper headers for download
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'image/jpeg');
+
+    // Send the file
+    res.sendFile(filepath);
+});
 
 // API Endpoints
 app.get('/api/status', (req, res) => {
