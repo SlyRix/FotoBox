@@ -1,4 +1,4 @@
-// Updated PhotoView.js with direct download and no gallery options
+// Fixed src/components/PhotoView.js with improved error handling
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -10,7 +10,6 @@ const PhotoView = () => {
     const [photo, setPhoto] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [downloadStarted, setDownloadStarted] = useState(false);
 
     // Fetch the specific photo data
     useEffect(() => {
@@ -51,40 +50,6 @@ const PhotoView = () => {
         fetchPhoto();
     }, [photoId]);
 
-    // Auto-download on mobile devices
-    useEffect(() => {
-        // Check if we're on a mobile device
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-        // If we have a photo and we're on mobile, start download automatically after a short delay
-        if (photo && isMobile && !downloadStarted) {
-            const timer = setTimeout(() => {
-                triggerDownload();
-                setDownloadStarted(true);
-            }, 1500); // Short delay to ensure the page has loaded
-
-            return () => clearTimeout(timer);
-        }
-    }, [photo, downloadStarted]);
-
-    // Trigger download programmatically
-    const triggerDownload = () => {
-        if (!photo) return;
-
-        // Create a temporary link to trigger download
-        const downloadLink = document.createElement('a');
-        downloadLink.href = photo.fullUrl;
-        downloadLink.download = `wedding_photo_${new Date().toISOString().split('T')[0]}.jpg`;
-        downloadLink.style.display = 'none';
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-
-        // Clean up
-        setTimeout(() => {
-            document.body.removeChild(downloadLink);
-        }, 100);
-    };
-
     // Format date for display
     const formatDate = (timestamp) => {
         if (!timestamp) return 'Unknown date';
@@ -115,6 +80,12 @@ const PhotoView = () => {
                             className="btn btn-primary btn-christian"
                         >
                             Back to Home
+                        </button>
+                        <button
+                            onClick={() => navigate('/gallery')}
+                            className="btn btn-outline btn-christian-outline"
+                        >
+                            View Gallery
                         </button>
                     </div>
                 </div>
@@ -158,20 +129,20 @@ const PhotoView = () => {
                             Taken on {formatDate(photo.timestamp)}
                         </p>
                     </div>
-                    {/* Download button only - removed Gallery button */}
-                    <div className="flex justify-center">
+
+                    {/* Buttons */}
+                    <div className="flex flex-col sm:flex-row justify-center gap-4">
                         <a
                             href={photo.fullUrl}
-                            download={`wedding_photo_${new Date().toISOString().split('T')[0]}.jpg`}
-                            className="btn btn-primary btn-christian text-center inline-flex items-center"
-                            onClick={() => setDownloadStarted(true)}
+                            download
+                            className="btn btn-primary btn-christian text-center"
+                            target="_blank"
+                            rel="noopener noreferrer"
                         >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
                             Download Photo
                         </a>
                     </div>
+
                     {/* Optional: Social sharing buttons */}
                     <div className="mt-8 text-center text-gray-600">
                         <p className="mb-3">Thank you for celebrating with us!</p>
