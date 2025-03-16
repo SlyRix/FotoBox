@@ -578,8 +578,8 @@ app.post('/api/photos/capture', (req, res) => {
 
 // Helper function to generate QR code and send response
 async function generateQRAndRespond(req, res, filename, timestamp) {
-    // Generate QR code for this photo
-    const photoUrl = `http://${req.headers.host}/photos/${filename}`;
+    // Generate QR code for this photo - point to the photo view page instead of direct image
+    const photoViewUrl = `http://${req.headers.host}/photo/${filename}`; // Changed URL to point to the view page
     const qrFilename = `qr_${timestamp}.png`;
     const qrFilepath = path.join(QR_DIR, qrFilename);
 
@@ -587,7 +587,7 @@ async function generateQRAndRespond(req, res, filename, timestamp) {
     const filepath = path.join(PHOTOS_DIR, filename);
     const thumbnailUrl = await generateThumbnail(filepath, filename);
 
-    QRCode.toFile(qrFilepath, photoUrl, {
+    QRCode.toFile(qrFilepath, photoViewUrl, {
         color: {
             dark: '#000',  // Points
             light: '#FFF'  // Background
@@ -609,6 +609,28 @@ async function generateQRAndRespond(req, res, filename, timestamp) {
         });
     });
 }
+
+// Add a new API endpoint to get a single photo's details
+app.get('/api/photos/:filename', (req, res) => {
+    const filename = req.params.filename;
+    const filepath = path.join(PHOTOS_DIR, filename);
+
+    // Check if the file exists
+    if (!fs.existsSync(filepath)) {
+        return res.status(404).json({ error: 'Photo not found' });
+    }
+
+    const stats = fs.statSync(filepath);
+    const photo = {
+        filename: filename,
+        url: `/photos/${filename}`,
+        thumbnailUrl: `/thumbnails/thumb_${filename}`,
+        qrUrl: `/qrcodes/qr_${filename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`,
+        timestamp: stats.mtime.getTime()
+    };
+
+    res.json(photo);
+});
 
 // Delete a photo
 app.delete('/api/photos/:filename', (req, res) => {
