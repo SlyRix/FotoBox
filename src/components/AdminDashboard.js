@@ -328,6 +328,31 @@ const AdminDashboard = () => {
                                 <div className="text-sm text-gray-600">
                                     <p>Taken: {formatDate(selectedPhoto.timestamp)}</p>
                                     <p>Filename: {selectedPhoto.filename}</p>
+                                    {/* Display the photo URL */}
+                                    <div className="mt-2">
+                                        <p className="font-medium mb-1">Photo Link:</p>
+                                        <div className="flex items-center">
+                                            <input
+                                                type="text"
+                                                value={`https://fotobox.slyrix.com/photo/${selectedPhoto.filename}`}
+                                                readOnly
+                                                className="text-xs bg-gray-100 p-2 rounded border border-gray-300 w-full"
+                                                onClick={(e) => e.target.select()}
+                                            />
+                                            <button
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(`https://fotobox.slyrix.com/photo/${selectedPhoto.filename}`);
+                                                    alert('Link copied to clipboard!');
+                                                }}
+                                                className="ml-2 p-2 bg-gray-100 rounded border border-gray-300 hover:bg-gray-200"
+                                                title="Copy link"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div className="flex mt-4 sm:mt-0 space-x-3">

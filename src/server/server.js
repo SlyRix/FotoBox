@@ -578,8 +578,11 @@ app.post('/api/photos/capture', (req, res) => {
 
 // Helper function to generate QR code and send response
 async function generateQRAndRespond(req, res, filename, timestamp) {
-    // Generate QR code for this photo
-    const photoUrl = `http://${req.headers.host}/photos/${filename}`;
+    // Generate QR code for the photo view page, not directly to the image
+    const photoId = filename; // Using the filename as the ID for simplicity
+    const clientDomain = 'fotobox.slyrix.com'; // Using the specified domain
+    const photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
+
     const qrFilename = `qr_${timestamp}.png`;
     const qrFilepath = path.join(QR_DIR, qrFilename);
 
@@ -587,7 +590,7 @@ async function generateQRAndRespond(req, res, filename, timestamp) {
     const filepath = path.join(PHOTOS_DIR, filename);
     const thumbnailUrl = await generateThumbnail(filepath, filename);
 
-    QRCode.toFile(qrFilepath, photoUrl, {
+    QRCode.toFile(qrFilepath, photoViewUrl, {
         color: {
             dark: '#000',  // Points
             light: '#FFF'  // Background
@@ -604,12 +607,52 @@ async function generateQRAndRespond(req, res, filename, timestamp) {
                 url: `/photos/${filename}`,
                 thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
                 qrUrl: `/qrcodes/${qrFilename}`,
+                photoViewUrl: photoViewUrl, // Add the photo view URL to response
                 timestamp: Date.now()
             }
         });
     });
 }
 
+// Now let's add an endpoint to get a specific photo by ID
+app.get('/api/photos/:photoId', (req, res) => {
+    const photoId = req.params.photoId;
+
+    // In this implementation, the photoId is the filename
+    const filepath = path.join(PHOTOS_DIR, photoId);
+
+    // Check if the file exists
+    if (!fs.existsSync(filepath)) {
+        return res.status(404).json({
+            success: false,
+            error: 'Photo not found'
+        });
+    }
+
+    // Get file stats for timestamp
+    const stats = fs.statSync(filepath);
+
+    // Generate QR code path
+    const qrFilename = `qr_${photoId.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`;
+
+    // Check if thumbnail exists
+    const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${photoId}`);
+    const hasThumbnail = fs.existsSync(thumbnailPath);
+
+    // Get client domain from request or config
+    const clientDomain = 'fotobox.slyrix.com';
+    const photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
+
+    // Return photo data
+    res.json({
+        filename: photoId,
+        url: `/photos/${photoId}`,
+        thumbnailUrl: hasThumbnail ? `/thumbnails/thumb_${photoId}` : null,
+        qrUrl: `/qrcodes/${qrFilename}`,
+        photoViewUrl: photoViewUrl,
+        timestamp: stats.mtime.getTime()
+    });
+});
 // Delete a photo
 app.delete('/api/photos/:filename', (req, res) => {
     const filename = req.params.filename;

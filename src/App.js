@@ -1,10 +1,11 @@
-// Updated App.js - Removed status indicator and added admin routes
+// Updated App.js - Added PhotoView route and fixed imports
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import HomePage from './components/HomePage';
 import CameraView from './components/CameraView';
 import PhotoPreview from './components/PhotoPreview';
 import QRCodeView from './components/QRCodeView';
+import PhotoView from './components/PhotoView';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import { CameraProvider } from './contexts/CameraContext';
@@ -35,6 +36,7 @@ function App() {
                         <Route path="/camera" element={<CameraView />} />
                         <Route path="/preview" element={<PhotoPreview />} />
                         <Route path="/qrcode" element={<QRCodeView />} />
+                        <Route path="/photo/:photoId" element={<PhotoView />} />
                         <Route path="/admin-login" element={<AdminLogin />} />
                         <Route
                             path="/admin"

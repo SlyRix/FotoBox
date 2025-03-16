@@ -1,4 +1,4 @@
-// client/src/components/QRCodeView.js - Optimized for landscape tablets
+// Updated QRCodeView.js with URL display
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
@@ -11,6 +11,7 @@ const QRCodeView = () => {
     const [isPrinting, setIsPrinting] = useState(false);
     const [printMessage, setPrintMessage] = useState('');
     const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
+    const [photoViewUrl, setPhotoViewUrl] = useState('');
 
     // Monitor orientation changes
     useEffect(() => {
@@ -21,6 +22,20 @@ const QRCodeView = () => {
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
+
+    // Generate or get the photo view URL
+    useEffect(() => {
+        if (currentPhoto && currentPhoto.filename) {
+            // First check if photoViewUrl was provided by the server
+            if (currentPhoto.photoViewUrl) {
+                setPhotoViewUrl(currentPhoto.photoViewUrl);
+            } else {
+                // Otherwise, construct it
+                const clientDomain = 'fotobox.slyrix.com';
+                setPhotoViewUrl(`https://${clientDomain}/photo/${currentPhoto.filename}`);
+            }
+        }
+    }, [currentPhoto]);
 
     // If no photo is available, redirect to camera
     if (!currentPhoto) {
@@ -63,6 +78,17 @@ const QRCodeView = () => {
         navigate('/');
     };
 
+    // Handle copy URL to clipboard
+    const handleCopyUrl = () => {
+        navigator.clipboard.writeText(photoViewUrl)
+            .then(() => {
+                alert('Link copied to clipboard!');
+            })
+            .catch(err => {
+                console.error('Could not copy text: ', err);
+            });
+    };
+
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
             <motion.div
@@ -96,6 +122,30 @@ const QRCodeView = () => {
                                     alt="QR Code"
                                     className={`${isLandscape ? 'w-40 h-40' : 'w-48 h-48'} mx-auto`}
                                 />
+                            </div>
+
+                            {/* Display and make the URL clickable and copyable */}
+                            <div className="mt-2 text-center">
+                                <p className="text-sm text-gray-500 mb-1">Or use this link:</p>
+                                <div className="flex justify-center items-center">
+                                    <a
+                                        href={photoViewUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-sm text-christian-accent hover:text-wedding-love truncate max-w-xs"
+                                    >
+                                        {photoViewUrl}
+                                    </a>
+                                    <button
+                                        onClick={handleCopyUrl}
+                                        className="ml-2 text-gray-500 hover:text-christian-accent"
+                                        title="Copy link"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
