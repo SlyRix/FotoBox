@@ -32,33 +32,18 @@ const PhotoView = () => {
 
         const fetchPhoto = async () => {
             try {
-                // First try to get photo details from API
-                const response = await fetch(`${API_ENDPOINT}/photos/${photoId}`);
-
-                if (!response.ok) {
-                    // If specific photo endpoint fails, try to create photo info from filename
-                    console.log('Specific photo endpoint failed, creating photo info from filename');
-                    setPhoto({
-                        filename: photoId,
-                        url: `/photos/${photoId}`,
-                        thumbnailUrl: `/thumbnails/thumb_${photoId}`,
-                        timestamp: new Date().getTime()
-                    });
-                } else {
-                    const data = await response.json();
-                    setPhoto(data);
-                }
-
-                setLoading(false);
-            } catch (err) {
-                console.error('Error fetching photo:', err);
-                // Even if there's an error with the API, still create basic info
+                // Create basic photo info from filename
+                // This works even without a specific API endpoint
                 setPhoto({
                     filename: photoId,
-                    url: `/photos/${photoId}`,
-                    thumbnailUrl: `/thumbnails/thumb_${photoId}`,
+                    url: `${API_BASE_URL}/photos/${photoId}`,
+                    thumbnailUrl: `${API_BASE_URL}/thumbnails/thumb_${photoId}`,
                     timestamp: new Date().getTime()
                 });
+                setLoading(false);
+            } catch (err) {
+                console.error('Error setting up photo:', err);
+                setError('Error loading photo');
                 setLoading(false);
             }
         };
@@ -103,15 +88,6 @@ const PhotoView = () => {
         );
     }
 
-    // Make sure URLs are fully qualified
-    const imageUrl = photo.url.startsWith('http')
-        ? photo.url
-        : `${API_BASE_URL}${photo.url}`;
-
-    const thumbnailUrl = photo.thumbnailUrl && photo.thumbnailUrl.startsWith('http')
-        ? photo.thumbnailUrl
-        : `${API_BASE_URL}${photo.thumbnailUrl || photo.url}`;
-
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
             <motion.div
@@ -129,13 +105,13 @@ const PhotoView = () => {
                         <div className="w-full max-w-2xl">
                             <div className="aspect-[4/3] w-full overflow-hidden rounded-lg border-4 border-wedding-background shadow-md mb-4">
                                 <img
-                                    src={imageUrl}
+                                    src={photo.url}
                                     alt="Wedding memory"
                                     className="w-full h-full object-contain"
                                     onError={(e) => {
                                         console.error("Primary image failed to load, trying thumbnail");
                                         e.target.onerror = null; // Prevent infinite loop
-                                        e.target.src = thumbnailUrl;
+                                        e.target.src = photo.thumbnailUrl;
                                     }}
                                 />
                             </div>
@@ -151,7 +127,7 @@ const PhotoView = () => {
 
                             <div className="flex flex-col sm:flex-row justify-center gap-4">
                                 <a
-                                    href={imageUrl}
+                                    href={photo.url}
                                     download={photo.filename}
                                     className="btn btn-primary btn-christian text-center"
                                 >
