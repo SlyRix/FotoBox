@@ -579,8 +579,8 @@ app.post('/api/photos/capture', (req, res) => {
 
 // Helper function to generate QR code and send response
 async function generateQRAndRespond(req, res, filename, timestamp) {
-    // Still point to API server URL, the redirect will handle the rest
-    const photoViewUrl = `${req.protocol}://${req.get('host')}/photo/${filename}`;
+    // Point directly to client app instead of API server
+    const photoViewUrl = `${CLIENT_APP_URL}/photo/${filename}`;
     const qrFilename = `qr_${timestamp}.png`;
     const qrFilepath = path.join(QR_DIR, qrFilename);
 
@@ -611,17 +611,21 @@ async function generateQRAndRespond(req, res, filename, timestamp) {
     });
 }
 
-// Add a redirect for /photo/* paths to the client app
 app.get('/photo/:filename', (req, res) => {
     const filename = req.params.filename;
     const clientUrl = `${CLIENT_APP_URL}/photo/${filename}`;
 
-    console.log(`Redirecting from API server to client app: ${clientUrl}`);
+    console.log(`==== PHOTO REDIRECT ====`);
+    console.log(`Request from: ${req.headers.referer || 'Unknown'}`);
+    console.log(`Original URL: ${req.originalUrl}`);
+    console.log(`Filename: ${filename}`);
+    console.log(`Redirecting to: ${clientUrl}`);
+    console.log(`Headers:`, req.headers);
+    console.log(`======================`);
 
     // 302 Found - temporary redirect
     res.redirect(302, clientUrl);
 });
-
 // Add a new API endpoint to get a single photo's details
 app.get('/api/photos/:filename', (req, res) => {
     const filename = req.params.filename;
