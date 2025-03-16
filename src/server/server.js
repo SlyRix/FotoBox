@@ -10,6 +10,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const compression = require('compression'); // Add compression
 const sharp = require('sharp'); // Add sharp for image processing
+const CLIENT_APP_URL = 'https://fotobox.slyrix.com'; // Replace with your actual client app URL
 
 // Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
@@ -578,8 +579,8 @@ app.post('/api/photos/capture', (req, res) => {
 
 // Helper function to generate QR code and send response
 async function generateQRAndRespond(req, res, filename, timestamp) {
-    // Generate QR code for this photo - point to the photo view page instead of direct image
-    const photoViewUrl = `http://${req.headers.host}/photo/${filename}`; // Changed URL to point to the view page
+    // Still point to API server URL, the redirect will handle the rest
+    const photoViewUrl = `${req.protocol}://${req.get('host')}/photo/${filename}`;
     const qrFilename = `qr_${timestamp}.png`;
     const qrFilepath = path.join(QR_DIR, qrFilename);
 
@@ -610,6 +611,17 @@ async function generateQRAndRespond(req, res, filename, timestamp) {
     });
 }
 
+// Add a redirect for /photo/* paths to the client app
+app.get('/photo/:filename', (req, res) => {
+    const filename = req.params.filename;
+    const clientUrl = `${CLIENT_APP_URL}/photo/${filename}`;
+
+    console.log(`Redirecting from API server to client app: ${clientUrl}`);
+
+    // 302 Found - temporary redirect
+    res.redirect(302, clientUrl);
+});
+
 // Add a new API endpoint to get a single photo's details
 app.get('/api/photos/:filename', (req, res) => {
     const filename = req.params.filename;
@@ -620,12 +632,17 @@ app.get('/api/photos/:filename', (req, res) => {
         return res.status(404).json({ error: 'Photo not found' });
     }
 
+    // Get file stats
     const stats = fs.statSync(filepath);
+
+    // Create full URLs (with protocol and host)
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+
     const photo = {
         filename: filename,
-        url: `/photos/${filename}`,
-        thumbnailUrl: `/thumbnails/thumb_${filename}`,
-        qrUrl: `/qrcodes/qr_${filename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`,
+        url: `${baseUrl}/photos/${filename}`,
+        thumbnailUrl: `${baseUrl}/thumbnails/thumb_${filename}`,
+        qrUrl: `${baseUrl}/qrcodes/qr_${filename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`,
         timestamp: stats.mtime.getTime()
     };
 

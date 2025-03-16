@@ -36,11 +36,12 @@ const PhotoView = () => {
                 const response = await fetch(`${API_ENDPOINT}/photos/${photoId}`);
 
                 if (!response.ok) {
-                    // If API doesn't respond correctly, create basic info
-                    // from the photoId parameter
+                    // If specific photo endpoint fails, try to create photo info from filename
+                    console.log('Specific photo endpoint failed, creating photo info from filename');
                     setPhoto({
                         filename: photoId,
                         url: `/photos/${photoId}`,
+                        thumbnailUrl: `/thumbnails/thumb_${photoId}`,
                         timestamp: new Date().getTime()
                     });
                 } else {
@@ -55,6 +56,7 @@ const PhotoView = () => {
                 setPhoto({
                     filename: photoId,
                     url: `/photos/${photoId}`,
+                    thumbnailUrl: `/thumbnails/thumb_${photoId}`,
                     timestamp: new Date().getTime()
                 });
                 setLoading(false);
@@ -101,10 +103,14 @@ const PhotoView = () => {
         );
     }
 
-    // Construct the image URL
-    const imageUrl = photo.url.startsWith('/')
-        ? `${API_BASE_URL}${photo.url}`
-        : photo.url;
+    // Make sure URLs are fully qualified
+    const imageUrl = photo.url.startsWith('http')
+        ? photo.url
+        : `${API_BASE_URL}${photo.url}`;
+
+    const thumbnailUrl = photo.thumbnailUrl && photo.thumbnailUrl.startsWith('http')
+        ? photo.thumbnailUrl
+        : `${API_BASE_URL}${photo.thumbnailUrl || photo.url}`;
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
@@ -126,6 +132,11 @@ const PhotoView = () => {
                                     src={imageUrl}
                                     alt="Wedding memory"
                                     className="w-full h-full object-contain"
+                                    onError={(e) => {
+                                        console.error("Primary image failed to load, trying thumbnail");
+                                        e.target.onerror = null; // Prevent infinite loop
+                                        e.target.src = thumbnailUrl;
+                                    }}
                                 />
                             </div>
                         </div>
