@@ -1,4 +1,4 @@
-// src/components/PhotoView.js
+// Fixed src/components/PhotoView.js with improved error handling
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -14,11 +14,19 @@ const PhotoView = () => {
     // Fetch the specific photo data
     useEffect(() => {
         const fetchPhoto = async () => {
+            // Validate photoId to prevent unnecessary API calls
+            if (!photoId) {
+                setError('No photo ID provided');
+                setLoading(false);
+                return;
+            }
+
             try {
+                console.log(`Fetching photo with ID: ${photoId}`);
                 const response = await fetch(`${API_ENDPOINT}/photos/${photoId}`);
 
                 if (!response.ok) {
-                    throw new Error('Photo not found');
+                    throw new Error(`Photo not found (Status: ${response.status})`);
                 }
 
                 const data = await response.json();
@@ -31,24 +39,20 @@ const PhotoView = () => {
                 };
 
                 setPhoto(photoWithUrls);
-                setLoading(false);
             } catch (error) {
                 console.error('Error fetching photo:', error);
                 setError(error.message);
+            } finally {
                 setLoading(false);
             }
         };
 
-        if (photoId) {
-            fetchPhoto();
-        } else {
-            setError('No photo ID provided');
-            setLoading(false);
-        }
+        fetchPhoto();
     }, [photoId]);
 
     // Format date for display
     const formatDate = (timestamp) => {
+        if (!timestamp) return 'Unknown date';
         return new Date(timestamp).toLocaleString();
     };
 
@@ -63,37 +67,27 @@ const PhotoView = () => {
         );
     }
 
-    if (error) {
+    if (error || !photo) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-wedding-background p-4">
                 <div className="bg-white rounded-lg shadow-lg p-6 max-w-lg w-full text-center">
                     <div className="text-5xl mb-4">😕</div>
                     <h2 className="text-2xl font-bold text-gray-800 mb-2">Photo Not Found</h2>
-                    <p className="text-gray-600 mb-6">{error}</p>
-                    <button
-                        onClick={() => navigate('/')}
-                        className="btn btn-primary btn-christian"
-                    >
-                        Back to Home
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    if (!photo) {
-        return (
-            <div className="min-h-screen flex flex-col items-center justify-center bg-wedding-background p-4">
-                <div className="bg-white rounded-lg shadow-lg p-6 max-w-lg w-full text-center">
-                    <div className="text-5xl mb-4">🔍</div>
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Photo Not Available</h2>
-                    <p className="text-gray-600 mb-6">We couldn't find the requested photo.</p>
-                    <button
-                        onClick={() => navigate('/')}
-                        className="btn btn-primary btn-christian"
-                    >
-                        Back to Home
-                    </button>
+                    <p className="text-gray-600 mb-6">{error || "We couldn't find the requested photo."}</p>
+                    <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                        <button
+                            onClick={() => navigate('/')}
+                            className="btn btn-primary btn-christian"
+                        >
+                            Back to Home
+                        </button>
+                        <button
+                            onClick={() => navigate('/gallery')}
+                            className="btn btn-outline btn-christian-outline"
+                        >
+                            View Gallery
+                        </button>
+                    </div>
                 </div>
             </div>
         );
@@ -120,6 +114,11 @@ const PhotoView = () => {
                                 src={photo.fullUrl}
                                 alt="Wedding photo"
                                 className="w-full h-full object-contain"
+                                onError={(e) => {
+                                    console.error('Error loading image:', photo.fullUrl);
+                                    e.target.src = '/placeholder-image.jpg'; // Fallback image
+                                    e.target.alt = 'Image could not be loaded';
+                                }}
                             />
                         </div>
                     </div>
@@ -137,12 +136,14 @@ const PhotoView = () => {
                             href={photo.fullUrl}
                             download
                             className="btn btn-primary btn-christian text-center"
+                            target="_blank"
+                            rel="noopener noreferrer"
                         >
                             Download Photo
                         </a>
 
                         <a
-                            href="/"
+                            href="/gallery"
                             className="btn btn-outline btn-christian-outline text-center"
                         >
                             Go to Gallery

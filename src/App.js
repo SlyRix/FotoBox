@@ -1,4 +1,4 @@
-// Updated App.js - Added PhotoView route and fixed imports
+// Fixed App.js to prevent redirect loops
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import HomePage from './components/HomePage';
@@ -6,6 +6,7 @@ import CameraView from './components/CameraView';
 import PhotoPreview from './components/PhotoPreview';
 import QRCodeView from './components/QRCodeView';
 import PhotoView from './components/PhotoView';
+import GalleryView from './components/GalleryView';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import { CameraProvider } from './contexts/CameraContext';
@@ -32,11 +33,17 @@ function App() {
             <Router>
                 <div className="min-h-screen bg-wedding-background">
                     <Routes>
+                        {/* Main routes */}
                         <Route path="/" element={<HomePage />} />
                         <Route path="/camera" element={<CameraView />} />
                         <Route path="/preview" element={<PhotoPreview />} />
                         <Route path="/qrcode" element={<QRCodeView />} />
+                        <Route path="/gallery" element={<GalleryView />} />
+
+                        {/* Photo viewing route with explicit path parameter to prevent loops */}
                         <Route path="/photo/:photoId" element={<PhotoView />} />
+
+                        {/* Admin routes */}
                         <Route path="/admin-login" element={<AdminLogin />} />
                         <Route
                             path="/admin"
@@ -46,6 +53,7 @@ function App() {
                                 </AdminRoute>
                             }
                         />
+
                         {/* Catch all route - redirect to home */}
                         <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>
