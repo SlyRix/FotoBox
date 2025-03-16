@@ -172,18 +172,6 @@ const PhotoView = () => {
                             >
                                 Save to Photos
                             </button>
-                            <div className="mt-2 p-3 bg-yellow-50 text-yellow-700 rounded-lg text-sm">
-                                <p className="font-medium">To save this photo to your device:</p>
-                                <ol className="list-decimal pl-5 mt-1">
-                                    <li>Tap the "Save to Photos" button above</li>
-                                    <li>Select "Save Image" from the menu</li>
-                                </ol>
-                                <p className="mt-1">If that doesn't work:</p>
-                                <ol className="list-decimal pl-5 mt-1">
-                                    <li>Press and hold on the photo above</li>
-                                    <li>Select "Save to Photos" from the menu</li>
-                                </ol>
-                            </div>
                         </div>
                     ) : isMobile ? (
                         <div className="space-y-4">
@@ -195,9 +183,9 @@ const PhotoView = () => {
                             >
                                 Download Photo
                             </a>
-                            <p className="text-sm text-gray-600 text-center">
-                                If download doesn't start, tap and hold on the photo above and select "Download Image"
-                            </p>
+                            {/*<p className="text-sm text-gray-600 text-center">*/}
+                            {/*    If download doesn't start, tap and hold on the photo above and select "Download Image"*/}
+                            {/*</p>*/}
                         </div>
                     ) : (
                         /* Desktop download button */
