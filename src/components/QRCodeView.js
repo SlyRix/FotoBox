@@ -1,5 +1,6 @@
-// client/src/components/QRCodeView.js - Optimized for landscape tablets
-import React, { useState, useEffect } from 'react';
+
+// client/src/components/QRCodeView.js
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
@@ -10,18 +11,7 @@ const QRCodeView = () => {
     const navigate = useNavigate();
     const [isPrinting, setIsPrinting] = useState(false);
     const [printMessage, setPrintMessage] = useState('');
-    const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
-
-    // Monitor orientation changes
-    useEffect(() => {
-        const handleResize = () => {
-            setIsLandscape(window.innerWidth > window.innerHeight);
-        };
-
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, []);
-
+    //TODO: Add Global API URL for all files
     // If no photo is available, redirect to camera
     if (!currentPhoto) {
         navigate('/camera');
@@ -69,32 +59,32 @@ const QRCodeView = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
-                className={`w-full ${isLandscape ? 'max-w-6xl' : 'max-w-2xl'} bg-white rounded-lg shadow-lg overflow-hidden`}
+                className="w-full max-w-2xl bg-white rounded-lg shadow-lg overflow-hidden"
             >
                 <div className="p-4 bg-hindu-secondary text-white">
                     <h2 className="text-xl font-bold text-center">Scan to View Your Photo</h2>
                 </div>
 
                 <div className="p-6">
-                    <div className={`flex ${isLandscape ? 'flex-row' : 'flex-col md:flex-row'} items-center justify-center gap-6`}>
-                        <div className={`${isLandscape ? 'w-1/2' : 'w-full md:w-1/2'}`}>
+                    <div className="flex flex-col md:flex-row items-center justify-center gap-6">
+                        <div className="w-full md:w-1/2">
                             <img
                                 src={imageUrl}
                                 alt="Your photo"
-                                className="w-full h-auto rounded-lg border-2 border-wedding-background shadow-md"
+                                className="w-full h-auto rounded-lg border-2 border-wedding-background"
                             />
                         </div>
 
-                        <div className={`${isLandscape ? 'w-1/2' : 'w-full md:w-1/2'} flex flex-col items-center justify-center`}>
+                        <div className="w-full md:w-1/2 flex flex-col items-center">
                             <p className="text-center mb-4 text-gray-700">
                                 Use your phone to scan this QR code and view your photo:
                             </p>
 
-                            <div className="p-4 bg-white border-4 border-wedding-gold rounded-lg shadow-md mb-4 mx-auto">
+                            <div className="p-4 bg-white border-4 border-wedding-gold rounded-lg shadow-md mb-4">
                                 <img
                                     src={qrCodeUrl}
                                     alt="QR Code"
-                                    className={`${isLandscape ? 'w-40 h-40' : 'w-48 h-48'} mx-auto`}
+                                    className="w-48 h-48"
                                 />
                             </div>
                         </div>
@@ -106,25 +96,25 @@ const QRCodeView = () => {
                         </div>
                     )}
 
-                    <div className={`mt-6 flex ${isLandscape ? 'flex-row justify-center' : 'flex-col md:flex-row justify-center'} gap-4`}>
+                    <div className="mt-6 flex flex-col md:flex-row justify-center gap-4">
                         <button
                             onClick={handlePrint}
                             disabled={isPrinting}
-                            className={`btn btn-primary btn-hindu ${isLandscape ? '' : 'w-full md:w-auto'}`}
+                            className="btn btn-primary btn-hindu w-full md:w-auto"
                         >
                             {isPrinting ? 'Printing...' : 'Print Photo'}
                         </button>
 
                         <button
                             onClick={handleAnotherPhoto}
-                            className={`btn btn-outline btn-christian-outline ${isLandscape ? '' : 'w-full md:w-auto'}`}
+                            className="btn btn-outline btn-christian-outline w-full md:w-auto"
                         >
                             Take Another Photo
                         </button>
 
                         <button
                             onClick={handleBackToHome}
-                            className={`btn btn-outline btn-hindu-outline ${isLandscape ? '' : 'w-full md:w-auto'}`}
+                            className="btn btn-outline btn-hindu-outline w-full md:w-auto"
                         >
                             Back to Home
                         </button>
