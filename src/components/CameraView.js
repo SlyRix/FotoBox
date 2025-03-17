@@ -1,8 +1,9 @@
-// Improved CameraView.js with larger UI for iPad and camera visibility during countdown
+// Full CameraView.js for Server-Side Implementation
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion, AnimatePresence } from 'framer-motion';
+import HeartSpinner from './HeartSpinner';
 
 const CameraView = () => {
     const { takePhoto, loading } = useCamera();
@@ -10,6 +11,7 @@ const CameraView = () => {
     const [countdown, setCountdown] = useState(null);
     const [isReady, setIsReady] = useState(true);
     const [streamActive, setStreamActive] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false);
 
     // Hard-coded stream URL that we know works
     const STREAM_URL = "https://fotobox-sh.slyrix.com//?action=stream";
@@ -56,34 +58,47 @@ const CameraView = () => {
             // Show "SMILE!" message
             setCountdown("SMILE!");
 
-            // Take photo after showing the smile message
-            const capturePhoto = async () => {
-                try {
-                    const photo = await takePhoto();
-                    if (photo) {
-                        // Navigate to preview page
-                        navigate('/preview');
-                    } else {
-                        // Reset if there was an error
-                        setIsReady(true);
-                        setCountdown(null);
-                    }
-                } catch (err) {
-                    console.error('Failed to take photo:', err);
-                    setIsReady(true);
-                    setCountdown(null);
-                }
-            };
-
-            // Short delay to show the "SMILE!" message
-            setTimeout(capturePhoto, 500);
+            // Show "SMILE!" for 1.5 seconds before showing the HeartSpinner
+            setTimeout(() => {
+                // Start photo capture process
+                capturePhoto();
+            }, 1500);
         }
 
         return () => clearTimeout(timer);
-    }, [countdown, takePhoto, navigate]);
+    }, [countdown]);
+
+    // Photo capture function
+    const capturePhoto = async () => {
+        // Show processing spinner
+        setIsProcessing(true);
+
+        try {
+            // Take the photo - server handles overlay application during capture
+            const photo = await takePhoto();
+
+            if (photo) {
+                // Add a short delay to ensure the server has time to process
+                setTimeout(() => {
+                    // Navigate to preview page
+                    navigate('/preview');
+                }, 1000);
+            } else {
+                // Reset if there was an error
+                setIsReady(true);
+                setCountdown(null);
+                setIsProcessing(false);
+            }
+        } catch (err) {
+            console.error('Failed to take photo:', err);
+            setIsReady(true);
+            setCountdown(null);
+            setIsProcessing(false);
+        }
+    };
 
     // Early return for loading state
-    if (loading && countdown === null) {
+    if (loading && countdown === null && !isProcessing) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center">
                 <div className="text-center">
@@ -96,7 +111,7 @@ const CameraView = () => {
 
     return (
         <div className="min-h-screen flex flex-col relative">
-            {/* Full-width camera view - optimized for landscape */}
+            {/* Full-width camera view */}
             <div className="absolute inset-0 bg-black">
                 {streamActive ? (
                     <img
@@ -114,7 +129,7 @@ const CameraView = () => {
                 )}
             </div>
 
-            {/* Overlay UI elements - optimized for landscape */}
+            {/* Overlay UI elements */}
             <div className="absolute inset-0 pointer-events-none">
                 {/* Top left - back button */}
                 <div className="absolute top-4 left-4">
@@ -140,9 +155,9 @@ const CameraView = () => {
                     <motion.button
                         whileTap={{ scale: 0.95 }}
                         onClick={handleTakePhoto}
-                        disabled={!isReady || loading || !streamActive}
+                        disabled={!isReady || loading || !streamActive || isProcessing}
                         className={`btn btn-primary btn-hindu py-10 px-10 text-center text-4xl font-semibold shadow-xl rounded-full pointer-events-auto w-64 ${
-                            !isReady || loading || !streamActive ? 'opacity-70 cursor-not-allowed' : ''
+                            !isReady || loading || !streamActive || isProcessing ? 'opacity-70 cursor-not-allowed' : ''
                         }`}
                     >
                         Take Photo
@@ -150,9 +165,23 @@ const CameraView = () => {
                 </div>
             </div>
 
+            {/* Processing overlay - show HeartSpinner when processing */}
+            <AnimatePresence>
+                {isProcessing && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 bg-white z-30 flex items-center justify-center"
+                    >
+                        <HeartSpinner />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* Overlay the countdown on top of everything */}
             <AnimatePresence>
-                {countdown !== null && (
+                {countdown !== null && !isProcessing && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}

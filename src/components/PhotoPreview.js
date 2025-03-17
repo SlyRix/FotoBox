@@ -1,17 +1,17 @@
-// Updated PhotoPreview.js with overlay functionality
-import React, { useEffect, useState, useRef } from 'react';
+// Updated PhotoPreview.js with server-side overlay processing
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
-import PhotoOverlay from './PhotoOverlay'; // Import the new component
+import { API_BASE_URL, API_ENDPOINT } from '../App';
 
 const PhotoPreview = () => {
-    const { currentPhoto, loading, apiBaseUrl, setCurrentPhoto } = useCamera();
+    const { currentPhoto, loading, setCurrentPhoto } = useCamera();
     const navigate = useNavigate();
     const [imageError, setImageError] = useState(false);
     const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
-    const [overlayApplied, setOverlayApplied] = useState(false);
-    const [processedPhoto, setProcessedPhoto] = useState(null);
+    const [isApplyingOverlay, setIsApplyingOverlay] = useState(false);
+    const [statusMessage, setStatusMessage] = useState("How does it look?");
 
     // Use useEffect for navigation to avoid state updates during render
     useEffect(() => {
@@ -29,31 +29,75 @@ const PhotoPreview = () => {
         return () => window.removeEventListener('resize', handleResize);
     }, [currentPhoto, loading, navigate]);
 
+    // Check if overlay is already applied (from server-side processing)
+    useEffect(() => {
+        if (currentPhoto && currentPhoto.overlayApplied) {
+            setStatusMessage("Perfect! Love the wedding frame!");
+        }
+    }, [currentPhoto]);
+
     // Handle retaking the photo
     const handleRetake = () => {
         navigate('/camera');
     };
 
-    // Handle keeping the photo
-    const handleKeep = () => {
-        // If we have a processed photo with overlay, update the current photo
-        if (processedPhoto) {
-            // In a real implementation, you'd upload the processed image to the server here
-            // For now, we'll just update the UI and proceed
-            setCurrentPhoto({
-                ...currentPhoto,
-                overlayApplied: true,
-                // Add a temporary displayUrl for showing the processed image on screen
-                displayUrl: processedPhoto.processedImageData || currentPhoto.fullUrl
-            });
+    // Handle applying overlay via server
+    const handleApplyOverlay = async () => {
+        if (!currentPhoto || !currentPhoto.filename) {
+            return;
         }
-        navigate('/qrcode');
+
+        setIsApplyingOverlay(true);
+        setStatusMessage("Adding wedding frame...");
+
+        try {
+            // Call server endpoint to apply overlay
+            const response = await fetch(`${API_ENDPOINT}/photos/${currentPhoto.filename}/overlay`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    overlayName: 'wedding-frame.png'
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // Update the current photo with the new overlay URL
+                // Add a cache-busting timestamp to force reload of the image
+                const timestamp = Date.now();
+                setCurrentPhoto({
+                    ...currentPhoto,
+                    url: `${result.url}?t=${timestamp}`,
+                    fullUrl: `${API_BASE_URL}${result.url}?t=${timestamp}`,
+                    overlayApplied: true
+                });
+
+                setStatusMessage("Perfect! Love the wedding frame!");
+            } else {
+                console.error('Failed to apply overlay:', result.error);
+                setStatusMessage("Couldn't add frame, but your photo still looks great!");
+            }
+        } catch (error) {
+            console.error('Error applying overlay:', error);
+            setStatusMessage("Couldn't add frame, but your photo still looks great!");
+        } finally {
+            setIsApplyingOverlay(false);
+        }
     };
 
-    // Handle overlay completion
-    const handleOverlayComplete = (processedPhotoData) => {
-        setProcessedPhoto(processedPhotoData);
-        setOverlayApplied(true);
+    // Handle keeping the photo
+    const handleKeep = () => {
+        // If overlay is not applied and not currently applying, apply it
+        if (!currentPhoto.overlayApplied && !isApplyingOverlay) {
+            handleApplyOverlay();
+            return;
+        }
+
+        // Otherwise, proceed to QR code
+        navigate('/qrcode');
     };
 
     // Loading state
@@ -69,16 +113,10 @@ const PhotoPreview = () => {
     }
 
     // Determine which image URL to display
-    const displayUrl = processedPhoto?.processedImageData ||
-        currentPhoto.displayUrl ||
-        currentPhoto.fullUrl ||
-        `${apiBaseUrl}${currentPhoto.url}`;
+    const displayUrl = currentPhoto.fullUrl || `${API_BASE_URL}${currentPhoto.url}`;
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
-            {/* Include the overlay processor component */}
-            <PhotoOverlay onComplete={handleOverlayComplete} />
-
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -108,16 +146,26 @@ const PhotoPreview = () => {
                                     <p className="text-xl">Image could not be loaded</p>
                                 </div>
                             ) : (
-                                <img
-                                    src={displayUrl}
-                                    alt="Your photo"
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => {
-                                        console.error("Image failed to load:", displayUrl);
-                                        e.target.onerror = null;
-                                        setImageError(true);
-                                    }}
-                                />
+                                <>
+                                    <img
+                                        src={displayUrl}
+                                        alt="Your photo"
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                            console.error("Image failed to load:", displayUrl);
+                                            e.target.onerror = null;
+                                            setImageError(true);
+                                        }}
+                                    />
+                                    {isApplyingOverlay && (
+                                        <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
+                                            <div className="text-center">
+                                                <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-wedding-love mx-auto mb-4"></div>
+                                                <p className="text-xl font-medium text-gray-700">Adding wedding frame...</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>
@@ -125,15 +173,14 @@ const PhotoPreview = () => {
                     {/* Controls and text - adjusted for landscape */}
                     <div className={`${isLandscape ? 'w-1/3 pl-4 flex flex-col justify-center' : 'w-full'}`}>
                         <p className={`text-center ${isLandscape ? 'mb-8' : 'mb-4'} text-2xl text-gray-700`}>
-                            {overlayApplied ?
-                                "Perfect! Love the wedding frame!" :
-                                "How does it look?"}
+                            {statusMessage}
                         </p>
 
                         <div className={`flex ${isLandscape ? 'flex-col' : 'flex-col md:flex-row'} justify-center gap-4`}>
                             <button
                                 onClick={handleRetake}
                                 className="btn btn-outline btn-hindu-outline text-xl py-4 px-6 w-full"
+                                disabled={isApplyingOverlay}
                             >
                                 Retake Photo
                             </button>
@@ -141,8 +188,9 @@ const PhotoPreview = () => {
                             <button
                                 onClick={handleKeep}
                                 className="btn btn-primary btn-hindu text-xl py-4 px-6 w-full"
+                                disabled={isApplyingOverlay}
                             >
-                                {overlayApplied ? "Continue with Frame" : "Perfect! Keep it"}
+                                {currentPhoto.overlayApplied ? "Perfect! Continue" : "Add Wedding Frame"}
                             </button>
                         </div>
                     </div>
