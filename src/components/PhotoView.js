@@ -1,8 +1,10 @@
-// Updated PhotoView.js with improved download functionality
+// Enhanced PhotoView.js with share functionality and elegant design
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { API_BASE_URL, API_ENDPOINT } from '../App';
+import Icon from '@mdi/react';
+import { mdiDownload, mdiShareVariant, mdiClose, mdiInstagram, mdiFacebook, mdiWhatsapp, mdiEmail, mdiHeartOutline, mdiLoading, mdiCheck } from '@mdi/js';
 
 const PhotoView = () => {
     const { photoId } = useParams();
@@ -12,6 +14,9 @@ const PhotoView = () => {
     const [error, setError] = useState(null);
     const [isMobile, setIsMobile] = useState(false);
     const [isIOS, setIsIOS] = useState(false);
+    const [showShareOptions, setShowShareOptions] = useState(false);
+    const [shareSuccess, setShareSuccess] = useState(false);
+    const [downloadSuccess, setDownloadSuccess] = useState(false);
 
     // Detect mobile and iOS devices
     useEffect(() => {
@@ -59,27 +64,69 @@ const PhotoView = () => {
         fetchPhoto();
     }, [photoId]);
 
+    // Reset success indicators after 3 seconds
+    useEffect(() => {
+        if (shareSuccess) {
+            const timer = setTimeout(() => setShareSuccess(false), 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [shareSuccess]);
+
+    useEffect(() => {
+        if (downloadSuccess) {
+            const timer = setTimeout(() => setDownloadSuccess(false), 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [downloadSuccess]);
+
     // Handle share functionality for mobile devices
     const handleShareImage = async () => {
         if (navigator.share) {
             try {
-                const response = await fetch(photo.fullUrl);
-                const blob = await response.blob();
-                const file = new File([blob], photo.filename, { type: blob.type });
-
+                // Try to share the URL first as it's most compatible
                 await navigator.share({
-                    files: [file],
                     title: 'Wedding Photo',
+                    text: 'Check out this photo from Rushel & Sivani\'s wedding!',
+                    url: window.location.href
                 });
+                setShareSuccess(true);
             } catch (error) {
                 console.error('Error sharing:', error);
-                // Fallback to opening in new tab
-                window.open(photo.fullUrl, '_blank');
+                // On error, try to fetch and share the actual file
+                try {
+                    const response = await fetch(photo.fullUrl);
+                    const blob = await response.blob();
+                    const file = new File([blob], photo.filename, { type: blob.type });
+
+                    await navigator.share({
+                        files: [file],
+                        title: 'Wedding Photo',
+                    });
+                    setShareSuccess(true);
+                } catch (innerError) {
+                    console.error('Error sharing file:', innerError);
+                    // Fallback to opening in new tab
+                    window.open(photo.fullUrl, '_blank');
+                }
             }
         } else {
-            // Fallback for browsers that don't support sharing
-            window.open(photo.fullUrl, '_blank');
+            // Show share options if Web Share API is not available
+            setShowShareOptions(!showShareOptions);
         }
+    };
+
+    // Handle download with success indicator
+    const handleDownload = () => {
+        // Create a temporary link element
+        const link = document.createElement('a');
+        link.href = photo.fullUrl;
+        link.download = photo.filename || "wedding-photo.jpg";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // Show success indicator
+        setDownloadSuccess(true);
     };
 
     // Format date for display
@@ -90,10 +137,16 @@ const PhotoView = () => {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex flex-col items-center justify-center bg-wedding-background">
+            <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-wedding-love mx-auto mb-4"></div>
-                    <p className="text-xl text-gray-700">Loading photo...</p>
+                    <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+                        className="mb-6 text-wedding-love"
+                    >
+                        <Icon path={mdiLoading} size={4} />
+                    </motion.div>
+                    <p className="text-xl font-display text-gray-700">Loading photo...</p>
                 </div>
             </div>
         );
@@ -101,25 +154,24 @@ const PhotoView = () => {
 
     if (error || !photo) {
         return (
-            <div className="min-h-screen flex flex-col items-center justify-center bg-wedding-background p-4">
-                <div className="bg-white rounded-lg shadow-lg p-6 max-w-lg w-full text-center">
-                    <div className="text-5xl mb-4">😕</div>
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Photo Not Found</h2>
-                    <p className="text-gray-600 mb-6">{error || "We couldn't find the requested photo."}</p>
-                    <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                        <button
-                            onClick={() => navigate('/')}
-                            className="btn btn-primary btn-christian"
-                        >
-                            Back to Home
-                        </button>
-                        <button
-                            onClick={() => navigate('/gallery')}
-                            className="btn btn-outline btn-christian-outline"
-                        >
-                            View Gallery
-                        </button>
-                    </div>
+            <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
+                <div className="bg-white rounded-xl shadow-elegant p-8 max-w-lg w-full text-center">
+                    <motion.div
+                        initial={{ scale: 0.8, opacity: 0.5 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ duration: 0.5 }}
+                        className="text-5xl text-wedding-love mb-6"
+                    >
+                        <Icon path={mdiHeartOutline} size={3} />
+                    </motion.div>
+                    <h2 className="text-2xl font-display font-bold text-gray-800 mb-4">Photo Not Found</h2>
+                    <p className="text-gray-600 mb-8">{error || "We couldn't find the requested photo."}</p>
+                    <button
+                        onClick={() => window.close()}
+                        className="btn btn-primary btn-christian"
+                    >
+                        Close
+                    </button>
                 </div>
             </div>
         );
@@ -128,82 +180,197 @@ const PhotoView = () => {
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
             <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="w-full max-w-4xl bg-white rounded-lg shadow-lg overflow-hidden"
+                initial={{opacity: 0, y: 20}}
+                animate={{opacity: 1, y: 0}}
+                transition={{duration: 0.5}}
+                className="w-full max-w-4xl bg-white rounded-xl shadow-elegant overflow-hidden"
             >
-                {/* Header */}
-                <div className="p-4 bg-wedding-gold/90 text-white">
-                    <h2 className="text-3xl font-display text-center text-shadow">Rushel & Sivani's Wedding</h2>
+                {/* Elegant header */}
+                <div className="relative">
+                    <div className="p-4 bg-gradient-to-r from-hindu-secondary to-hindu-accent text-white">
+                        <h2 className="text-3xl font-script text-center text-shadow">Rushel & Sivani's Wedding</h2>
+                    </div>
+
+                    {/* Decorative element */}
+                    <div className="absolute -bottom-3 left-0 right-0 flex justify-center">
+                        <div className="flex space-x-2">
+                            {[...Array(5)].map((_, i) => (
+                                <div key={i} className="w-1.5 h-1.5 rounded-full bg-white"></div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
 
                 {/* Photo display */}
                 <div className="p-6">
-                    <div className="mb-6">
-                        <div className="aspect-[4/3] w-full overflow-hidden rounded-lg border-4 border-wedding-background shadow-md">
-                            <img
-                                src={photo.fullUrl}
-                                alt="Wedding photo"
-                                className="w-full h-full object-contain"
-                                onError={(e) => {
-                                    console.error('Error loading image:', photo.fullUrl);
-                                    e.target.src = '/placeholder-image.jpg'; // Fallback image
-                                    e.target.alt = 'Image could not be loaded';
-                                }}
-                            />
-                        </div>
+                    <div className="mb-6 relative rounded-lg overflow-hidden shadow-card">
+                        <img
+                            src={photo.fullUrl}
+                            alt="Wedding photo"
+                            className="w-full h-auto object-contain"
+                            onError={(e) => {
+                                console.error('Error loading image:', photo.fullUrl);
+                                e.target.src = '/placeholder-image.jpg'; // Fallback image
+                                e.target.alt = 'Image could not be loaded';
+                            }}
+                        />
                     </div>
 
                     {/* Photo info */}
                     <div className="mb-6 text-center">
-                        <p className="text-gray-600">
+                        <p className="text-gray-600 font-display">
                             Taken on {formatDate(photo.timestamp)}
                         </p>
                     </div>
 
-                    {/* Download options - different UI based on device */}
-                    {isIOS ? (
-                        <div className="space-y-4">
-                            {/* Share button for iOS */}
-                            <button
-                                onClick={handleShareImage}
-                                className="btn btn-primary btn-christian text-center w-full"
-                            >
-                                Save to Photos
-                            </button>
-                        </div>
-                    ) : isMobile ? (
-                        <div className="space-y-4">
-                            {/* Download for Android */}
-                            <a
-                                href={photo.fullUrl}
-                                download={photo.filename || "wedding-photo.jpg"}
-                                className="btn btn-primary btn-christian text-center block w-full"
-                            >
-                                Download Photo
-                            </a>
-                            {/*<p className="text-sm text-gray-600 text-center">*/}
-                            {/*    If download doesn't start, tap and hold on the photo above and select "Download Image"*/}
-                            {/*</p>*/}
-                        </div>
-                    ) : (
-                        /* Desktop download button */
-                        <div className="flex justify-center">
-                            <a
-                                href={photo.fullUrl}
-                                download={photo.filename || "wedding-photo.jpg"}
-                                className="btn btn-primary btn-christian text-center"
-                            >
-                                Download Photo
-                            </a>
-                        </div>
-                    )}
+                    {/* Action buttons */}
+                    <div className="flex justify-center space-x-4">
+                        {/* Download button with success indicator */}
+                        <motion.button
+                            onClick={handleDownload}
+                            className="relative btn btn-outline btn-christian-outline flex items-center"
+                            whileHover={{scale: 1.05}}
+                            whileTap={{scale: 0.95}}
+                        >
+                            <AnimatePresence mode="wait">
+                                {downloadSuccess ? (
+                                    <motion.div
+                                        key="success"
+                                        initial={{scale: 0.5, opacity: 0}}
+                                        animate={{scale: 1, opacity: 1}}
+                                        exit={{scale: 0.5, opacity: 0}}
+                                        className="mr-2 text-green-500"
+                                    >
+                                        <Icon path={mdiCheck} size={1}/>
+                                    </motion.div>
+                                ) : (
+                                    <motion.div
+                                        key="download"
+                                        initial={{scale: 0.5, opacity: 0}}
+                                        animate={{scale: 1, opacity: 1}}
+                                        exit={{scale: 0.5, opacity: 0}}
+                                        className="mr-2"
+                                    >
+                                        <Icon path={mdiDownload} size={1}/>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                            {downloadSuccess ? "Downloaded!" : "Download Photo"}
+                        </motion.button>
 
-                    {/* Social sharing section */}
-                    <div className="mt-8 text-center text-gray-600">
-                        <p className="mb-3">Thank you for celebrating with us!</p>
-                        <p className="text-sm">Share your memories with #RushelAndSivani2025</p>
+                        {/* Share button with options */}
+                        <div className="relative">
+                            <motion.button
+                                onClick={handleShareImage}
+                                className="btn btn-primary btn-hindu flex items-center"
+                                whileHover={{scale: 1.05}}
+                                whileTap={{scale: 0.95}}
+                            >
+                                <AnimatePresence mode="wait">
+                                    {shareSuccess ? (
+                                        <motion.div
+                                            key="success"
+                                            initial={{scale: 0.5, opacity: 0}}
+                                            animate={{scale: 1, opacity: 1}}
+                                            exit={{scale: 0.5, opacity: 0}}
+                                            className="mr-2"
+                                        >
+                                            <Icon path={mdiCheck} size={1}/>
+                                        </motion.div>
+                                    ) : (
+                                        <motion.div
+                                            key="share"
+                                            initial={{scale: 0.5, opacity: 0}}
+                                            animate={{scale: 1, opacity: 1}}
+                                            exit={{scale: 0.5, opacity: 0}}
+                                            className="mr-2"
+                                        >
+                                            <Icon path={mdiShareVariant} size={1}/>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                                {shareSuccess ? "Shared!" : "Share Photo"}
+                            </motion.button>
+
+                            {/* Share options popup */}
+                            <AnimatePresence>
+                                {showShareOptions && (
+                                    <motion.div
+                                        initial={{opacity: 0, y: 10, scale: 0.9}}
+                                        animate={{opacity: 1, y: 0, scale: 1}}
+                                        exit={{opacity: 0, y: 10, scale: 0.9}}
+                                        className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-lg shadow-elegant overflow-hidden z-10"
+                                    >
+                                        <div
+                                            className="flex justify-between items-center px-4 py-2 bg-gray-50 border-b">
+                                            <span className="text-sm font-medium">Share via</span>
+                                            <button
+                                                onClick={() => setShowShareOptions(false)}
+                                                className="text-gray-500 hover:text-gray-700"
+                                            >
+                                                <Icon path={mdiClose} size={0.8}/>
+                                            </button>
+                                        </div>
+                                        <div className="p-1">
+                                            {/* Instagram */}
+                                            <a
+                                                href={`https://www.instagram.com/?url=${encodeURIComponent(window.location.href)}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center px-4 py-3 hover:bg-gray-50"
+                                                onClick={() => setShareSuccess(true)}
+                                            >
+                                                <Icon path={mdiInstagram} size={1.2} className="text-pink-600 mr-3"/>
+                                                <span>Instagram</span>
+                                            </a>
+
+                                            {/* Facebook */}
+                                            <a
+                                                href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center px-4 py-3 hover:bg-gray-50 border-t"
+                                                onClick={() => setShareSuccess(true)}
+                                            >
+                                                <Icon path={mdiFacebook} size={1.2} className="text-blue-600 mr-3"/>
+                                                <span>Facebook</span>
+                                            </a>
+
+                                            {/* WhatsApp */}
+                                            <a
+                                                href={`https://wa.me/?text=${encodeURIComponent('Check out this photo from Rushel & Sivani\'s wedding! ' + window.location.href)}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center px-4 py-3 hover:bg-gray-50 border-t"
+                                                onClick={() => setShareSuccess(true)}
+                                            >
+                                                <Icon path={mdiWhatsapp} size={1.2} className="text-green-600 mr-3"/>
+                                                <span>WhatsApp</span>
+                                            </a>
+
+                                            {/* Email */}
+                                            <a
+                                                href={`mailto:?subject=Wedding Photo&body=${encodeURIComponent('Check out this photo from Rushel & Sivani\'s wedding!\n\n' + window.location.href)}`}
+                                                className="flex items-center px-4 py-3 hover:bg-gray-50 border-t"
+                                                onClick={() => setShareSuccess(true)}
+                                            >
+                                                <Icon path={mdiEmail} size={1.2} className="text-gray-600 mr-3"/>
+                                                <span>Email</span>
+                                            </a>
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                    </div>
+
+                    {/* Wedding info and social tags */}
+                    <div className="mt-10 text-center">
+                        <div className="fancy-divider my-6"></div>
+                        <p className="text-gray-500 mb-2">Thank you for celebrating with us!</p>
+                        <p className="text-sm text-wedding-love font-script text-lg">
+                            #RushelAndSivani2026
+                        </p>
                     </div>
                 </div>
             </motion.div>

@@ -1,9 +1,11 @@
-// Updated PhotoPreview.js with server-side overlay processing
+// Fixed PhotoPreview.js (removed frame toggle feature)
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { API_BASE_URL, API_ENDPOINT } from '../App';
+import Icon from '@mdi/react';
+import { mdiCamera, mdiCheck, mdiLoading ,mdiImage} from '@mdi/js';
 
 const PhotoPreview = () => {
     const { currentPhoto, loading, setCurrentPhoto } = useCamera();
@@ -105,8 +107,14 @@ const PhotoPreview = () => {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-24 w-24 border-t-8 border-b-8 border-wedding-love mx-auto mb-6"></div>
-                    <p className="text-3xl text-gray-700">Processing your photo...</p>
+                    <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+                        className="mb-6 text-wedding-love"
+                    >
+                        <Icon path={mdiLoading} size={4} />
+                    </motion.div>
+                    <p className="text-3xl font-display text-gray-700">Processing your photo...</p>
                 </div>
             </div>
         );
@@ -118,31 +126,45 @@ const PhotoPreview = () => {
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
             <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className={`w-full ${isLandscape ? 'max-w-6xl' : 'max-w-4xl'} bg-white rounded-lg shadow-lg overflow-hidden`}
+                initial={{opacity: 0, y: 20}}
+                animate={{opacity: 1, y: 0}}
+                transition={{duration: 0.5}}
+                className={`w-full ${isLandscape ? 'max-w-6xl' : 'max-w-4xl'} bg-white rounded-xl shadow-elegant overflow-hidden`}
             >
-                {/* Header */}
-                <div className="p-4 bg-hindu-secondary text-white">
-                    <h2 className="text-3xl font-bold text-center">Your Photo</h2>
+                {/* Header with decorative elements */}
+                <div className="relative">
+                    <div className="p-4 bg-gradient-to-r from-hindu-secondary to-hindu-accent text-white">
+                        <div className="flex items-center justify-center">
+                            <div className="h-px bg-white/30 w-12 md:w-16"></div>
+                            <h2 className="text-2xl md:text-3xl font-display text-center mx-4">Your Moment</h2>
+                            <div className="h-px bg-white/30 w-12 md:w-16"></div>
+                        </div>
+                    </div>
+
+                    {/* Decorative dot pattern */}
+                    <div className="absolute -bottom-3 left-0 right-0 flex justify-center">
+                        <div className="flex space-x-2">
+                            {[...Array(5)].map((_, i) => (
+                                <div key={i} className="w-1.5 h-1.5 rounded-full bg-white"></div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
 
                 {/* Main content - optimized for landscape */}
-                <div className={`p-4 ${isLandscape ? 'flex items-center' : 'block'}`}>
+                <div className={`p-6 ${isLandscape ? 'flex items-center' : 'block'}`}>
                     {/* Photo container - adjusted for landscape */}
                     <div
                         className={`
-                            ${isLandscape ? 'w-2/3 pr-4' : 'w-full mb-4'} 
+                            ${isLandscape ? 'w-2/3 pr-6' : 'w-full mb-6'} 
                             relative
                         `}
                     >
-                        <div className="aspect-[4/3] w-full overflow-hidden rounded-lg border-4 border-wedding-background relative">
+                        <div className="aspect-[4/3] w-full overflow-hidden rounded-lg shadow-card relative">
                             {imageError ? (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100 text-gray-500">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-24 w-24 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                    </svg>
+                                <div
+                                    className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100 text-gray-500">
+                                    <Icon path={mdiImage} size={4} className="mb-4"/>
                                     <p className="text-xl">Image could not be loaded</p>
                                 </div>
                             ) : (
@@ -158,10 +180,19 @@ const PhotoPreview = () => {
                                         }}
                                     />
                                     {isApplyingOverlay && (
-                                        <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
+                                        <div
+                                            className="absolute inset-0 bg-white/70 backdrop-blur-sm flex items-center justify-center">
                                             <div className="text-center">
-                                                <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-wedding-love mx-auto mb-4"></div>
-                                                <p className="text-xl font-medium text-gray-700">Adding wedding frame...</p>
+                                                <motion.div
+                                                    animate={{rotate: 360}}
+                                                    transition={{repeat: Infinity, duration: 1.5, ease: "linear"}}
+                                                    className="mb-4 text-hindu-accent"
+                                                >
+                                                    <Icon path={mdiLoading} size={3}/>
+                                                </motion.div>
+                                                <p className="text-xl font-medium text-hindu-accent">
+                                                    Adding wedding frame...
+                                                </p>
                                             </div>
                                         </div>
                                     )}
@@ -171,25 +202,38 @@ const PhotoPreview = () => {
                     </div>
 
                     {/* Controls and text - adjusted for landscape */}
-                    <div className={`${isLandscape ? 'w-1/3 pl-4 flex flex-col justify-center' : 'w-full'}`}>
-                        <p className={`text-center ${isLandscape ? 'mb-8' : 'mb-4'} text-2xl text-gray-700`}>
-                            {statusMessage}
-                        </p>
+                    <div className={`${isLandscape ? 'w-1/3 pl-6 flex flex-col justify-center' : 'w-full'}`}>
+                        <AnimatePresence mode="wait">
+                            <motion.p
+                                key={statusMessage}
+                                initial={{opacity: 0, y: -10}}
+                                animate={{opacity: 1, y: 0}}
+                                exit={{opacity: 0, y: 10}}
+                                className={`text-center ${isLandscape ? 'mb-8' : 'mb-6'} text-2xl text-gray-700 font-display`}
+                            >
+                                {statusMessage}
+                            </motion.p>
+                        </AnimatePresence>
 
-                        <div className={`flex ${isLandscape ? 'flex-col' : 'flex-col md:flex-row'} justify-center gap-4`}>
+                        <div
+                            className={`flex ${isLandscape ? 'flex-col space-y-4' : 'flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4'}`}>
+                            {/* Retake button */}
                             <button
                                 onClick={handleRetake}
-                                className="btn btn-outline btn-hindu-outline text-xl py-4 px-6 w-full"
                                 disabled={isApplyingOverlay}
+                                className="flex items-center justify-center btn btn-outline btn-hindu-outline text-lg py-3 px-6 w-full"
                             >
+                                <Icon path={mdiCamera} size={1} className="mr-2"/>
                                 Retake Photo
                             </button>
 
+                            {/* Keep/Continue button */}
                             <button
                                 onClick={handleKeep}
-                                className="btn btn-primary btn-hindu text-xl py-4 px-6 w-full"
                                 disabled={isApplyingOverlay}
+                                className="flex items-center justify-center btn btn-primary btn-hindu text-lg py-3 px-6 w-full"
                             >
+                                <Icon path={mdiCheck} size={1} className="mr-2"/>
                                 {currentPhoto.overlayApplied ? "Perfect! Continue" : "Add Wedding Frame"}
                             </button>
                         </div>

@@ -1,9 +1,11 @@
-// Full CameraView.js for Server-Side Implementation
+// Enhanced CameraView.js with more design elements
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import HeartSpinner from './HeartSpinner';
+import Icon from '@mdi/react';
+import { mdiCamera, mdiHome, mdiHeartOutline, mdiHeart } from '@mdi/js';
 
 const CameraView = () => {
     const { takePhoto, loading } = useCamera();
@@ -100,19 +102,19 @@ const CameraView = () => {
     // Early return for loading state
     if (loading && countdown === null && !isProcessing) {
         return (
-            <div className="min-h-screen flex flex-col items-center justify-center">
+            <div className="min-h-screen bg-wedding-background flex flex-col items-center justify-center">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-24 w-24 border-t-8 border-b-8 border-wedding-love mx-auto mb-6"></div>
-                    <p className="text-3xl text-gray-700">Loading camera...</p>
+                    <p className="text-3xl font-display text-gray-700">Preparing camera...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen flex flex-col relative">
+        <div className="min-h-screen flex flex-col relative bg-black">
             {/* Full-width camera view */}
-            <div className="absolute inset-0 bg-black">
+            <div className="absolute inset-0">
                 {streamActive ? (
                     <img
                         src={STREAM_URL}
@@ -120,10 +122,23 @@ const CameraView = () => {
                         className="w-full h-full object-contain"
                     />
                 ) : (
-                    <div className="flex flex-col items-center justify-center text-white/80 h-full">
-                        <div className="text-8xl mb-6">📷</div>
-                        <p className="text-4xl">
-                            Camera loading...
+                    <div className="flex flex-col items-center justify-center text-white/80 h-full bg-gradient-to-b from-gray-800 to-black">
+                        <motion.div
+                            animate={{
+                                scale: [1, 1.1, 1],
+                                rotate: [0, 5, 0, -5, 0]
+                            }}
+                            transition={{
+                                duration: 3,
+                                repeat: Infinity,
+                                ease: "easeInOut"
+                            }}
+                            className="text-8xl mb-6"
+                        >
+                            <Icon path={mdiCamera} size={6} />
+                        </motion.div>
+                        <p className="text-4xl font-display">
+                            Connecting to camera...
                         </p>
                     </div>
                 )}
@@ -131,37 +146,104 @@ const CameraView = () => {
 
             {/* Overlay UI elements */}
             <div className="absolute inset-0 pointer-events-none">
-                {/* Top left - back button */}
-                <div className="absolute top-4 left-4">
+                {/* Standardized header bar */}
+                <div className="absolute top-0 left-0 right-0 h-16 bg-gradient-to-r from-hindu-secondary to-hindu-accent shadow-md flex items-center justify-between px-4">
                     <button
                         onClick={() => navigate('/')}
-                        className="flex items-center justify-center bg-hindu-secondary text-white hover:bg-hindu-accent transition-colors text-xl py-4 px-6 rounded-full shadow-lg pointer-events-auto"
+                        className="flex items-center justify-center bg-white/20 backdrop-blur-md text-white hover:bg-white/30 transition-colors text-xl p-3 rounded-full shadow-lg pointer-events-auto"
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
-                        </svg>
+                        <Icon path={mdiHome} size={1.2} />
                     </button>
+
+                    <div className="text-white text-xl font-script text-shadow">
+                        Rushel & Sivani
+                    </div>
+
+                    <div className="w-10"></div> {/* Empty div to balance the layout */}
                 </div>
 
-                {/* Title at top */}
-                <div className="absolute top-4 left-0 right-0 text-center pointer-events-none">
-                    <div className="inline-block bg-hindu-secondary/80 text-white px-6 py-2 rounded-full">
-                        <h2 className="text-2xl font-display">Ready for your photo!</h2>
+                {/* Photo frame guide overlay */}
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div className="relative w-4/5 max-w-2xl aspect-[4/3]">
+                        {/* Corner markers for framing */}
+                        <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-white/30"></div>
+                        <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-white/30"></div>
+                        <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-white/30"></div>
+                        <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-white/30"></div>
+
+                        {/* Decorative elements */}
+                        <motion.div
+                            className="absolute -top-4 left-1/2 -translate-x-1/2 text-wedding-love/50"
+                            animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.5, 0.3] }}
+                            transition={{ duration: 3, repeat: Infinity }}
+                        >
+                            <Icon path={mdiHeart} size={1.5} />
+                        </motion.div>
                     </div>
                 </div>
 
-                {/* Bottom area - take photo button */}
-                <div className="absolute bottom-8 left-0 right-0 flex justify-center">
-                    <motion.button
-                        whileTap={{ scale: 0.95 }}
-                        onClick={handleTakePhoto}
-                        disabled={!isReady || loading || !streamActive || isProcessing}
-                        className={`btn btn-primary btn-hindu py-10 px-10 text-center text-4xl font-semibold shadow-xl rounded-full pointer-events-auto w-64 ${
-                            !isReady || loading || !streamActive || isProcessing ? 'opacity-70 cursor-not-allowed' : ''
-                        }`}
-                    >
-                        Take Photo
-                    </motion.button>
+                {/* Bottom area - enhanced camera button */}
+                <div className="absolute bottom-0 left-0 right-0">
+                    {/* Gradient background for button area */}
+                    <div className="h-40 bg-gradient-to-t from-black/80 to-transparent pointer-events-none"></div>
+
+                    {/* Camera button with enhanced styling */}
+                    <div className="absolute bottom-12 left-0 right-0 flex justify-center">
+                        <motion.button
+                            whileTap={{ scale: 0.95 }}
+                            onClick={handleTakePhoto}
+                            disabled={!isReady || loading || !streamActive || isProcessing}
+                            className={`relative group pointer-events-auto`}
+                        >
+                            {/* Pulsing glow effect */}
+                            <motion.div
+                                className={`absolute -inset-6 rounded-full bg-wedding-love opacity-20 blur-md ${
+                                    !isReady || loading || !streamActive || isProcessing ? 'hidden' : ''
+                                }`}
+                                animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.3, 0.1] }}
+                                transition={{ duration: 2, repeat: Infinity }}
+                            />
+
+                            {/* Orbit effect */}
+                            <motion.div
+                                className={`absolute -inset-12 ${
+                                    !isReady || loading || !streamActive || isProcessing ? 'hidden' : ''
+                                }`}
+                                style={{ zIndex: -1 }}
+                            >
+                                {[...Array(3)].map((_, i) => (
+                                    <motion.div
+                                        key={i}
+                                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full"
+                                        style={{
+                                            backgroundColor: '#d93f0b',
+                                            opacity: 0.6 - (i * 0.2)
+                                        }}
+                                        animate={{
+                                            scale: [1, 1.5, 1],
+                                            rotate: [0, 360],
+                                            opacity: [0.1, 0.3, 0.1]
+                                        }}
+                                        transition={{
+                                            duration: 4 + i,
+                                            delay: i * 0.5,
+                                            repeat: Infinity,
+                                            ease: "linear"
+                                        }}
+                                    />
+                                ))}
+                            </motion.div>
+
+                            {/* Actual camera button */}
+                            <div
+                                className={`relative flex items-center justify-center bg-gradient-to-r from-wedding-love to-hindu-accent text-white rounded-full w-32 h-32 shadow-elegant ${
+                                    !isReady || loading || !streamActive || isProcessing ? 'opacity-50' : 'opacity-100'
+                                }`}
+                            >
+                                <Icon path={mdiCamera} size={4} />
+                            </div>
+                        </motion.button>
+                    </div>
                 </div>
             </div>
 
@@ -186,18 +268,25 @@ const CameraView = () => {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="absolute inset-0 flex items-center justify-center bg-black/30 z-20 pointer-events-none"
+                        className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-20 pointer-events-none"
                     >
-                        <div className="bg-white/90 p-10 rounded-full w-64 h-64 flex items-center justify-center shadow-lg">
+                        <motion.div
+                            className="bg-white/90 rounded-full w-60 h-60 flex items-center justify-center shadow-lg"
+                            animate={{ scale: [0.9, 1] }}
+                            transition={{ duration: 0.3 }}
+                        >
                             {typeof countdown === 'string' ? (
-                                <motion.span
+                                <motion.div
                                     key="smile"
                                     initial={{ scale: 0.8, opacity: 0 }}
                                     animate={{ scale: 1, opacity: 1 }}
-                                    className="text-6xl font-bold text-wedding-love"
+                                    className="flex flex-col items-center"
                                 >
-                                    {countdown}!
-                                </motion.span>
+                                    <span className="text-6xl font-bold text-wedding-love mb-2">
+                                        {countdown}!
+                                    </span>
+                                    <Icon path={mdiHeartOutline} size={3} className="text-wedding-love" />
+                                </motion.div>
                             ) : (
                                 <motion.span
                                     key={countdown}
@@ -209,7 +298,7 @@ const CameraView = () => {
                                     {countdown}
                                 </motion.span>
                             )}
-                        </div>
+                        </motion.div>
                     </motion.div>
                 )}
             </AnimatePresence>

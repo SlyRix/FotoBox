@@ -1,6 +1,8 @@
-// Fixed App.js to prevent redirect loops
+// Updated App.js with enhanced component imports
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+
+// Import enhanced components
 import HomePage from './components/HomePage';
 import CameraView from './components/CameraView';
 import PhotoPreview from './components/PhotoPreview';
@@ -9,6 +11,8 @@ import PhotoView from './components/PhotoView';
 import GalleryView from './components/GalleryView';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
+import HeartSpinner from './components/HeartSpinner';
+
 import { CameraProvider } from './contexts/CameraContext';
 import './styles/tailwind.css';
 
