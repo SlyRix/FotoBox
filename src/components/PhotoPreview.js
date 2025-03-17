@@ -1,14 +1,17 @@
-// Improved PhotoPreview.js optimized for landscape tablet view
-import React, { useEffect, useState } from 'react';
+// Updated PhotoPreview.js with overlay functionality
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
+import PhotoOverlay from './PhotoOverlay'; // Import the new component
 
 const PhotoPreview = () => {
-    const { currentPhoto, loading, apiBaseUrl } = useCamera();
+    const { currentPhoto, loading, apiBaseUrl, setCurrentPhoto } = useCamera();
     const navigate = useNavigate();
     const [imageError, setImageError] = useState(false);
     const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
+    const [overlayApplied, setOverlayApplied] = useState(false);
+    const [processedPhoto, setProcessedPhoto] = useState(null);
 
     // Use useEffect for navigation to avoid state updates during render
     useEffect(() => {
@@ -33,7 +36,24 @@ const PhotoPreview = () => {
 
     // Handle keeping the photo
     const handleKeep = () => {
+        // If we have a processed photo with overlay, update the current photo
+        if (processedPhoto) {
+            // In a real implementation, you'd upload the processed image to the server here
+            // For now, we'll just update the UI and proceed
+            setCurrentPhoto({
+                ...currentPhoto,
+                overlayApplied: true,
+                // Add a temporary displayUrl for showing the processed image on screen
+                displayUrl: processedPhoto.processedImageData || currentPhoto.fullUrl
+            });
+        }
         navigate('/qrcode');
+    };
+
+    // Handle overlay completion
+    const handleOverlayComplete = (processedPhotoData) => {
+        setProcessedPhoto(processedPhotoData);
+        setOverlayApplied(true);
     };
 
     // Loading state
@@ -48,11 +68,17 @@ const PhotoPreview = () => {
         );
     }
 
-    // First try to use the fullUrl if available, otherwise construct it
-    const imageUrl = currentPhoto.fullUrl || `${apiBaseUrl}${currentPhoto.url}`;
+    // Determine which image URL to display
+    const displayUrl = processedPhoto?.processedImageData ||
+        currentPhoto.displayUrl ||
+        currentPhoto.fullUrl ||
+        `${apiBaseUrl}${currentPhoto.url}`;
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
+            {/* Include the overlay processor component */}
+            <PhotoOverlay onComplete={handleOverlayComplete} />
+
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -83,11 +109,11 @@ const PhotoPreview = () => {
                                 </div>
                             ) : (
                                 <img
-                                    src={imageUrl}
+                                    src={displayUrl}
                                     alt="Your photo"
                                     className="w-full h-full object-cover"
                                     onError={(e) => {
-                                        console.error("Image failed to load:", imageUrl);
+                                        console.error("Image failed to load:", displayUrl);
                                         e.target.onerror = null;
                                         setImageError(true);
                                     }}
@@ -99,7 +125,9 @@ const PhotoPreview = () => {
                     {/* Controls and text - adjusted for landscape */}
                     <div className={`${isLandscape ? 'w-1/3 pl-4 flex flex-col justify-center' : 'w-full'}`}>
                         <p className={`text-center ${isLandscape ? 'mb-8' : 'mb-4'} text-2xl text-gray-700`}>
-                            How does it look?
+                            {overlayApplied ?
+                                "Perfect! Love the wedding frame!" :
+                                "How does it look?"}
                         </p>
 
                         <div className={`flex ${isLandscape ? 'flex-col' : 'flex-col md:flex-row'} justify-center gap-4`}>
@@ -114,7 +142,7 @@ const PhotoPreview = () => {
                                 onClick={handleKeep}
                                 className="btn btn-primary btn-hindu text-xl py-4 px-6 w-full"
                             >
-                                Perfect! Keep it
+                                {overlayApplied ? "Continue with Frame" : "Perfect! Keep it"}
                             </button>
                         </div>
                     </div>

@@ -10,6 +10,8 @@ const http = require('http');
 const WebSocket = require('ws');
 const compression = require('compression'); // Add compression
 const sharp = require('sharp'); // Add sharp for image processing
+const multer = require('multer');
+const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 
 // Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
@@ -53,9 +55,10 @@ const PHOTOS_DIR = path.join(__dirname, 'public', 'photos');
 const QR_DIR = path.join(__dirname, 'public', 'qrcodes');
 const PREVIEW_DIR = path.join(__dirname, 'public', 'preview');
 const THUMBNAILS_DIR = path.join(__dirname, 'public', 'thumbnails');
+const OVERLAYS_DIR = path.join(__dirname, 'public', 'overlays');
 
 // Create required directories
-[PHOTOS_DIR, QR_DIR, PREVIEW_DIR, THUMBNAILS_DIR].forEach(dir => {
+[PHOTOS_DIR, QR_DIR, PREVIEW_DIR, THUMBNAILS_DIR, OVERLAYS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, {recursive: true});
     }
@@ -425,6 +428,35 @@ async function generateThumbnail(sourceFilePath, filename) {
 
     return `/thumbnails/thumb_${filename}`;
 }
+
+// Helper function to apply overlay to an image
+async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath) {
+    try {
+        // Get dimensions of the input image
+        const metadata = await sharp(sourceImagePath).metadata();
+
+        // Resize the overlay to match the input image dimensions
+        const resizedOverlay = await sharp(overlayImagePath)
+            .resize(metadata.width, metadata.height, {
+                fit: 'fill'
+            })
+            .toBuffer();
+
+        // Composite the images
+        await sharp(sourceImagePath)
+            .composite([
+                { input: resizedOverlay, gravity: 'center' }
+            ])
+            .jpeg({ quality: 90 })
+            .toFile(outputPath);
+
+        return true;
+    } catch (error) {
+        console.error('Error applying overlay:', error);
+        return false;
+    }
+}
+
 app.get('/photos/:filename', (req, res) => {
     const filename = req.params.filename;
     const filepath = path.join(PHOTOS_DIR, filename);
@@ -605,6 +637,32 @@ async function generateQRAndRespond(req, res, filename, timestamp) {
     const filepath = path.join(PHOTOS_DIR, filename);
     const thumbnailUrl = await generateThumbnail(filepath, filename);
 
+    // Check if default overlay exists and apply it
+    const defaultOverlayPath = path.join(OVERLAYS_DIR, 'wedding-frame.png');
+    let overlayApplied = false;
+
+    if (fs.existsSync(defaultOverlayPath)) {
+        try {
+            // Create a temporary path for the processed file
+            const processedPath = path.join(PHOTOS_DIR, `temp_${filename}`);
+
+            // Apply the overlay
+            const success = await applyOverlayToImage(filepath, defaultOverlayPath, processedPath);
+
+            if (success) {
+                // Replace the original with the overlaid version
+                fs.renameSync(processedPath, filepath);
+                overlayApplied = true;
+
+                // Regenerate thumbnail with the overlay
+                await generateThumbnail(filepath, filename);
+            }
+        } catch (error) {
+            console.error('Error applying default overlay:', error);
+            // Continue without overlay if there's an error
+        }
+    }
+
     QRCode.toFile(qrFilepath, photoViewUrl, {
         color: {
             dark: '#000',  // Points
@@ -623,6 +681,7 @@ async function generateQRAndRespond(req, res, filename, timestamp) {
                 thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
                 qrUrl: `/qrcodes/${qrFilename}`,
                 photoViewUrl: photoViewUrl, // Add the photo view URL to response
+                overlayApplied: overlayApplied, // Indicate if overlay was applied
                 timestamp: Date.now()
             }
         });
@@ -686,6 +745,7 @@ app.get('/api/photos/:photoId', (req, res) => {
         });
     }
 });
+
 // Delete a photo
 app.delete('/api/photos/:filename', (req, res) => {
     const filename = req.params.filename;
@@ -769,6 +829,144 @@ app.get('/api/admin/generate-thumbnails', async (req, res) => {
     }
 });
 
+// Endpoint to apply overlay to a photo
+app.post('/api/photos/:photoId/overlay', upload.single('processedImage'), async (req, res) => {
+    const photoId = req.params.photoId;
+    const overlayName = req.body.overlayName || 'wedding-frame.png';
+
+    // Validate inputs
+    if (!photoId) {
+        return res.status(400).json({
+            success: false,
+            error: 'Photo ID is required'
+        });
+    }
+
+    // Source paths
+    const sourcePhotoPath = path.join(PHOTOS_DIR, photoId);
+    const overlayPath = path.join(OVERLAYS_DIR, overlayName);
+
+    // Check if both files exist
+    if (!fs.existsSync(sourcePhotoPath)) {
+        return res.status(404).json({
+            success: false,
+            error: 'Source photo not found'
+        });
+    }
+
+    if (!fs.existsSync(overlayPath)) {
+        return res.status(404).json({
+            success: false,
+            error: 'Overlay image not found'
+        });
+    }
+
+    try {
+        // If client uploaded a processed image
+        if (req.file) {
+            // Save the uploaded processed image
+            fs.writeFileSync(sourcePhotoPath, req.file.buffer);
+
+            // Regenerate thumbnail for the updated image
+            await generateThumbnail(sourcePhotoPath, photoId);
+
+            return res.json({
+                success: true,
+                message: 'Processed image saved successfully',
+                url: `/photos/${photoId}`
+            });
+        } else {
+            // Process the overlay on the server
+            const outputPath = sourcePhotoPath; // Overwrite original
+            const success = await applyOverlayToImage(sourcePhotoPath, overlayPath, outputPath);
+
+            if (success) {
+                // Regenerate thumbnail
+                await generateThumbnail(sourcePhotoPath, photoId);
+
+                return res.json({
+                    success: true,
+                    message: 'Overlay applied successfully',
+                    url: `/photos/${photoId}`
+                });
+            } else {
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to apply overlay'
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error in overlay processing:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error during overlay processing'
+        });
+    }
+});
+
+// Endpoint to upload a new overlay template
+app.post('/api/admin/overlays', upload.single('overlay'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({
+            success: false,
+            error: 'No overlay file uploaded'
+        });
+    }
+
+    const overlayName = req.body.name || `overlay-${Date.now()}.png`;
+    const overlayPath = path.join(OVERLAYS_DIR, overlayName);
+
+    try {
+        // Save the uploaded overlay
+        fs.writeFileSync(overlayPath, req.file.buffer);
+
+        return res.json({
+            success: true,
+            message: 'Overlay uploaded successfully',
+            name: overlayName,
+            url: `/overlays/${overlayName}`
+        });
+    } catch (error) {
+        console.error('Error saving overlay:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error saving overlay'
+        });
+    }
+});
+
+// Get list of available overlays
+app.get('/api/admin/overlays', (req, res) => {
+    try {
+        if (!fs.existsSync(OVERLAYS_DIR)) {
+            return res.json([]);
+        }
+
+        const files = fs.readdirSync(OVERLAYS_DIR);
+        const overlays = files
+            .filter(file => /\.(png|jpg|jpeg)$/i.test(file))
+            .map(file => {
+                const stats = fs.statSync(path.join(OVERLAYS_DIR, file));
+                return {
+                    name: file,
+                    url: `/overlays/${file}`,
+                    timestamp: stats.mtime.getTime(),
+                    size: stats.size
+                };
+            })
+            .sort((a, b) => b.timestamp - a.timestamp);
+
+        return res.json(overlays);
+    } catch (error) {
+        console.error('Error listing overlays:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error listing overlays'
+        });
+    }
+});
+
 // Create HTTP server and attach WebSocket server
 const server = http.createServer(app);
 setupWebSocketServer(server);
@@ -778,6 +976,7 @@ server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Photos directory: ${PHOTOS_DIR}`);
     console.log(`QR codes directory: ${QR_DIR}`);
+    console.log(`Overlays directory: ${OVERLAYS_DIR}`);
 });
 
 // Cleanup on server shutdown

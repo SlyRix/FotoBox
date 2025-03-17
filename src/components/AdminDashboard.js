@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
 import { API_BASE_URL } from '../App';
+import OverlayUpload from './OverlayUpload';
 
 const AdminDashboard = () => {
     const { photos, fetchPhotos, loading, error, deletePhoto } = useCamera();
@@ -96,6 +97,36 @@ const AdminDashboard = () => {
         }
     };
 
+    // Apply overlay to a specific photo
+    const handleApplyOverlay = async (photoFilename) => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/photos/${photoFilename}/overlay`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    overlayName: 'wedding-frame.png'
+                }),
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                alert("Overlay applied successfully!");
+                // Refresh the photos list
+                fetchPhotos();
+                // Close the lightbox
+                closeLightbox();
+            } else {
+                alert("Error applying overlay: " + (result.error || "Unknown error"));
+            }
+        } catch (error) {
+            console.error('Error applying overlay:', error);
+            alert("Error applying overlay. Please try again.");
+        }
+    };
+
     // Format date for display
     const formatDate = (timestamp) => {
         return new Date(timestamp).toLocaleString();
@@ -162,6 +193,9 @@ const AdminDashboard = () => {
                         Regenerate Thumbnails
                     </button>
                 </div>
+
+                {/* Overlay Management */}
+                <OverlayUpload />
 
                 {/* Photos gallery */}
                 <div className="bg-white rounded-lg shadow-md p-4">
@@ -355,7 +389,7 @@ const AdminDashboard = () => {
                                     </div>
                                 </div>
 
-                                <div className="flex mt-4 sm:mt-0 space-x-3">
+                                <div className="flex flex-wrap mt-4 sm:mt-0 gap-3">
                                     <a
                                         href={`${API_BASE_URL}${selectedPhoto.url}`}
                                         download
@@ -373,6 +407,13 @@ const AdminDashboard = () => {
                                     >
                                         Get QR Code
                                     </a>
+
+                                    <button
+                                        onClick={() => handleApplyOverlay(selectedPhoto.filename)}
+                                        className="btn btn-primary btn-christian text-sm py-2"
+                                    >
+                                        Apply Frame
+                                    </button>
 
                                     <button
                                         onClick={() => handleDeletePhoto(selectedPhoto.filename)}
