@@ -12,7 +12,7 @@ import GalleryView from './components/GalleryView';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import HeartSpinner from './components/HeartSpinner';
-
+import KioskMode from './components/KioskMode';
 import { CameraProvider } from './contexts/CameraContext';
 import './styles/tailwind.css';
 
@@ -34,6 +34,8 @@ const AdminRoute = ({ children }) => {
 function App() {
     return (
         <CameraProvider apiBaseUrl={API_BASE_URL} apiEndpoint={API_ENDPOINT}>
+            <KioskMode />
+
             <Router>
                 <div className="min-h-screen bg-wedding-background">
                     <Routes>

@@ -2,7 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+@media screen and (max-width: 768px) {
+    html {
+        touch-action: none;
+    }
+}
 @layer base {
+    html, body {
+        -webkit-user-select: none; /* Safari */
+        -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* IE10+/Edge */
+        user-select: none; /* Standard syntax */
+
+        /* Prevent zooming */
+        touch-action: manipulation;
+        overscroll-behavior: none;
+
+        /* Disable text resize */
+        -webkit-text-size-adjust: 100%;
+        -moz-text-size-adjust: 100%;
+        -ms-text-size-adjust: 100%;
+    }
+
+    /* Explicitly prevent zooming */
+    input[type="text"],
+    input[type="number"],
+    input[type="tel"],
+    input[type="email"] {
+        font-size: 16px; /* Prevents auto-zoom on iOS */
+    }
     html {
         @apply scroll-smooth;
     }
