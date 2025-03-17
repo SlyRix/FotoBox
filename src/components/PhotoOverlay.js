@@ -9,13 +9,6 @@ const PhotoOverlay = ({ onComplete }) => {
     const [processedImage, setProcessedImage] = useState(null);
     const [loading, setLoading] = useState(true);
     const canvasRef = useRef(null);
-    const sharp = require('sharp');
-    const multer = require('multer');
-    const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
-    const OVERLAYS_DIR = path.join(__dirname, 'public', 'overlays');
-    if (!fs.existsSync(OVERLAYS_DIR)) {
-        fs.mkdirSync(OVERLAYS_DIR, { recursive: true });
-    }
     useEffect(() => {
         if (!currentPhoto || !currentPhoto.fullUrl) {
             return;
