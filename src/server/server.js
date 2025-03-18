@@ -1181,7 +1181,7 @@ app.get('/api/mosaic', async (req, res) => {
         const cols = Math.ceil(Math.sqrt(total * 1.5));
         const rows = Math.ceil(total / cols);
 
-        // Create mosaic canvas
+        // Create mosaic canvas - use integer values for dimensions
         const tileSize = 200; // px
         const mosaicWidth = cols * tileSize;
         const mosaicHeight = rows * tileSize;
@@ -1197,15 +1197,32 @@ app.get('/api/mosaic', async (req, res) => {
 
         // Prepare composite array
         const composites = [];
+        let successCount = 0;
 
         for (let i = 0; i < photosToUse.length; i++) {
             const col = i % cols;
             const row = Math.floor(i / cols);
 
+            // Use integer values for tile positions
+            const left = col * tileSize;
+            const top = row * tileSize;
+
             // Resize each thumbnail to fit tile with a slight overlap for a more continuous look
             try {
-                const resizedBuffer = await sharp(path.join(THUMBNAILS_DIR, photosToUse[i]))
-                    .resize(tileSize * 1.1, tileSize * 1.1, {
+                // Use integer values for dimensions to avoid floating point errors
+                const resizeWidth = Math.floor(tileSize * 1.1);
+                const resizeHeight = Math.floor(tileSize * 1.1);
+
+                const thumbnailPath = path.join(THUMBNAILS_DIR, photosToUse[i]);
+
+                // Check if file exists and is accessible
+                if (!fs.existsSync(thumbnailPath)) {
+                    console.log(`Thumbnail not found: ${photosToUse[i]}`);
+                    continue;
+                }
+
+                const resizedBuffer = await sharp(thumbnailPath)
+                    .resize(resizeWidth, resizeHeight, {
                         fit: 'cover',
                         position: 'center'
                     })
@@ -1213,26 +1230,45 @@ app.get('/api/mosaic', async (req, res) => {
 
                 composites.push({
                     input: resizedBuffer,
-                    top: row * tileSize,
-                    left: col * tileSize
+                    top: top,
+                    left: left
                 });
+
+                successCount++;
             } catch (err) {
                 console.error(`Error processing thumbnail ${photosToUse[i]}:`, err);
                 // Continue with other photos
             }
         }
 
-        // Create mosaic
-        const mosaicBuffer = await mosaic.composite(composites).png().toBuffer();
+        // Ensure we have at least some photos successfully processed
+        if (successCount === 0) {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to process any photos for mosaic'
+            });
+        }
 
-        // Save mosaic to file for caching
-        const mosaicFilepath = path.join(PHOTOS_DIR, 'mosaic.png');
-        await fs.promises.writeFile(mosaicFilepath, mosaicBuffer);
+        try {
+            // Create mosaic
+            const mosaicBuffer = await mosaic.composite(composites).png().toBuffer();
 
-        // Send response
-        res.set('Content-Type', 'image/png');
-        res.set('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
-        res.send(mosaicBuffer);
+            // Save mosaic to file for caching
+            const mosaicFilepath = path.join(PHOTOS_DIR, 'mosaic.png');
+            await fs.promises.writeFile(mosaicFilepath, mosaicBuffer);
+
+            // Send response
+            res.set('Content-Type', 'image/png');
+            res.set('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
+            res.send(mosaicBuffer);
+        } catch (error) {
+            console.error('Error creating final mosaic:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to create final mosaic image',
+                message: error.message
+            });
+        }
     } catch (error) {
         console.error('Error creating mosaic:', error);
         res.status(500).json({
