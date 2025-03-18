@@ -13,7 +13,7 @@ const sharp = require('sharp'); // Add sharp for image processing
 const multer = require('multer');
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 let photoCounter = 0;
-const MOSAIC_PHOTO_INTERVAL = 10; // Regenerate every 10th photo
+const MOSAIC_PHOTO_INTERVAL = 3; // Regenerate every 10th photo
 
 // Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
