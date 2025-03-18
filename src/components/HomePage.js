@@ -1,4 +1,4 @@
-// src/components/HomePage.js
+// Updated HomePage.js with cleaner card background and styling improvements
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -87,12 +87,12 @@ const HomePage = () => {
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden">
-            {/* Conditional mosaic background */}
+            {/* Enhanced mosaic background with improved overlay */}
             <AnimatePresence>
                 {mosaicStatus.available && mosaicStatus.url && (
                     <motion.div
                         initial={{ opacity: 0 }}
-                        animate={{ opacity: 0.2 }}
+                        animate={{ opacity: 0.8 }}
                         exit={{ opacity: 0 }}
                         transition={{ duration: 1.5 }}
                         className="absolute inset-0 overflow-hidden pointer-events-none"
@@ -101,9 +101,11 @@ const HomePage = () => {
                             src={mosaicStatus.url}
                             alt="Wedding photo mosaic"
                             className="w-full h-full object-cover"
-                            style={{ filter: 'blur(3px)' }}
+                            style={{ filter: 'blur(2px)' }}
                         />
-                        <div className="absolute inset-0 bg-gradient-to-br from-christian-accent/30 to-hindu-secondary/30"></div>
+                        {/* Lighter gradient overlay for better clarity */}
+                        {/* Wedding-themed gradient overlay with reduced opacity */}
+                        <div className="absolute inset-0 bg-gradient-to-br from-hindu-accent/40 via-black/10 to-hindu-accent/40"></div>
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -170,80 +172,85 @@ const HomePage = () => {
                 </div>
             )}
 
-            {/* Main content */}
-            <div className="text-center z-10 px-6">
-                <motion.div
-                    initial={{ opacity: 0, y: -20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.8 }}
-                >
-                    <h1 className="text-7xl md:text-8xl font-script text-wedding-love mb-4 tracking-wide text-shadow-sm">
-                        Rushel & Sivani
-                    </h1>
-
+            {/* Main content - NOW WRAPPED IN ELEGANT CARD - REDUCED BLUR */}
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8 }}
+                className="relative z-10 bg-white/60 backdrop-blur-sm rounded-2xl shadow-xl px-6 py-8 md:px-12 md:py-10 max-w-2xl border border-white/50"
+            >
+                <div className="text-center relative">
                     <motion.div
-                        className="flex justify-center items-center mb-6"
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        transition={{ delay: 0.2, duration: 0.5 }}
+                        initial={{ opacity: 0, y: -20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.8, delay: 0.2 }}
+                        className="relative"
                     >
-                        <div className="h-px bg-wedding-gold/40 w-16 md:w-24"></div>
-                        <Icon path={mdiHeart} size={1.5} className="mx-4 text-wedding-love" />
-                        <div className="h-px bg-wedding-gold/40 w-16 md:w-24"></div>
+                        {/* Enhanced main heading with stronger shadow and backdrop */}
+                        <div className="relative z-10">
+                            <h1 className="text-7xl md:text-8xl font-script text-wedding-love mb-4 tracking-wide text-shadow-lg drop-shadow-md font-bold">
+                                Rushel & Sivani
+                            </h1>
+                        </div>
+
+                        <motion.div
+                            className="flex justify-center items-center mb-6"
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ delay: 0.4, duration: 0.5 }}
+                        >
+                            <div className="h-px bg-wedding-gold/70 w-16 md:w-24 shadow-sm"></div>
+                            <Icon path={mdiHeart} size={1.5} className="mx-4 text-wedding-love drop-shadow-md" />
+                            <div className="h-px bg-wedding-gold/70 w-16 md:w-24 shadow-sm"></div>
+                        </motion.div>
+
+                        {/* Sub-heading with enhanced readability */}
+                        <h2 className="text-3xl md:text-4xl font-display text-gray-800 mb-12 font-bold text-shadow drop-shadow-md">
+                            Wedding FotoBox
+                        </h2>
                     </motion.div>
 
-                    <h2 className="text-3xl md:text-4xl font-display text-gray-800 mb-16">Wedding FotoBox</h2>
-                </motion.div>
-
-                <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.5, delay: 0.5 }}
-                    className="flex flex-col items-center space-y-6"
-                >
-                    {/* Take a Photo button */}
-                    <Link
-                        to="/camera"
-                        className="relative group"
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.5, delay: 0.7 }}
+                        className="flex flex-col items-center space-y-6"
                     >
-                        <motion.div
-                            className="absolute -inset-0.5 rounded-full bg-gradient-to-r from-christian-accent to-hindu-accent blur opacity-70 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"
-                            animate={{
-                                opacity: [0.5, 0.7, 0.5],
-                            }}
-                            transition={{
-                                duration: 3,
-                                repeat: Infinity,
-                                ease: "easeInOut"
-                            }}
-                        />
-                        <div className="relative flex items-center bg-gradient-to-r from-hindu-accent to-hindu-accent/90 text-white text-center text-3xl py-8 px-12 shadow-elegant transform transition-all duration-300 hover:scale-105 btn-hover-glow rounded-full">
-                            <Icon path={mdiCamera} size={1.5} className="mr-4" />
-                            Take a Photo
-                        </div>
-                    </Link>
-
-                    {/* Gallery button - conditionally show based on photo count */}
-                    {mosaicStatus.photoCount > 0 && (
+                        {/* Take a Photo button */}
                         <Link
-                            to="/gallery"
-                            className="flex items-center text-lg text-gray-600 hover:text-wedding-love transition-colors"
+                            to="/camera"
+                            className="relative group"
                         >
-                            <Icon path={mdiImage} size={1} className="mr-2" />
-                            View Gallery ({mosaicStatus.photoCount} photos)
+                            <motion.div
+                                className="absolute -inset-0.5 rounded-full bg-gradient-to-r from-christian-accent to-hindu-accent blur opacity-70 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"
+                                animate={{
+                                    opacity: [0.5, 0.7, 0.5],
+                                }}
+                                transition={{
+                                    duration: 3,
+                                    repeat: Infinity,
+                                    ease: "easeInOut"
+                                }}
+                            />
+                            <div className="relative flex items-center bg-gradient-to-r from-hindu-accent to-hindu-accent/90 text-white text-center text-3xl py-6 px-10 md:py-8 md:px-12 shadow-elegant transform transition-all duration-300 hover:scale-105 btn-hover-glow rounded-full">
+                                <Icon path={mdiCamera} size={1.5} className="mr-4" />
+                                Take a Photo
+                            </div>
                         </Link>
-                    )}
-                </motion.div>
 
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.5, delay: 1 }}
-                    className="mt-20 text-gray-500 text-lg"
-                >
-                    <p>Tap to begin</p>
-                </motion.div>
-            </div>
+                        {/* Gallery button removed as requested */}
+                    </motion.div>
+
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.5, delay: 1 }}
+                        className="mt-12 text-lg font-medium"
+                    >
+                        <p className="text-black font-semibold">Tap to begin</p>
+                    </motion.div>
+                </div>
+            </motion.div>
 
             {/* Decorative footer with hidden admin link */}
             <motion.div
@@ -253,11 +260,11 @@ const HomePage = () => {
                 transition={{ delay: 1.5, duration: 1 }}
             >
                 <div className="flex justify-center items-center">
-                    <div className="h-px bg-wedding-gold/30 w-16"></div>
-                    <p className="mx-4 text-base text-gray-400">
+                    <div className="h-px bg-wedding-gold/70 w-16"></div>
+                    <p className="mx-4 text-base text-black font-medium">
                         {new Date().getFullYear()}
                     </p>
-                    <div className="h-px bg-wedding-gold/30 w-16"></div>
+                    <div className="h-px bg-wedding-gold/70 w-16"></div>
                 </div>
 
                 {/* Hidden admin link - only visible if you know where to click */}
