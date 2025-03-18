@@ -12,6 +12,8 @@ const compression = require('compression'); // Add compression
 const sharp = require('sharp'); // Add sharp for image processing
 const multer = require('multer');
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
+let photoCounter = 0;
+const MOSAIC_PHOTO_INTERVAL = 10; // Regenerate every 10th photo
 
 // Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
@@ -655,7 +657,7 @@ app.get('/api/photos', (req, res) => {
 });
 
 // Take a new photo - using gphoto2 for final capture - mit Dual-Format
-app.post('/api/photos/capture', (req, res) => {
+app.post('/api/photos/capture', async (req, res) => {
     // Prevent multiple simultaneous capture requests
     if (captureInProgress.status) {
         return res.status(429).json({
@@ -724,6 +726,16 @@ app.post('/api/photos/capture', (req, res) => {
                 try {
                     // Dual-Format-Verarbeitung für das Webcam-Foto
                     const processedPhotos = await processPhotoWithDualFormats(filepath, filename);
+
+                    // Increment photo counter for mosaic generation
+                    photoCounter++;
+
+                    // Check if we should regenerate mosaic (every 10th photo)
+                    if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
+                        console.log(`Captured ${photoCounter} photos. Regenerating mosaic.`);
+                        regenerateMosaicInBackground();
+                    }
+
                     generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
                 } catch (err) {
                     console.error('Fehler bei der Dual-Format-Verarbeitung:', err);
@@ -741,6 +753,15 @@ app.post('/api/photos/capture', (req, res) => {
         // Dual-Format-Verarbeitung für die Kameraaufnahme
         processPhotoWithDualFormats(filepath, filename)
             .then(processedPhotos => {
+                // Increment photo counter for mosaic generation
+                photoCounter++;
+
+                // Check if we should regenerate mosaic (every 10th photo)
+                if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
+                    console.log(`Captured ${photoCounter} photos. Regenerating mosaic.`);
+                    regenerateMosaicInBackground();
+                }
+
                 generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
             })
             .catch(err => {
@@ -751,6 +772,28 @@ app.post('/api/photos/capture', (req, res) => {
     });
 });
 
+// Helper function to regenerate mosaic in background
+function regenerateMosaicInBackground() {
+    // Check if we have enough photos for a mosaic
+    const files = fs.readdirSync(THUMBNAILS_DIR);
+    const photoCount = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file)).length;
+
+    if (photoCount >= 10) {
+        // Use the internal URL for the server to call itself
+        const serverUrl = `http://localhost:${PORT}/api/mosaic?t=${Date.now()}`;
+
+        // Make the request without waiting for response
+        fetch(serverUrl)
+            .then(response => {
+                if (response.ok) {
+                    console.log('Mosaic regenerated successfully');
+                } else {
+                    console.log('Mosaic regeneration returned status:', response.status);
+                }
+            })
+            .catch(err => console.error('Error regenerating mosaic:', err));
+    }
+}
 // API-Endpunkt zum Abrufen eines einzelnen Fotos nach ID - mit allen Versionen
 app.get('/api/photos/:photoId', (req, res) => {
     const photoId = req.params.photoId;

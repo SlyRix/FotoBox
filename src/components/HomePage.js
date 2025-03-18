@@ -1,72 +1,174 @@
-// Fixed HomePage.js with elegant design and animations
-import React from 'react';
+// src/components/HomePage.js
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import Icon from '@mdi/react';
-import { mdiCamera, mdiHeart } from '@mdi/js';
+import { mdiCamera, mdiHeart, mdiImage } from '@mdi/js';
+import { API_ENDPOINT, API_BASE_URL } from '../App';
 
 const HomePage = () => {
+    // State for mosaic background
+    const [mosaicStatus, setMosaicStatus] = useState({
+        available: false,
+        loading: true,
+        url: null,
+        photoCount: 0,
+        requiredCount: 10
+    });
+
+    // Check if there are enough photos for a mosaic when component mounts
+    useEffect(() => {
+        const checkMosaicStatus = async () => {
+            try {
+                const response = await fetch(`${API_ENDPOINT}/mosaic/info`);
+                if (!response.ok) throw new Error('Failed to fetch mosaic info');
+
+                const data = await response.json();
+
+                setMosaicStatus({
+                    available: data.photoCount >= data.requiredCount,
+                    loading: false,
+                    url: data.hasMosaic ? `${API_BASE_URL}${data.mosaic.url}?t=${Date.now()}` : null,
+                    photoCount: data.photoCount,
+                    requiredCount: data.requiredCount
+                });
+
+                // If mosaic doesn't exist but we have enough photos, trigger mosaic generation
+                if (!data.hasMosaic && data.photoCount >= data.requiredCount) {
+                    generateMosaic();
+                }
+            } catch (error) {
+                console.error("Error checking mosaic status:", error);
+                setMosaicStatus(prev => ({
+                    ...prev,
+                    loading: false
+                }));
+            }
+        };
+
+        checkMosaicStatus();
+    }, []);
+
+    // Function to trigger mosaic generation
+    const generateMosaic = async () => {
+        try {
+            // Set loading state
+            setMosaicStatus(prev => ({
+                ...prev,
+                loading: true
+            }));
+
+            // Request mosaic generation
+            const response = await fetch(`${API_ENDPOINT}/mosaic?t=${Date.now()}`);
+
+            if (response.ok) {
+                // If successful, update the mosaic URL
+                setMosaicStatus(prev => ({
+                    ...prev,
+                    available: true,
+                    loading: false,
+                    url: `${API_BASE_URL}/photos/mosaic.png?t=${Date.now()}`
+                }));
+            } else {
+                // If failed, just update loading state
+                setMosaicStatus(prev => ({
+                    ...prev,
+                    loading: false
+                }));
+            }
+        } catch (error) {
+            console.error("Error generating mosaic:", error);
+            setMosaicStatus(prev => ({
+                ...prev,
+                loading: false
+            }));
+        }
+    };
+
     return (
-        <div className="min-h-screen bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-            {/* Animated background elements */}
-            <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                {/* Floating hearts */}
-                {[...Array(12)].map((_, i) => (
+        <div className="min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden">
+            {/* Conditional mosaic background */}
+            <AnimatePresence>
+                {mosaicStatus.available && mosaicStatus.url && (
                     <motion.div
-                        key={i}
-                        className={`absolute opacity-10 text-wedding-love`}
-                        initial={{
-                            x: Math.random() * 100 - 50,
-                            y: Math.random() * 100 - 50,
-                            scale: 0.5 + Math.random() * 1.5
-                        }}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 0.2 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 1.5 }}
+                        className="absolute inset-0 overflow-hidden pointer-events-none"
+                    >
+                        <img
+                            src={mosaicStatus.url}
+                            alt="Wedding photo mosaic"
+                            className="w-full h-full object-cover"
+                            style={{ filter: 'blur(3px)' }}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-br from-christian-accent/30 to-hindu-secondary/30"></div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Original animated background elements - shown if mosaic is not available */}
+            {(!mosaicStatus.available || mosaicStatus.loading) && (
+                <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                    {/* Floating hearts */}
+                    {[...Array(12)].map((_, i) => (
+                        <motion.div
+                            key={i}
+                            className={`absolute opacity-10 text-wedding-love`}
+                            initial={{
+                                x: Math.random() * 100 - 50,
+                                y: Math.random() * 100 - 50,
+                                scale: 0.5 + Math.random() * 1.5
+                            }}
+                            animate={{
+                                y: [0, -15, 0],
+                                rotate: [0, 5, 0, -5, 0],
+                                scale: [1, 1.05, 1],
+                            }}
+                            transition={{
+                                duration: 4 + Math.random() * 6,
+                                repeat: Infinity,
+                                delay: Math.random() * 4,
+                                ease: "easeInOut"
+                            }}
+                            style={{
+                                left: `${Math.random() * 100}%`,
+                                top: `${Math.random() * 100}%`,
+                            }}
+                        >
+                            <Icon path={mdiHeart} size={1 + Math.random() * 2} />
+                        </motion.div>
+                    ))}
+
+                    {/* Large decorative circles */}
+                    <motion.div
+                        className="absolute left-1/4 top-1/4 w-64 h-64 rounded-full bg-christian-accent opacity-5"
                         animate={{
-                            y: [0, -15, 0],
-                            rotate: [0, 5, 0, -5, 0],
+                            y: [0, -20, 0],
                             scale: [1, 1.05, 1],
                         }}
                         transition={{
-                            duration: 4 + Math.random() * 6,
+                            duration: 8,
                             repeat: Infinity,
-                            delay: Math.random() * 4,
                             ease: "easeInOut"
                         }}
-                        style={{
-                            left: `${Math.random() * 100}%`,
-                            top: `${Math.random() * 100}%`,
+                    />
+                    <motion.div
+                        className="absolute right-1/4 bottom-1/4 w-80 h-80 rounded-full bg-hindu-secondary opacity-5"
+                        animate={{
+                            y: [0, 20, 0],
+                            scale: [1, 0.95, 1],
                         }}
-                    >
-                        <Icon path={mdiHeart} size={1 + Math.random() * 2} />
-                    </motion.div>
-                ))}
-
-                {/* Large decorative circles */}
-                <motion.div
-                    className="absolute left-1/4 top-1/4 w-64 h-64 rounded-full bg-christian-accent opacity-5"
-                    animate={{
-                        y: [0, -20, 0],
-                        scale: [1, 1.05, 1],
-                    }}
-                    transition={{
-                        duration: 8,
-                        repeat: Infinity,
-                        ease: "easeInOut"
-                    }}
-                />
-                <motion.div
-                    className="absolute right-1/4 bottom-1/4 w-80 h-80 rounded-full bg-hindu-secondary opacity-5"
-                    animate={{
-                        y: [0, 20, 0],
-                        scale: [1, 0.95, 1],
-                    }}
-                    transition={{
-                        duration: 10,
-                        repeat: Infinity,
-                        ease: "easeInOut",
-                        delay: 2
-                    }}
-                />
-            </div>
+                        transition={{
+                            duration: 10,
+                            repeat: Infinity,
+                            ease: "easeInOut",
+                            delay: 2
+                        }}
+                    />
+                </div>
+            )}
 
             {/* Main content */}
             <div className="text-center z-10 px-6">
@@ -120,6 +222,17 @@ const HomePage = () => {
                             Take a Photo
                         </div>
                     </Link>
+
+                    {/* Gallery button - conditionally show based on photo count */}
+                    {mosaicStatus.photoCount > 0 && (
+                        <Link
+                            to="/gallery"
+                            className="flex items-center text-lg text-gray-600 hover:text-wedding-love transition-colors"
+                        >
+                            <Icon path={mdiImage} size={1} className="mr-2" />
+                            View Gallery ({mosaicStatus.photoCount} photos)
+                        </Link>
+                    )}
                 </motion.div>
 
                 <motion.div
