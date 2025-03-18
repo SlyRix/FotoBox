@@ -1173,18 +1173,36 @@ app.get('/api/mosaic', async (req, res) => {
             });
         }
 
-        // Limit to a reasonable number for performance (max 50 photos)
-        const photosToUse = photoFiles.slice(0, 50);
+        // Calculate the best grid size to fill the canvas nicely
+        // Use a 16:9 aspect ratio for wide displays
+        const targetWidth = 1920;
+        const targetHeight = 1080;
 
-        // Calculate grid size - make it wider than tall for most displays
-        const total = photosToUse.length;
-        const cols = Math.ceil(Math.sqrt(total * 1.5));
-        const rows = Math.ceil(total / cols);
+        // Start with a simple calculation for how many photos to use
+        // Dynamically determine the number of columns and rows
+        let photoCount = photoFiles.length; // Limit to 100 photos max
+        // let photoCount = Math.min(photoFiles.length, 100); // Limit to 100 photos max
+
+        // Try to determine optimal grid dimensions
+        let cols = Math.ceil(Math.sqrt(photoCount * targetWidth / targetHeight));
+        let rows = Math.ceil(photoCount / cols);
+
+        // Ensure we completely fill the grid by repeating photos if necessary
+        let photosToUse = [];
+        let requiredPhotos = cols * rows;
+
+        // Loop through our photos, repeating if needed to fill the grid
+        for (let i = 0; i < requiredPhotos; i++) {
+            photosToUse.push(photoFiles[i % photoFiles.length]);
+        }
+
+        // Calculate the size of each tile to fill the target dimensions exactly
+        const tileWidth = Math.floor(targetWidth / cols);
+        const tileHeight = Math.floor(targetHeight / rows);
 
         // Create mosaic canvas - use integer values for dimensions
-        const tileSize = 200; // px
-        const mosaicWidth = cols * tileSize;
-        const mosaicHeight = rows * tileSize;
+        const mosaicWidth = tileWidth * cols;
+        const mosaicHeight = tileHeight * rows;
 
         const mosaic = sharp({
             create: {
@@ -1204,15 +1222,11 @@ app.get('/api/mosaic', async (req, res) => {
             const row = Math.floor(i / cols);
 
             // Use integer values for tile positions
-            const left = col * tileSize;
-            const top = row * tileSize;
+            const left = col * tileWidth;
+            const top = row * tileHeight;
 
-            // Resize each thumbnail to fit tile with a slight overlap for a more continuous look
+            // Process each thumbnail
             try {
-                // Use integer values for dimensions to avoid floating point errors
-                const resizeWidth = Math.floor(tileSize * 1.1);
-                const resizeHeight = Math.floor(tileSize * 1.1);
-
                 const thumbnailPath = path.join(THUMBNAILS_DIR, photosToUse[i]);
 
                 // Check if file exists and is accessible
@@ -1221,9 +1235,12 @@ app.get('/api/mosaic', async (req, res) => {
                     continue;
                 }
 
+                // Resize to exactly fit the tile size
                 const resizedBuffer = await sharp(thumbnailPath)
-                    .resize(resizeWidth, resizeHeight, {
-                        fit: 'cover',
+                    .resize({
+                        width: tileWidth,
+                        height: tileHeight,
+                        fit: 'cover',   // This ensures the image covers the entire tile
                         position: 'center'
                     })
                     .toBuffer();
@@ -1248,6 +1265,8 @@ app.get('/api/mosaic', async (req, res) => {
                 error: 'Failed to process any photos for mosaic'
             });
         }
+
+        console.log(`Successfully processed ${successCount} photos for mosaic`);
 
         try {
             // Create mosaic
@@ -1313,7 +1332,6 @@ app.get('/api/mosaic/info', async (req, res) => {
         });
     }
 });
-
 // Create HTTP server and attach WebSocket server
 const server = http.createServer(app);
 setupWebSocketServer(server);
