@@ -58,7 +58,7 @@ const CameraView = () => {
             timer = setTimeout(() => setCountdown(countdown - 1), 1000);
         } else if (countdown === 0) {
             // Show "SMILE!" message
-            setCountdown("SMILE!");
+            setCountdown("SMILE");
 
             // Show "SMILE!" for 1.5 seconds before showing the HeartSpinner
             setTimeout(() => {
@@ -297,63 +297,17 @@ const CameraView = () => {
                                     initial={{scale: 0.8, opacity: 0}}
                                     animate={{
                                         scale: 1,
-                                        opacity: 1,
-                                        y: [0, -5, 0]
+                                        opacity: 1
                                     }}
                                     transition={{
-                                        duration: 0.8,
-                                        y: {
-                                            repeat: Infinity,
-                                            duration: 1.5,
-                                            ease: "easeInOut"
-                                        }
+                                        duration: 0.8
                                     }}
-                                    className="flex flex-col items-center relative"
+                                    className="flex flex-col items-center"
                                 >
-                                    {/* Decorative floating hearts */}
-                                    <motion.div
-                                        className="absolute -top-12 -left-16"
-                                        animate={{rotate: [0, 15, 0], scale: [1, 1.1, 1]}}
-                                        transition={{duration: 2, repeat: Infinity}}
-                                    >
-                                        <Icon path={mdiHeart} size={1.5} className="text-wedding-love opacity-70"/>
-                                    </motion.div>
-                                    <motion.div
-                                        className="absolute -top-8 -right-16"
-                                        animate={{rotate: [0, -15, 0], scale: [1, 1.1, 1]}}
-                                        transition={{duration: 2.3, repeat: Infinity, delay: 0.5}}
-                                    >
-                                        <Icon path={mdiHeart} size={1.5} className="text-wedding-love opacity-70"/>
-                                    </motion.div>
-
-                                    {/* Enhanced SMILE text with elegant styling */}
-                                    <span
-                                        className="text-7xl font-script text-wedding-love drop-shadow-lg mb-2 tracking-wide">
-            {countdown}!
-        </span>
-
-                                    {/* Decorative element below */}
-                                    <div className="flex items-center mt-1">
-                                        <div className="h-px bg-wedding-love/50 w-12"></div>
-                                        <Icon path={mdiHeartOutline} size={2} className="text-wedding-love mx-2"/>
-                                        <div className="h-px bg-wedding-love/50 w-12"></div>
-                                    </div>
-
-                                    {/* Pulsing heart below */}
-                                    <motion.div
-                                        animate={{
-                                            scale: [1, 1.2, 1],
-                                            opacity: [0.7, 1, 0.7]
-                                        }}
-                                        transition={{
-                                            duration: 1.5,
-                                            repeat: Infinity,
-                                            ease: "easeInOut"
-                                        }}
-                                        className="mt-4"
-                                    >
-                                        <Icon path={mdiHeart} size={3} className="text-wedding-love"/>
-                                    </motion.div>
+                                    {/* Simple SMILE text */}
+                                    <span className="text-8xl font-bold text-wedding-love">
+                                        {countdown}!
+                                    </span>
                                 </motion.div>
                             ) : (
                                 <motion.span

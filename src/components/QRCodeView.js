@@ -165,15 +165,10 @@ const QRCodeView = () => {
                                         : 'w-64 h-64'
                                     } mx-auto`}
                                 />
-                                <p className="text-center text-sm mt-2 text-gray-600">
-                                    Scan for high-resolution photo
-                                </p>
+
                             </div>
 
-                            {/* Note about QR code */}
-                            <p className="text-center text-sm text-gray-500 mb-4">
-                                Share this QR code with guests to let them download your photo
-                            </p>
+
                         </div>
                     </div>
 

@@ -1156,6 +1156,127 @@ app.get('/api/admin/overlays', (req, res) => {
         });
     }
 });
+app.get('/api/mosaic', async (req, res) => {
+    try {
+        // Get all photos (using thumbnails for better performance)
+        const files = fs.readdirSync(THUMBNAILS_DIR);
+        const photoFiles = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file))
+            .sort(() => 0.5 - Math.random()); // Randomize order
+
+        // Check if we have enough photos (minimum 10)
+        if (photoFiles.length < 10) {
+            return res.status(404).json({
+                success: false,
+                error: 'Not enough photos for mosaic',
+                count: photoFiles.length,
+                required: 10
+            });
+        }
+
+        // Limit to a reasonable number for performance (max 50 photos)
+        const photosToUse = photoFiles.slice(0, 50);
+
+        // Calculate grid size - make it wider than tall for most displays
+        const total = photosToUse.length;
+        const cols = Math.ceil(Math.sqrt(total * 1.5));
+        const rows = Math.ceil(total / cols);
+
+        // Create mosaic canvas
+        const tileSize = 200; // px
+        const mosaicWidth = cols * tileSize;
+        const mosaicHeight = rows * tileSize;
+
+        const mosaic = sharp({
+            create: {
+                width: mosaicWidth,
+                height: mosaicHeight,
+                channels: 4,
+                background: { r: 255, g: 255, b: 255, alpha: 0.2 } // Translucent background
+            }
+        });
+
+        // Prepare composite array
+        const composites = [];
+
+        for (let i = 0; i < photosToUse.length; i++) {
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+
+            // Resize each thumbnail to fit tile with a slight overlap for a more continuous look
+            try {
+                const resizedBuffer = await sharp(path.join(THUMBNAILS_DIR, photosToUse[i]))
+                    .resize(tileSize * 1.1, tileSize * 1.1, {
+                        fit: 'cover',
+                        position: 'center'
+                    })
+                    .toBuffer();
+
+                composites.push({
+                    input: resizedBuffer,
+                    top: row * tileSize,
+                    left: col * tileSize
+                });
+            } catch (err) {
+                console.error(`Error processing thumbnail ${photosToUse[i]}:`, err);
+                // Continue with other photos
+            }
+        }
+
+        // Create mosaic
+        const mosaicBuffer = await mosaic.composite(composites).png().toBuffer();
+
+        // Save mosaic to file for caching
+        const mosaicFilepath = path.join(PHOTOS_DIR, 'mosaic.png');
+        await fs.promises.writeFile(mosaicFilepath, mosaicBuffer);
+
+        // Send response
+        res.set('Content-Type', 'image/png');
+        res.set('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
+        res.send(mosaicBuffer);
+    } catch (error) {
+        console.error('Error creating mosaic:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to create photo mosaic',
+            message: error.message
+        });
+    }
+});
+
+// Add an info endpoint to check mosaic status
+app.get('/api/mosaic/info', async (req, res) => {
+    try {
+        const files = fs.readdirSync(THUMBNAILS_DIR);
+        const photoFiles = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file));
+
+        const mosaicFilepath = path.join(PHOTOS_DIR, 'mosaic.png');
+        const mosaicExists = fs.existsSync(mosaicFilepath);
+        let mosaicStats = null;
+
+        if (mosaicExists) {
+            const stats = fs.statSync(mosaicFilepath);
+            mosaicStats = {
+                lastModified: stats.mtime,
+                size: stats.size,
+                url: '/photos/mosaic.png'
+            };
+        }
+
+        res.json({
+            success: true,
+            photoCount: photoFiles.length,
+            requiredCount: 10,
+            hasMosaic: mosaicExists,
+            mosaic: mosaicStats
+        });
+    } catch (error) {
+        console.error('Error checking mosaic info:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to check mosaic info'
+        });
+    }
+});
 
 // Create HTTP server and attach WebSocket server
 const server = http.createServer(app);
