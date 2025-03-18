@@ -148,13 +148,6 @@ const QRCodeView = () => {
                                     <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-white/60 rounded-bl-sm pointer-events-none"></div>
                                     <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white/60 rounded-br-sm pointer-events-none"></div>
                                 </div>
-
-                                {/* Photo size indicator */}
-                                <div className="flex justify-center items-center gap-2">
-                                    <div className="h-px bg-gray-300 w-8"></div>
-                                    <p className="text-xs text-gray-500">A5 Photo Format</p>
-                                    <div className="h-px bg-gray-300 w-8"></div>
-                                </div>
                             </div>
                         </div>
 

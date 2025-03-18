@@ -396,14 +396,6 @@ const PhotoView = () => {
                                     <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white/60 rounded-br-sm pointer-events-none"></div>
                                 </div>
 
-                                {/* Photo type indicator for A5 print version */}
-                                {photo.filename.startsWith('print_') && (
-                                    <div className="flex justify-center items-center gap-2">
-                                        <div className="h-px bg-gray-300 w-8"></div>
-                                        <p className="text-xs text-gray-500">A5 Querformat</p>
-                                        <div className="h-px bg-gray-300 w-8"></div>
-                                    </div>
-                                )}
                             </div>
                         )}
                     </div>
