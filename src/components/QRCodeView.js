@@ -41,9 +41,9 @@ const QRCodeView = () => {
 
     // Construct the image URLs - use print version for the display (A5 ratio)
     // but set the QR code to link to the original high-resolution version
-    const imageUrl = currentPhoto.printUrl
-        ? `${API_BASE_URL}${currentPhoto.printUrl}`
-        : `${API_BASE_URL}${currentPhoto.url}`;
+    const imageUrl = currentPhoto.url
+        ? `${API_BASE_URL}${currentPhoto.url}`
+        : (currentPhoto.fullUrl || '');
 
     const qrCodeUrl = `${API_BASE_URL}${currentPhoto.qrUrl}`;
 

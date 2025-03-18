@@ -69,9 +69,9 @@ const PhotoPreview = () => {
 
     // Determine which image URL to display - now using the print version for preview
     // since it has the correct A5 ratio and is optimized for printing
-    const displayUrl = currentPhoto.printUrl
-        ? `${API_BASE_URL}${currentPhoto.printUrl}`
-        : currentPhoto.fullUrl || `${API_BASE_URL}${currentPhoto.url}`;
+    const displayUrl = currentPhoto.url
+        ? `${API_BASE_URL}${currentPhoto.url}`
+        : currentPhoto.fullUrl;
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
