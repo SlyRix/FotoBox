@@ -729,7 +729,7 @@ app.post('/api/photos/capture', async (req, res) => {
 
                     // Increment photo counter for mosaic generation
                     photoCounter++;
-
+                    console.log(`Foto mit Webcam als Fallback aufgenommen`);
                     // Check if we should regenerate mosaic (every 10th photo)
                     if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
                         console.log(`Captured ${photoCounter} photos. Regenerating mosaic.`);
@@ -755,10 +755,10 @@ app.post('/api/photos/capture', async (req, res) => {
             .then(processedPhotos => {
                 // Increment photo counter for mosaic generation
                 photoCounter++;
-
+                console.log(`photocount ${photoCounter}`);
                 // Check if we should regenerate mosaic (every 10th photo)
                 if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
-                    console.log(`Captured ${photoCounter} photos. Regenerating mosaic.`);
+                    console.log(`regenerate mosaic`);
                     regenerateMosaicInBackground();
                 }
 
@@ -781,6 +781,7 @@ function regenerateMosaicInBackground() {
     if (photoCount >= 10) {
         // Use the internal URL for the server to call itself
         const serverUrl = `http://localhost:${PORT}/api/mosaic?t=${Date.now()}`;
+        console.log('Mosaic regenerated');
 
         // Make the request without waiting for response
         fetch(serverUrl)
