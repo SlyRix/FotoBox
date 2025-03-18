@@ -268,20 +268,33 @@ const CameraView = () => {
             <AnimatePresence>
                 {countdown !== null && !isProcessing && (
                     <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
+                        initial={{opacity: 0}}
+                        animate={{opacity: 1}}
+                        exit={{opacity: 0}}
                         className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-20 pointer-events-none"
                     >
                         <motion.div
-                            className="bg-white/90 rounded-full w-60 h-60 flex items-center justify-center shadow-lg"
-                            animate={{ scale: [0.9, 1] }}
-                            transition={{ duration: 0.3 }}
+                            initial={{
+                                borderRadius: "50%",
+                                width: "15rem",
+                                height: "15rem",
+                            }}
+                            animate={{
+                                width: typeof countdown === 'string' ? ["15rem", "24rem"] : "15rem",
+                                height: typeof countdown === 'string' ? ["15rem", "16rem"] : "15rem",
+                                borderRadius: typeof countdown === 'string' ? ["50%", "1rem"] : "50%"
+                            }}
+                            transition={{
+                                duration: 0.5,
+                                type: "spring",
+                                stiffness: 120
+                            }}
+                            className="bg-white/90 flex items-center justify-center shadow-lg overflow-hidden"
                         >
                             {typeof countdown === 'string' ? (
                                 <motion.div
                                     key="smile"
-                                    initial={{ scale: 0.8, opacity: 0 }}
+                                    initial={{scale: 0.8, opacity: 0}}
                                     animate={{
                                         scale: 1,
                                         opacity: 1,
@@ -300,28 +313,29 @@ const CameraView = () => {
                                     {/* Decorative floating hearts */}
                                     <motion.div
                                         className="absolute -top-12 -left-16"
-                                        animate={{ rotate: [0, 15, 0], scale: [1, 1.1, 1] }}
-                                        transition={{ duration: 2, repeat: Infinity }}
+                                        animate={{rotate: [0, 15, 0], scale: [1, 1.1, 1]}}
+                                        transition={{duration: 2, repeat: Infinity}}
                                     >
-                                        <Icon path={mdiHeart} size={1.5} className="text-wedding-love opacity-70" />
+                                        <Icon path={mdiHeart} size={1.5} className="text-wedding-love opacity-70"/>
                                     </motion.div>
                                     <motion.div
                                         className="absolute -top-8 -right-16"
-                                        animate={{ rotate: [0, -15, 0], scale: [1, 1.1, 1] }}
-                                        transition={{ duration: 2.3, repeat: Infinity, delay: 0.5 }}
+                                        animate={{rotate: [0, -15, 0], scale: [1, 1.1, 1]}}
+                                        transition={{duration: 2.3, repeat: Infinity, delay: 0.5}}
                                     >
-                                        <Icon path={mdiHeart} size={1.5} className="text-wedding-love opacity-70" />
+                                        <Icon path={mdiHeart} size={1.5} className="text-wedding-love opacity-70"/>
                                     </motion.div>
 
                                     {/* Enhanced SMILE text with elegant styling */}
-                                    <span className="text-7xl font-script text-wedding-love drop-shadow-lg mb-2 tracking-wide">
+                                    <span
+                                        className="text-7xl font-script text-wedding-love drop-shadow-lg mb-2 tracking-wide">
             {countdown}!
         </span>
 
                                     {/* Decorative element below */}
                                     <div className="flex items-center mt-1">
                                         <div className="h-px bg-wedding-love/50 w-12"></div>
-                                        <Icon path={mdiHeartOutline} size={2} className="text-wedding-love mx-2" />
+                                        <Icon path={mdiHeartOutline} size={2} className="text-wedding-love mx-2"/>
                                         <div className="h-px bg-wedding-love/50 w-12"></div>
                                     </div>
 
@@ -338,15 +352,15 @@ const CameraView = () => {
                                         }}
                                         className="mt-4"
                                     >
-                                        <Icon path={mdiHeart} size={3} className="text-wedding-love" />
+                                        <Icon path={mdiHeart} size={3} className="text-wedding-love"/>
                                     </motion.div>
                                 </motion.div>
                             ) : (
                                 <motion.span
                                     key={countdown}
-                                    initial={{ scale: 1.5, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    exit={{ scale: 0.5, opacity: 0 }}
+                                    initial={{scale: 1.5, opacity: 0}}
+                                    animate={{scale: 1, opacity: 1}}
+                                    exit={{scale: 0.5, opacity: 0}}
                                     className="text-9xl font-bold text-wedding-love"
                                 >
                                     {countdown}
