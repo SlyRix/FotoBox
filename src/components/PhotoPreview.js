@@ -1,18 +1,17 @@
-// Fixed PhotoPreview.js (removed frame toggle feature)
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { API_BASE_URL, API_ENDPOINT } from '../App';
+import { API_BASE_URL } from '../App';
 import Icon from '@mdi/react';
-import { mdiCamera, mdiCheck, mdiLoading ,mdiImage} from '@mdi/js';
+import { mdiCamera, mdiCheck, mdiLoading, mdiImage } from '@mdi/js';
 
 const PhotoPreview = () => {
     const { currentPhoto, loading, setCurrentPhoto } = useCamera();
     const navigate = useNavigate();
     const [imageError, setImageError] = useState(false);
     const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
-    const [isApplyingOverlay, setIsApplyingOverlay] = useState(false);
+    const [isTablet, setIsTablet] = useState(window.innerWidth >= 768 && window.innerWidth <= 1024);
     const [statusMessage, setStatusMessage] = useState("How does it look?");
 
     // Use useEffect for navigation to avoid state updates during render
@@ -25,80 +24,28 @@ const PhotoPreview = () => {
         // Add resize listener to detect orientation changes
         const handleResize = () => {
             setIsLandscape(window.innerWidth > window.innerHeight);
+            setIsTablet(window.innerWidth >= 768 && window.innerWidth <= 1024);
         };
 
         window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, [currentPhoto, loading, navigate]);
+        window.addEventListener('orientationchange', handleResize);
 
-    // Check if overlay is already applied (from server-side processing)
-    useEffect(() => {
-        if (currentPhoto && currentPhoto.overlayApplied) {
-            setStatusMessage("Perfect! Love the wedding frame!");
-        }
-    }, [currentPhoto]);
+        // Initial check
+        handleResize();
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            window.removeEventListener('orientationchange', handleResize);
+        };
+    }, [currentPhoto, loading, navigate]);
 
     // Handle retaking the photo
     const handleRetake = () => {
         navigate('/camera');
     };
 
-    // Handle applying overlay via server
-    const handleApplyOverlay = async () => {
-        if (!currentPhoto || !currentPhoto.filename) {
-            return;
-        }
-
-        setIsApplyingOverlay(true);
-        setStatusMessage("Adding wedding frame...");
-
-        try {
-            // Call server endpoint to apply overlay
-            const response = await fetch(`${API_ENDPOINT}/photos/${currentPhoto.filename}/overlay`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    overlayName: 'wedding-frame.png'
-                })
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                // Update the current photo with the new overlay URL
-                // Add a cache-busting timestamp to force reload of the image
-                const timestamp = Date.now();
-                setCurrentPhoto({
-                    ...currentPhoto,
-                    url: `${result.url}?t=${timestamp}`,
-                    fullUrl: `${API_BASE_URL}${result.url}?t=${timestamp}`,
-                    overlayApplied: true
-                });
-
-                setStatusMessage("Perfect! Love the wedding frame!");
-            } else {
-                console.error('Failed to apply overlay:', result.error);
-                setStatusMessage("Couldn't add frame, but your photo still looks great!");
-            }
-        } catch (error) {
-            console.error('Error applying overlay:', error);
-            setStatusMessage("Couldn't add frame, but your photo still looks great!");
-        } finally {
-            setIsApplyingOverlay(false);
-        }
-    };
-
-    // Handle keeping the photo
+    // Handle keeping the photo - go directly to QR code
     const handleKeep = () => {
-        // If overlay is not applied and not currently applying, apply it
-        if (!currentPhoto.overlayApplied && !isApplyingOverlay) {
-            handleApplyOverlay();
-            return;
-        }
-
-        // Otherwise, proceed to QR code
         navigate('/qrcode');
     };
 
@@ -120,8 +67,11 @@ const PhotoPreview = () => {
         );
     }
 
-    // Determine which image URL to display
-    const displayUrl = currentPhoto.fullUrl || `${API_BASE_URL}${currentPhoto.url}`;
+    // Determine which image URL to display - now using the print version for preview
+    // since it has the correct A5 ratio and is optimized for printing
+    const displayUrl = currentPhoto.printUrl
+        ? `${API_BASE_URL}${currentPhoto.printUrl}`
+        : currentPhoto.fullUrl || `${API_BASE_URL}${currentPhoto.url}`;
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
@@ -129,7 +79,10 @@ const PhotoPreview = () => {
                 initial={{opacity: 0, y: 20}}
                 animate={{opacity: 1, y: 0}}
                 transition={{duration: 0.5}}
-                className={`w-full ${isLandscape ? 'max-w-6xl' : 'max-w-4xl'} bg-white rounded-xl shadow-elegant overflow-hidden`}
+                className={`w-full ${isTablet
+                    ? (isLandscape ? 'max-w-4xl px-8' : 'max-w-2xl px-4')
+                    : (isLandscape ? 'max-w-6xl px-6' : 'max-w-xl px-4')
+                } bg-white rounded-xl shadow-elegant overflow-hidden`}
             >
                 {/* Header with decorative elements */}
                 <div className="relative">
@@ -152,52 +105,62 @@ const PhotoPreview = () => {
                 </div>
 
                 {/* Main content - optimized for landscape */}
-                <div className={`p-6 ${isLandscape ? 'flex items-center' : 'block'}`}>
-                    {/* Photo container - adjusted for landscape */}
+                <div className={`p-${isTablet ? '4' : '6'} ${isLandscape ? 'flex items-center' : 'block'}`}>
+                    {/* Photo container - adjusted for landscape and A5 ratio */}
                     <div
-                        className={`
-                            ${isLandscape ? 'w-2/3 pr-6' : 'w-full mb-6'} 
-                            relative
-                        `}
+                        className={`relative ${
+                            isTablet
+                                ? (isLandscape ? 'w-3/5 pr-4' : 'w-full mb-4')
+                                : (isLandscape ? 'w-2/3 pr-6' : 'w-full mb-6')
+                        }`}
                     >
-                        <div className="aspect-[4/3] w-full overflow-hidden rounded-lg shadow-card relative">
-                            {imageError ? (
-                                <div
-                                    className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100 text-gray-500">
-                                    <Icon path={mdiImage} size={4} className="mb-4"/>
-                                    <p className="text-xl">Image could not be loaded</p>
-                                </div>
-                            ) : (
-                                <>
-                                    <img
-                                        src={displayUrl}
-                                        alt="Your photo"
-                                        className="w-full h-full object-cover"
-                                        onError={(e) => {
-                                            console.error("Image failed to load:", displayUrl);
-                                            e.target.onerror = null;
-                                            setImageError(true);
-                                        }}
-                                    />
-                                    {isApplyingOverlay && (
-                                        <div
-                                            className="absolute inset-0 bg-white/70 backdrop-blur-sm flex items-center justify-center">
-                                            <div className="text-center">
-                                                <motion.div
-                                                    animate={{rotate: 360}}
-                                                    transition={{repeat: Infinity, duration: 1.5, ease: "linear"}}
-                                                    className="mb-4 text-hindu-accent"
-                                                >
-                                                    <Icon path={mdiLoading} size={3}/>
-                                                </motion.div>
-                                                <p className="text-xl font-medium text-hindu-accent">
-                                                    Adding wedding frame...
-                                                </p>
-                                            </div>
-                                        </div>
-                                    )}
-                                </>
-                            )}
+                        {/* Enhanced Photo Frame with improved presentation - UPDATED FOR A5 LANDSCAPE */}
+                        <div className="relative">
+                            {/* A5 Photo Frame with decorative border - UPDATED ASPECT RATIO FOR LANDSCAPE */}
+                            <div className="aspect-[1.414/1] w-full overflow-hidden rounded-lg shadow-lg relative mb-2">
+                                {/* Double border effect */}
+                                <div className="absolute inset-0 border-8 border-white z-10 rounded-md pointer-events-none"></div>
+                                <div className="absolute inset-2 border border-gray-200 z-10 rounded-sm pointer-events-none"></div>
+
+                                {/* Inner mat/background with gradient */}
+                                <div className="absolute inset-0 bg-white"></div>
+
+
+                                {/* Photo itself - positioned to fill available space */}
+                                {imageError ? (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100 text-gray-500">
+                                        <Icon path={mdiImage} size={4} className="mb-4"/>
+                                        <p className="text-xl font-medium">Image could not be loaded</p>
+                                        <p className="text-sm text-gray-400 mt-2">Please try taking a new photo</p>
+                                    </div>
+                                ) : (
+                                    <div className="absolute inset-[16px] flex items-center justify-center overflow-hidden">
+                                        <img
+                                            src={displayUrl}
+                                            alt="Your photo"
+                                            className="max-w-full max-h-full object-contain"
+                                            onError={(e) => {
+                                                console.error("Image failed to load:", displayUrl);
+                                                e.target.onerror = null;
+                                                setImageError(true);
+                                            }}
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Subtle "corners" overlay to indicate frame */}
+                                <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-white/60 rounded-tl-sm pointer-events-none"></div>
+                                <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-white/60 rounded-tr-sm pointer-events-none"></div>
+                                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-white/60 rounded-bl-sm pointer-events-none"></div>
+                                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white/60 rounded-br-sm pointer-events-none"></div>
+                            </div>
+
+                            {/* Photo size indicator - UPDATED FOR LANDSCAPE */}
+                            <div className="flex justify-center items-center gap-2">
+                                <div className="h-px bg-gray-300 w-8"></div>
+                                <p className="text-xs text-gray-500">A5 Querformat</p>
+                                <div className="h-px bg-gray-300 w-8"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -211,31 +174,30 @@ const PhotoPreview = () => {
                                 exit={{opacity: 0, y: 10}}
                                 className={`text-center ${isLandscape ? 'mb-8' : 'mb-6'} text-2xl text-gray-700 font-display`}
                             >
-                                {statusMessage}
+                                {imageError ? "Would you like to try again?" : "How does it look?"}
                             </motion.p>
                         </AnimatePresence>
 
-                        <div
-                            className={`flex ${isLandscape ? 'flex-col space-y-4' : 'flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4'}`}>
+                        <div className={`flex ${isLandscape ? 'flex-col space-y-4' : 'flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4'}`}>
                             {/* Retake button */}
                             <button
                                 onClick={handleRetake}
-                                disabled={isApplyingOverlay}
-                                className="flex items-center justify-center btn btn-outline btn-hindu-outline text-lg py-3 px-6 w-full"
+                                className={`flex items-center justify-center btn btn-outline btn-hindu-outline text-lg py-3 px-6 w-full`}
                             >
                                 <Icon path={mdiCamera} size={1} className="mr-2"/>
                                 Retake Photo
                             </button>
 
-                            {/* Keep/Continue button */}
-                            <button
-                                onClick={handleKeep}
-                                disabled={isApplyingOverlay}
-                                className="flex items-center justify-center btn btn-primary btn-hindu text-lg py-3 px-6 w-full"
-                            >
-                                <Icon path={mdiCheck} size={1} className="mr-2"/>
-                                {currentPhoto.overlayApplied ? "Perfect! Continue" : "Add Wedding Frame"}
-                            </button>
+                            {/* Continue button - simplified */}
+                            {!imageError && (
+                                <button
+                                    onClick={handleKeep}
+                                    className="flex items-center justify-center btn btn-primary btn-hindu text-lg py-3 px-6 w-full"
+                                >
+                                    <Icon path={mdiCheck} size={1} className="mr-2"/>
+                                    Continue
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

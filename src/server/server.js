@@ -56,9 +56,12 @@ const QR_DIR = path.join(__dirname, 'public', 'qrcodes');
 const PREVIEW_DIR = path.join(__dirname, 'public', 'preview');
 const THUMBNAILS_DIR = path.join(__dirname, 'public', 'thumbnails');
 const OVERLAYS_DIR = path.join(__dirname, 'public', 'overlays');
+// Neue Verzeichnispfade für Dual-Format-Fotos
+const PRINT_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'print');
+const ORIGINALS_DIR = path.join(__dirname, 'public', 'photos', 'originals');
 
 // Create required directories
-[PHOTOS_DIR, QR_DIR, PREVIEW_DIR, THUMBNAILS_DIR, OVERLAYS_DIR].forEach(dir => {
+[PHOTOS_DIR, QR_DIR, PREVIEW_DIR, THUMBNAILS_DIR, OVERLAYS_DIR, PRINT_PHOTOS_DIR, ORIGINALS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, {recursive: true});
     }
@@ -315,6 +318,7 @@ function stopWebcamPreview() {
         });
     }
 }
+
 function sendFrameToClients(base64Image) {
     let activeClientCount = 0;
     for (const [_, client] of activeStreams) {
@@ -398,22 +402,115 @@ function broadcastToStreamingClients(message) {
     }
 }
 
-// Thumbnail generation function
+// Neue Funktion zur Verarbeitung von Fotos in zwei Formaten - mit A5 QUERFORMAT
+async function processPhotoWithDualFormats(sourceFilePath, filename) {
+    // Pfade für verschiedene Versionen
+    const originalFilename = `original_${filename}`;
+    const printFilename = `print_${filename}`;
+    const originalPath = path.join(ORIGINALS_DIR, originalFilename);
+    const printPath = path.join(PRINT_PHOTOS_DIR, printFilename);
+    const publicPath = path.join(PHOTOS_DIR, filename); // Öffentlich sichtbare Version
+
+    try {
+        // 1. Originalbild speichern (unverändert)
+        await fs.promises.copyFile(sourceFilePath, originalPath);
+
+        // 2. A5-Format-Version für den Druck erstellen - QUERFORMAT (1.414:1 Seitenverhältnis)
+        await sharp(sourceFilePath)
+            .resize({
+                width: 2480,         // ~A5 bei 300dpi
+                height: 1748,        // A5-Querformat (1.414:1)
+                fit: 'contain',      // Bild in den Rahmen einpassen ohne Beschneiden
+                background: { r: 255, g: 255, b: 255 } // Weißer Hintergrund statt schwarz
+            })
+            .jpeg({ quality: 90 })
+            .toFile(printPath);
+
+        // 3. Hauptversion (mit Rahmen) erstellen - diese wird in der App angezeigt
+        // Overlay prüfen und anwenden
+        const defaultOverlayPath = path.join(OVERLAYS_DIR, 'wedding-frame.png');
+        let overlayApplied = false;
+
+        if (fs.existsSync(defaultOverlayPath)) {
+            try {
+                // Rahmen auf die A5-Version anwenden
+                const success = await applyOverlayToImage(printPath, defaultOverlayPath, publicPath);
+                overlayApplied = success;
+            } catch (error) {
+                console.error('Error applying default overlay:', error);
+                // Bei Fehler A5-Version ohne Rahmen kopieren
+                await fs.promises.copyFile(printPath, publicPath);
+            }
+        } else {
+            // Kein Overlay verfügbar, A5-Version kopieren
+            await fs.promises.copyFile(printPath, publicPath);
+        }
+
+        // 4. Thumbnail für Galerie-Ansicht erstellen
+        const thumbnailUrl = await generateThumbnail(publicPath, filename);
+
+        return {
+            originalPath: originalPath,
+            originalUrl: `/photos/originals/${originalFilename}`,
+            printPath: printPath,
+            printUrl: `/photos/print/${printFilename}`,
+            publicPath: publicPath,
+            publicUrl: `/photos/${filename}`,
+            thumbnailUrl: thumbnailUrl,
+            overlayApplied: overlayApplied
+        };
+    } catch (error) {
+        console.error('Error processing photo with dual formats:', error);
+        throw error;
+    }
+}
+
+// Überarbeitete applyOverlayToImage-Funktion
+async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath) {
+    try {
+        // Dimensionen des Eingangsbilds abrufen
+        const metadata = await sharp(sourceImagePath).metadata();
+
+        // Overlay auf die Größe des Eingangsbilds anpassen
+        const resizedOverlay = await sharp(overlayImagePath)
+            .resize(metadata.width, metadata.height, {
+                fit: 'fill'
+            })
+            .toBuffer();
+
+        // Bilder übereinanderlegen
+        await sharp(sourceImagePath)
+            .composite([
+                { input: resizedOverlay, gravity: 'center' }
+            ])
+            .jpeg({ quality: 95 }) // Höhere Qualität für bessere Rahmendetails
+            .toFile(outputPath);
+
+        return true;
+    } catch (error) {
+        console.error('Error applying overlay:', error);
+        return false;
+    }
+}
+
+// Aktualisierte Thumbnail-Generierungsfunktion - mit A5 QUERFORMAT
 async function generateThumbnail(sourceFilePath, filename) {
-    // Create thumbnails directory if it doesn't exist
+    // Thumbnail-Verzeichnis erstellen, wenn es nicht existiert
     if (!fs.existsSync(THUMBNAILS_DIR)) {
         fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
     }
 
     const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${filename}`);
 
-    // Generate thumbnail only if it doesn't already exist
+    // Thumbnail nur generieren, wenn es noch nicht existiert
     if (!fs.existsSync(thumbnailPath)) {
         try {
             await sharp(sourceFilePath)
-                .resize(300, 225, { // 4:3 aspect ratio thumbnail
-                    fit: 'cover',
-                    position: 'center'
+                .resize({
+                    width: 424,         // A5-Querformat (1.414:1)
+                    height: 300,
+                    fit: 'contain',     // Bild nicht beschneiden
+                    background: { r: 255, g: 255, b: 255 } // Weißer Hintergrund statt schwarz
                 })
                 .jpeg({ quality: 80, progressive: true })
                 .toFile(thumbnailPath);
@@ -429,37 +526,18 @@ async function generateThumbnail(sourceFilePath, filename) {
     return `/thumbnails/thumb_${filename}`;
 }
 
-// Helper function to apply overlay to an image
-async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath) {
-    try {
-        // Get dimensions of the input image
-        const metadata = await sharp(sourceImagePath).metadata();
-
-        // Resize the overlay to match the input image dimensions
-        const resizedOverlay = await sharp(overlayImagePath)
-            .resize(metadata.width, metadata.height, {
-                fit: 'fill'
-            })
-            .toBuffer();
-
-        // Composite the images
-        await sharp(sourceImagePath)
-            .composite([
-                { input: resizedOverlay, gravity: 'center' }
-            ])
-            .jpeg({ quality: 90 })
-            .toFile(outputPath);
-
-        return true;
-    } catch (error) {
-        console.error('Error applying overlay:', error);
-        return false;
-    }
-}
-
 app.get('/photos/:filename', (req, res) => {
     const filename = req.params.filename;
-    const filepath = path.join(PHOTOS_DIR, filename);
+    let filepath;
+
+    // Bestimmen, in welchem Verzeichnis das Foto zu finden ist
+    if (filename.startsWith('original_')) {
+        filepath = path.join(ORIGINALS_DIR, filename);
+    } else if (filename.startsWith('print_')) {
+        filepath = path.join(PRINT_PHOTOS_DIR, filename);
+    } else {
+        filepath = path.join(PHOTOS_DIR, filename);
+    }
 
     if (!fs.existsSync(filepath)) {
         return res.status(404).send('Photo not found');
@@ -518,41 +596,71 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-// Get list of all photos
+// Get list of all photos - with Type-Parameter
 app.get('/api/photos', (req, res) => {
-    fs.readdir(PHOTOS_DIR, (err, files) => {
+    // Abfrageparameter für Typ abrufen (Standard: mit Rahmen)
+    const type = req.query.type || 'framed'; // 'framed', 'original', 'print'
+
+    // Verzeichnis basierend auf Typ auswählen
+    let dirToScan;
+    switch (type) {
+        case 'original':
+            dirToScan = ORIGINALS_DIR;
+            break;
+        case 'print':
+            dirToScan = PRINT_PHOTOS_DIR;
+            break;
+        case 'framed':
+        default:
+            dirToScan = PHOTOS_DIR;
+            break;
+    }
+
+    fs.readdir(dirToScan, (err, files) => {
         if (err) {
-            return res.status(500).json({error: 'Failed to retrieve photos'});
+            return res.status(500).json({error: 'Fehler beim Abrufen der Fotos'});
         }
 
-        // Filter for image files
+        // Nach Bilddateien filtern
         const photoFiles = files.filter(file =>
             /\.(jpg|jpeg|png)$/i.test(file)
         );
 
-        // Add timestamps and sort by most recent
+        // Zeitstempel hinzufügen und nach neuesten sortieren
         const photos = photoFiles.map(file => {
-            const stats = fs.statSync(path.join(PHOTOS_DIR, file));
-            return {
-                filename: file,
-                url: `/photos/${file}`,
-                thumbnailUrl: `/thumbnails/thumb_${file}`, // Add thumbnail URL
-                qrUrl: `/qrcodes/qr_${file.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`,
-                timestamp: stats.mtime.getTime()
-            };
-        }).sort((a, b) => b.timestamp - a.timestamp);
+            try {
+                const stats = fs.statSync(path.join(dirToScan, file));
+                const baseFilename = file.replace(/^(original_|print_)/, '');
+
+                return {
+                    filename: file,
+                    baseFilename: baseFilename,
+                    url: type === 'original'
+                        ? `/photos/originals/${file}`
+                        : (type === 'print' ? `/photos/print/${file}` : `/photos/${file}`),
+                    originalUrl: `/photos/originals/original_${baseFilename}`,
+                    printUrl: `/photos/print/print_${baseFilename}`,
+                    thumbnailUrl: `/thumbnails/thumb_${baseFilename}`, // Thumbnail-URL hinzufügen
+                    qrUrl: `/qrcodes/qr_${baseFilename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`,
+                    timestamp: stats.mtime.getTime()
+                };
+            } catch (error) {
+                console.error(`Error processing photo ${file}:`, error);
+                return null;
+            }
+        }).filter(photo => photo !== null).sort((a, b) => b.timestamp - a.timestamp);
 
         res.json(photos);
     });
 });
 
-// Take a new photo - using gphoto2 for final capture
+// Take a new photo - using gphoto2 for final capture - mit Dual-Format
 app.post('/api/photos/capture', (req, res) => {
     // Prevent multiple simultaneous capture requests
     if (captureInProgress.status) {
         return res.status(429).json({
             success: false,
-            error: 'A photo capture is already in progress. Please try again in a moment.'
+            error: 'Eine Fotoaufnahme ist bereits im Gange. Bitte versuche es in einem Moment noch einmal.'
         });
     }
 
@@ -595,180 +703,249 @@ app.post('/api/photos/capture', (req, res) => {
             }, 1500); // Short delay to allow camera to recover
         }
 
-        captureInProgress.status = false;
-
         if (error || stderr.includes('ERROR')) {
-            console.error(`Error capturing photo: ${error ? error.message : stderr}`);
+            console.error(`Fehler bei der Fotoaufnahme: ${error ? error.message : stderr}`);
 
-            // If gphoto2 fails, fall back to webcam as backup
+            // Bei gphoto2-Fehler auf Webcam als Backup zurückgreifen
             const fallbackCommand = `fswebcam -d /dev/video0 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
 
-            exec(fallbackCommand, (fbError, fbStdout, fbStderr) => {
+            exec(fallbackCommand, async (fbError, fbStdout, fbStderr) => {
+                captureInProgress.status = false;
+
                 if (fbError) {
                     return res.status(500).json({
                         success: false,
-                        error: 'Failed to capture photo with both camera and webcam'
+                        error: 'Fotoaufnahme sowohl mit Kamera als auch mit Webcam fehlgeschlagen'
                     });
                 }
 
-                console.log(`Photo captured with webcam as fallback`);
-                generateQRAndRespond(req, res, filename, timestamp);
+                console.log(`Foto mit Webcam als Fallback aufgenommen`);
+
+                try {
+                    // Dual-Format-Verarbeitung für das Webcam-Foto
+                    const processedPhotos = await processPhotoWithDualFormats(filepath, filename);
+                    generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
+                } catch (err) {
+                    console.error('Fehler bei der Dual-Format-Verarbeitung:', err);
+                    // Versuchen, mit Standardverarbeitung fortzufahren
+                    generateQRAndRespond(req, res, filename, timestamp);
+                }
             });
 
             return;
         }
 
-        console.log(`Photo captured successfully with camera: ${filename}`);
-        generateQRAndRespond(req, res, filename, timestamp);
+        captureInProgress.status = false;
+        console.log(`Foto erfolgreich mit Kamera aufgenommen: ${filename}`);
+
+        // Dual-Format-Verarbeitung für die Kameraaufnahme
+        processPhotoWithDualFormats(filepath, filename)
+            .then(processedPhotos => {
+                generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
+            })
+            .catch(err => {
+                console.error('Fehler bei der Dual-Format-Verarbeitung:', err);
+                // Versuchen, mit Standardverarbeitung fortzufahren
+                generateQRAndRespond(req, res, filename, timestamp);
+            });
     });
 });
 
-// Helper function to generate QR code and send response
-async function generateQRAndRespond(req, res, filename, timestamp) {
-    // Generate QR code for the photo view page, not directly to the image
-    const photoId = filename; // Using the filename as the ID for simplicity
-    const clientDomain = 'fotobox.slyrix.com'; // Using the specified domain
+// API-Endpunkt zum Abrufen eines einzelnen Fotos nach ID - mit allen Versionen
+app.get('/api/photos/:photoId', (req, res) => {
+    const photoId = req.params.photoId;
+
+    // Eingabevalidierung
+    if (!photoId || typeof photoId !== 'string') {
+        return res.status(400).json({
+            success: false,
+            error: 'Ungültige Foto-ID'
+        });
+    }
+
+    // Bestimmen, ob dies ein Original oder eine andere Variante ist
+    let filepath;
+    let isOriginal = false;
+
+    if (photoId.startsWith('original_')) {
+        // Original-Version angefordert
+        filepath = path.join(ORIGINALS_DIR, photoId);
+        isOriginal = true;
+    } else if (photoId.startsWith('print_')) {
+        // Druckbare Version angefordert
+        filepath = path.join(PRINT_PHOTOS_DIR, photoId);
+    } else {
+        // Standard-Version (mit Rahmen) angefordert
+        filepath = path.join(PHOTOS_DIR, photoId);
+    }
+
+    // Prüfen, ob die Datei existiert
+    if (!fs.existsSync(filepath)) {
+        console.log(`Foto nicht gefunden: ${photoId}`);
+
+        // Wenn es sich um keine spezielle Version handelt, in anderen Ordnern suchen
+        if (!photoId.startsWith('original_') && !photoId.startsWith('print_')) {
+            // Nach gleicher Basis-ID in anderen Ordnern suchen
+            const baseId = photoId.replace(/^(original_|print_)/, '');
+
+            const originalPath = path.join(ORIGINALS_DIR, `original_${baseId}`);
+            const printPath = path.join(PRINT_PHOTOS_DIR, `print_${baseId}`);
+
+            if (fs.existsSync(originalPath)) {
+                filepath = originalPath;
+                isOriginal = true;
+            } else if (fs.existsSync(printPath)) {
+                filepath = printPath;
+            } else {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Foto nicht gefunden'
+                });
+            }
+        } else {
+            return res.status(404).json({
+                success: false,
+                error: 'Foto nicht gefunden'
+            });
+        }
+    }
+
+    try {
+        // Dateieigenschaften für Zeitstempel abrufen
+        const stats = fs.statSync(filepath);
+
+        // QR-Code-Pfad generieren
+        const baseFilename = photoId.replace(/^(original_|print_)/, '');
+        const qrFilename = `qr_${baseFilename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`;
+
+        // Prüfen, ob Thumbnail existiert
+        const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${baseFilename}`);
+        const hasThumbnail = fs.existsSync(thumbnailPath);
+
+        // Client-Domain aus Anfrage oder Konfiguration ermitteln
+        const clientDomain = req.headers.host || 'fotobox.slyrix.com';
+
+        // Verschiedene URLs für verschiedene Versionen zusammenstellen
+        let normalUrl = `/photos/${baseFilename}`;
+        let originalUrl = `/photos/originals/original_${baseFilename}`;
+        let printUrl = `/photos/print/print_${baseFilename}`;
+
+        // Basierend auf angeforderten Bild-Typ die korrekte photoViewUrl erstellen
+        const photoViewUrl = isOriginal
+            ? `https://${clientDomain}/photo/original_${baseFilename}`
+            : `https://${clientDomain}/photo/${baseFilename}`;
+
+        // Fotodaten zurückgeben
+        res.json({
+            success: true,
+            filename: photoId,
+            url: isOriginal ? originalUrl : normalUrl,
+            originalUrl: originalUrl,
+            printUrl: printUrl,
+            thumbnailUrl: hasThumbnail ? `/thumbnails/thumb_${baseFilename}` : null,
+            qrUrl: `/qrcodes/${qrFilename}`,
+            photoViewUrl: photoViewUrl,
+            isOriginal: isOriginal,
+            timestamp: stats.mtime.getTime()
+        });
+    } catch (error) {
+        console.error(`Fehler beim Abrufen des Fotos ${photoId}:`, error);
+        res.status(500).json({
+            success: false,
+            error: 'Serverfehler beim Abrufen des Fotos'
+        });
+    }
+});
+
+// Hilfsfunktion für QR-Code-Generierung und Antwort
+async function generateQRAndRespond(req, res, filename, timestamp, processedPhotos = null) {
+    // QR-Code für die Foto-Ansichtsseite generieren, nicht direkt für das Bild
+    const photoId = processedPhotos ? path.basename(processedPhotos.originalUrl) : filename; // Original-ID für QR-Code verwenden
+    const clientDomain = 'fotobox.slyrix.com'; // Angegebene Domain verwenden
     const photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
 
     const qrFilename = `qr_${timestamp}.png`;
     const qrFilepath = path.join(QR_DIR, qrFilename);
 
-    // Generate thumbnail
-    const filepath = path.join(PHOTOS_DIR, filename);
-    const thumbnailUrl = await generateThumbnail(filepath, filename);
-
-    // Check if default overlay exists and apply it
-    const defaultOverlayPath = path.join(OVERLAYS_DIR, 'wedding-frame.png');
-    let overlayApplied = false;
-
-    if (fs.existsSync(defaultOverlayPath)) {
-        try {
-            // Create a temporary path for the processed file
-            const processedPath = path.join(PHOTOS_DIR, `temp_${filename}`);
-
-            // Apply the overlay
-            const success = await applyOverlayToImage(filepath, defaultOverlayPath, processedPath);
-
-            if (success) {
-                // Replace the original with the overlaid version
-                fs.renameSync(processedPath, filepath);
-                overlayApplied = true;
-
-                // Regenerate thumbnail with the overlay
-                await generateThumbnail(filepath, filename);
-            }
-        } catch (error) {
-            console.error('Error applying default overlay:', error);
-            // Continue without overlay if there's an error
-        }
-    }
+    // Wenn keine verarbeiteten Fotos vorliegen, Thumbnail für die Hauptdatei erstellen
+    const thumbnailUrl = processedPhotos
+        ? processedPhotos.thumbnailUrl
+        : await generateThumbnail(path.join(PHOTOS_DIR, filename), filename);
 
     QRCode.toFile(qrFilepath, photoViewUrl, {
         color: {
-            dark: '#000',  // Points
-            light: '#FFF'  // Background
+            dark: '#000',  // Punkte
+            light: '#FFF'  // Hintergrund
         }
     }, (qrErr) => {
         if (qrErr) {
-            console.error(`Error generating QR code: ${qrErr.message}`);
+            console.error(`Fehler beim Generieren des QR-Codes: ${qrErr.message}`);
         }
 
+        // Antwort mit allen relevanten URLs
         res.json({
             success: true,
             photo: {
-                filename,
-                url: `/photos/${filename}`,
-                thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
+                filename: filename,
+                url: processedPhotos ? processedPhotos.publicUrl : `/photos/${filename}`,
+                thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback auf Original, wenn Thumbnail fehlschlägt
                 qrUrl: `/qrcodes/${qrFilename}`,
-                photoViewUrl: photoViewUrl, // Add the photo view URL to response
-                overlayApplied: overlayApplied, // Indicate if overlay was applied
+                photoViewUrl: photoViewUrl,
+                originalUrl: processedPhotos ? processedPhotos.originalUrl : null,
+                printUrl: processedPhotos ? processedPhotos.printUrl : null,
+                overlayApplied: processedPhotos ? processedPhotos.overlayApplied : false,
                 timestamp: Date.now()
             }
         });
     });
 }
 
-// Now let's add an endpoint to get a specific photo by ID
-app.get('/api/photos/:photoId', (req, res) => {
-    const photoId = req.params.photoId;
-
-    // Input validation
-    if (!photoId || typeof photoId !== 'string') {
-        return res.status(400).json({
-            success: false,
-            error: 'Invalid photo ID'
-        });
-    }
-
-    // In this implementation, the photoId is the filename
-    const filepath = path.join(PHOTOS_DIR, photoId);
-
-    // Check if the file exists
-    if (!fs.existsSync(filepath)) {
-        console.log(`Photo not found: ${photoId}`);
-        return res.status(404).json({
-            success: false,
-            error: 'Photo not found'
-        });
-    }
-
-    try {
-        // Get file stats for timestamp
-        const stats = fs.statSync(filepath);
-
-        // Generate QR code path
-        const qrFilename = `qr_${photoId.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`;
-
-        // Check if thumbnail exists
-        const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${photoId}`);
-        const hasThumbnail = fs.existsSync(thumbnailPath);
-
-        // Get client domain from request or config
-        const clientDomain = req.headers.host || 'fotobox.slyrix.com';
-        const photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
-
-        // Return photo data
-        res.json({
-            success: true,
-            filename: photoId,
-            url: `/photos/${photoId}`,
-            thumbnailUrl: hasThumbnail ? `/thumbnails/thumb_${photoId}` : null,
-            qrUrl: `/qrcodes/${qrFilename}`,
-            photoViewUrl: photoViewUrl,
-            timestamp: stats.mtime.getTime()
-        });
-    } catch (error) {
-        console.error(`Error retrieving photo ${photoId}:`, error);
-        res.status(500).json({
-            success: false,
-            error: 'Server error retrieving photo'
-        });
-    }
-});
-
-// Delete a photo
+// Delete a photo - alle Versionen
 app.delete('/api/photos/:filename', (req, res) => {
     const filename = req.params.filename;
-    const filepath = path.join(PHOTOS_DIR, filename);
-    const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${filename}`);
+    const baseFilename = filename.replace(/^(original_|print_)/, '');
 
-    // Delete the original photo
-    fs.unlink(filepath, (err) => {
-        if (err) {
-            return res.status(500).json({error: 'Failed to delete photo'});
+    const filepaths = [
+        path.join(PHOTOS_DIR, baseFilename),                        // Standard-Version
+        path.join(ORIGINALS_DIR, `original_${baseFilename}`),       // Original-Version
+        path.join(PRINT_PHOTOS_DIR, `print_${baseFilename}`),       // Druck-Version
+        path.join(THUMBNAILS_DIR, `thumb_${baseFilename}`)          // Thumbnail
+    ];
+
+    let success = true;
+    let errorMessage = '';
+
+    // Alle Versionen löschen
+    for (const filepath of filepaths) {
+        if (fs.existsSync(filepath)) {
+            try {
+                fs.unlinkSync(filepath);
+                console.log(`Deleted: ${filepath}`);
+            } catch (err) {
+                success = false;
+                errorMessage += `Failed to delete ${filepath}: ${err.message}. `;
+                console.error(`Error deleting ${filepath}:`, err);
+            }
         }
+    }
 
-        // Also try to delete the thumbnail if it exists
-        if (fs.existsSync(thumbnailPath)) {
-            fs.unlink(thumbnailPath, (thumbErr) => {
-                if (thumbErr) {
-                    console.error(`Failed to delete thumbnail: ${thumbErr}`);
-                }
-            });
+    // QR-Code auch löschen
+    const qrPath = path.join(QR_DIR, `qr_${baseFilename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`);
+    if (fs.existsSync(qrPath)) {
+        try {
+            fs.unlinkSync(qrPath);
+            console.log(`Deleted QR code: ${qrPath}`);
+        } catch (err) {
+            console.error(`Error deleting QR code ${qrPath}:`, err);
+            // QR-Code-Löschfehler nicht als kritisch betrachten
         }
+    }
 
-        res.json({success: true, message: 'Photo deleted successfully'});
-    });
+    if (success) {
+        res.json({success: true, message: 'All photo versions deleted successfully'});
+    } else {
+        res.status(500).json({success: false, error: errorMessage});
+    }
 });
 
 // Send print command (placeholder for future implementation)
@@ -780,7 +957,10 @@ app.post('/api/photos/print', (req, res) => {
     }
 
     // This is where you would implement the printing logic
-    console.log(`Print request received for: ${filename}`);
+    // Für A5-Druck sollten wir die print_-Version verwenden
+    const printFilename = filename.startsWith('print_') ? filename : `print_${filename}`;
+
+    console.log(`Print request received for: ${printFilename}`);
 
     res.json({
         success: true,
@@ -842,8 +1022,16 @@ app.post('/api/photos/:photoId/overlay', upload.single('processedImage'), async 
         });
     }
 
-    // Source paths
-    const sourcePhotoPath = path.join(PHOTOS_DIR, photoId);
+    // Source paths - determine correct path based on photo ID
+    let sourcePhotoPath;
+    if (photoId.startsWith('original_')) {
+        sourcePhotoPath = path.join(ORIGINALS_DIR, photoId);
+    } else if (photoId.startsWith('print_')) {
+        sourcePhotoPath = path.join(PRINT_PHOTOS_DIR, photoId);
+    } else {
+        sourcePhotoPath = path.join(PHOTOS_DIR, photoId);
+    }
+
     const overlayPath = path.join(OVERLAYS_DIR, overlayName);
 
     // Check if both files exist
@@ -868,7 +1056,8 @@ app.post('/api/photos/:photoId/overlay', upload.single('processedImage'), async 
             fs.writeFileSync(sourcePhotoPath, req.file.buffer);
 
             // Regenerate thumbnail for the updated image
-            await generateThumbnail(sourcePhotoPath, photoId);
+            const baseFilename = photoId.replace(/^(original_|print_)/, '');
+            await generateThumbnail(sourcePhotoPath, baseFilename);
 
             return res.json({
                 success: true,
@@ -882,7 +1071,8 @@ app.post('/api/photos/:photoId/overlay', upload.single('processedImage'), async 
 
             if (success) {
                 // Regenerate thumbnail
-                await generateThumbnail(sourcePhotoPath, photoId);
+                const baseFilename = photoId.replace(/^(original_|print_)/, '');
+                await generateThumbnail(sourcePhotoPath, baseFilename);
 
                 return res.json({
                     success: true,
@@ -977,6 +1167,8 @@ server.listen(PORT, () => {
     console.log(`Photos directory: ${PHOTOS_DIR}`);
     console.log(`QR codes directory: ${QR_DIR}`);
     console.log(`Overlays directory: ${OVERLAYS_DIR}`);
+    console.log(`Print versions directory: ${PRINT_PHOTOS_DIR}`);
+    console.log(`Original photos directory: ${ORIGINALS_DIR}`);
 });
 
 // Cleanup on server shutdown

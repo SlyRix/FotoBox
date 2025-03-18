@@ -147,25 +147,28 @@ const CameraView = () => {
             {/* Overlay UI elements */}
             <div className="absolute inset-0 pointer-events-none">
                 {/* Standardized header bar */}
-                <div className="absolute top-0 left-0 right-0 h-16 bg-gradient-to-r from-hindu-secondary to-hindu-accent shadow-md flex items-center justify-between px-4">
+                <div
+                    className="absolute top-0 left-0 right-0 h-16 bg-gradient-to-r from-hindu-secondary to-hindu-accent shadow-md flex items-center justify-between px-4">
                     <button
                         onClick={() => navigate('/')}
                         className="flex items-center justify-center bg-white/20 backdrop-blur-md text-white hover:bg-white/30 transition-colors text-xl p-3 rounded-full shadow-lg pointer-events-auto"
                     >
-                        <Icon path={mdiHome} size={1.2} />
+                        <Icon path={mdiHome} size={1.2}/>
                     </button>
 
                     <div className="text-white text-xl font-script text-shadow">
                         Rushel & Sivani
                     </div>
 
-                    <div className="w-10"></div> {/* Empty div to balance the layout */}
+                    <div className="w-10"></div>
+                    {/* Empty div to balance the layout */}
                 </div>
 
                 {/* Photo frame guide overlay */}
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                    <div className="relative w-4/5 max-w-2xl aspect-[4/3]">
-                        {/* Corner markers for framing */}
+                    <div
+                        className="relative w-4/5 max-w-2xl aspect-[1.414/1]"> {/* Seitenverhältnis geändert auf 1.414:1 */}
+                        {/* Rahmenecken */}
                         <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-white/30"></div>
                         <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-white/30"></div>
                         <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-white/30"></div>
@@ -174,10 +177,10 @@ const CameraView = () => {
                         {/* Decorative elements */}
                         <motion.div
                             className="absolute -top-4 left-1/2 -translate-x-1/2 text-wedding-love/50"
-                            animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.5, 0.3] }}
-                            transition={{ duration: 3, repeat: Infinity }}
+                            animate={{scale: [1, 1.1, 1], opacity: [0.3, 0.5, 0.3]}}
+                            transition={{duration: 3, repeat: Infinity}}
                         >
-                            <Icon path={mdiHeart} size={1.5} />
+                            <Icon path={mdiHeart} size={1.5}/>
                         </motion.div>
                     </div>
                 </div>
@@ -190,7 +193,7 @@ const CameraView = () => {
                     {/* Camera button with enhanced styling */}
                     <div className="absolute bottom-12 left-0 right-0 flex justify-center">
                         <motion.button
-                            whileTap={{ scale: 0.95 }}
+                            whileTap={{scale: 0.95}}
                             onClick={handleTakePhoto}
                             disabled={!isReady || loading || !streamActive || isProcessing}
                             className={`relative group pointer-events-auto`}
@@ -200,8 +203,8 @@ const CameraView = () => {
                                 className={`absolute -inset-6 rounded-full bg-wedding-love opacity-20 blur-md ${
                                     !isReady || loading || !streamActive || isProcessing ? 'hidden' : ''
                                 }`}
-                                animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.3, 0.1] }}
-                                transition={{ duration: 2, repeat: Infinity }}
+                                animate={{scale: [1, 1.2, 1], opacity: [0.1, 0.3, 0.1]}}
+                                transition={{duration: 2, repeat: Infinity}}
                             />
 
                             {/* Orbit effect */}
@@ -209,7 +212,7 @@ const CameraView = () => {
                                 className={`absolute -inset-12 ${
                                     !isReady || loading || !streamActive || isProcessing ? 'hidden' : ''
                                 }`}
-                                style={{ zIndex: -1 }}
+                                style={{zIndex: -1}}
                             >
                                 {[...Array(3)].map((_, i) => (
                                     <motion.div
@@ -240,7 +243,7 @@ const CameraView = () => {
                                     !isReady || loading || !streamActive || isProcessing ? 'opacity-50' : 'opacity-100'
                                 }`}
                             >
-                                <Icon path={mdiCamera} size={4} />
+                                <Icon path={mdiCamera} size={4}/>
                             </div>
                         </motion.button>
                     </div>
@@ -251,12 +254,12 @@ const CameraView = () => {
             <AnimatePresence>
                 {isProcessing && (
                     <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
+                        initial={{opacity: 0}}
+                        animate={{opacity: 1}}
+                        exit={{opacity: 0}}
                         className="absolute inset-0 bg-white z-30 flex items-center justify-center"
                     >
-                        <HeartSpinner />
+                        <HeartSpinner/>
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -279,13 +282,64 @@ const CameraView = () => {
                                 <motion.div
                                     key="smile"
                                     initial={{ scale: 0.8, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    className="flex flex-col items-center"
+                                    animate={{
+                                        scale: 1,
+                                        opacity: 1,
+                                        y: [0, -5, 0]
+                                    }}
+                                    transition={{
+                                        duration: 0.8,
+                                        y: {
+                                            repeat: Infinity,
+                                            duration: 1.5,
+                                            ease: "easeInOut"
+                                        }
+                                    }}
+                                    className="flex flex-col items-center relative"
                                 >
-                                    <span className="text-6xl font-bold text-wedding-love mb-2">
-                                        {countdown}!
-                                    </span>
-                                    <Icon path={mdiHeartOutline} size={3} className="text-wedding-love" />
+                                    {/* Decorative floating hearts */}
+                                    <motion.div
+                                        className="absolute -top-12 -left-16"
+                                        animate={{ rotate: [0, 15, 0], scale: [1, 1.1, 1] }}
+                                        transition={{ duration: 2, repeat: Infinity }}
+                                    >
+                                        <Icon path={mdiHeart} size={1.5} className="text-wedding-love opacity-70" />
+                                    </motion.div>
+                                    <motion.div
+                                        className="absolute -top-8 -right-16"
+                                        animate={{ rotate: [0, -15, 0], scale: [1, 1.1, 1] }}
+                                        transition={{ duration: 2.3, repeat: Infinity, delay: 0.5 }}
+                                    >
+                                        <Icon path={mdiHeart} size={1.5} className="text-wedding-love opacity-70" />
+                                    </motion.div>
+
+                                    {/* Enhanced SMILE text with elegant styling */}
+                                    <span className="text-7xl font-script text-wedding-love drop-shadow-lg mb-2 tracking-wide">
+            {countdown}!
+        </span>
+
+                                    {/* Decorative element below */}
+                                    <div className="flex items-center mt-1">
+                                        <div className="h-px bg-wedding-love/50 w-12"></div>
+                                        <Icon path={mdiHeartOutline} size={2} className="text-wedding-love mx-2" />
+                                        <div className="h-px bg-wedding-love/50 w-12"></div>
+                                    </div>
+
+                                    {/* Pulsing heart below */}
+                                    <motion.div
+                                        animate={{
+                                            scale: [1, 1.2, 1],
+                                            opacity: [0.7, 1, 0.7]
+                                        }}
+                                        transition={{
+                                            duration: 1.5,
+                                            repeat: Infinity,
+                                            ease: "easeInOut"
+                                        }}
+                                        className="mt-4"
+                                    >
+                                        <Icon path={mdiHeart} size={3} className="text-wedding-love" />
+                                    </motion.div>
                                 </motion.div>
                             ) : (
                                 <motion.span
