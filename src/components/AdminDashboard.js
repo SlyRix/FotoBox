@@ -1,10 +1,10 @@
-// AdminDashboard.js - For photo management and system control
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
-import { motion } from 'framer-motion';
-import { API_BASE_URL } from '../App';
-import OverlayUpload from './OverlayUpload';
+import { motion, AnimatePresence } from 'framer-motion';
+import { API_BASE_URL, API_ENDPOINT } from '../App';
+import Icon from '@mdi/react';
+import { mdiCamera, mdiHome, mdiShareVariant, mdiDownload, mdiImage, mdiInstagram, mdiDelete, mdiPencil, mdiLoading, mdiCheck, mdiUpload, mdiClose } from '@mdi/js';
 
 const AdminDashboard = () => {
     const { photos, fetchPhotos, loading, error, deletePhoto } = useCamera();
@@ -12,6 +12,28 @@ const AdminDashboard = () => {
     const [deleteConfirm, setDeleteConfirm] = useState(null);
     const [cameraStatus, setCameraStatus] = useState('Loading...');
     const navigate = useNavigate();
+
+    // Frame management state
+    const [frames, setFrames] = useState({
+        standard: [],
+        instagram: [],
+        wedding: []
+    });
+    const [isLoadingFrames, setIsLoadingFrames] = useState(true);
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [framePreviewUrl, setFramePreviewUrl] = useState('');
+    const [frameName, setFrameName] = useState('');
+    const [frameType, setFrameType] = useState('standard'); // 'standard', 'instagram', 'wedding'
+    const [frameMessage, setFrameMessage] = useState({ text: '', type: '' });
+    const [uploadingFrame, setUploadingFrame] = useState(false);
+
+    // Confirmation dialog state
+    const [confirmDialog, setConfirmDialog] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: null
+    });
 
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
@@ -34,12 +56,12 @@ const AdminDashboard = () => {
         }
     }, [navigate]);
 
+    // Fetch photos and camera status on mount
     useEffect(() => {
-        // Fetch photos when component mounts
         fetchPhotos();
 
         // Check camera status
-        fetch(`${API_BASE_URL}/api/status`)
+        fetch(`${API_ENDPOINT}/status`)
             .then(response => response.json())
             .then(data => {
                 setCameraStatus(data.message);
@@ -48,7 +70,44 @@ const AdminDashboard = () => {
                 console.error('Error checking camera status:', error);
                 setCameraStatus('Error checking camera status');
             });
+
+        // Fetch available frames
+        fetchFrames();
     }, [fetchPhotos]);
+
+    // Fetch available frames
+    const fetchFrames = async () => {
+        try {
+            setIsLoadingFrames(true);
+            const response = await fetch(`${API_ENDPOINT}/frames`);
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch frames');
+            }
+
+            const allFrames = await response.json();
+
+            // Sort frames by type
+            const sortedFrames = {
+                standard: allFrames.filter(frame =>
+                    frame.type === 'standard' || (!frame.name.startsWith('instagram-') && !frame.name.startsWith('wedding-'))),
+                instagram: allFrames.filter(frame =>
+                    frame.type === 'instagram' || frame.name.startsWith('instagram-')),
+                wedding: allFrames.filter(frame =>
+                    frame.type === 'wedding' || frame.name.startsWith('wedding-'))
+            };
+
+            setFrames(sortedFrames);
+        } catch (error) {
+            console.error('Error fetching frames:', error);
+            setFrameMessage({
+                text: 'Failed to load frames: ' + error.message,
+                type: 'error'
+            });
+        } finally {
+            setIsLoadingFrames(false);
+        }
+    };
 
     const handleLogout = () => {
         sessionStorage.removeItem('isAdmin');
@@ -84,52 +143,154 @@ const AdminDashboard = () => {
 
     // Handle regenerating thumbnails for all photos
     const handleRegenerateThumbnails = () => {
-        if (window.confirm("This will regenerate thumbnails for all photos and may take some time. Continue?")) {
-            fetch(`${API_BASE_URL}/api/admin/generate-thumbnails`)
-                .then(response => response.json())
-                .then(data => {
-                    alert(data.message || "Thumbnail generation started.");
-                })
-                .catch(error => {
-                    console.error('Error starting thumbnail generation:', error);
-                    alert("Error starting thumbnail generation.");
-                });
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Regenerate Thumbnails',
+            message: 'This will regenerate thumbnails for all photos and may take some time. Continue?',
+            onConfirm: () => {
+                fetch(`${API_ENDPOINT}/admin/generate-thumbnails`)
+                    .then(response => response.json())
+                    .then(data => {
+                        alert(data.message || "Thumbnail generation started.");
+                    })
+                    .catch(error => {
+                        console.error('Error starting thumbnail generation:', error);
+                        alert("Error starting thumbnail generation.");
+                    });
+            }
+        });
+    };
+
+    // Handle frame selection
+    const handleFileChange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Validate file type
+        if (!file.type.match('image.*')) {
+            setFrameMessage({ text: 'Please select an image file (PNG, JPG)', type: 'error' });
+            return;
+        }
+
+        setSelectedFile(file);
+        setFramePreviewUrl(URL.createObjectURL(file));
+
+        // Auto-generate name based on type
+        if (frameType === 'instagram') {
+            setFrameName(`instagram-frame-${Date.now()}.png`);
+        } else if (frameType === 'wedding') {
+            setFrameName(`wedding-frame-${Date.now()}.png`);
+        } else {
+            setFrameName(`standard-frame-${Date.now()}.png`);
         }
     };
 
-    // Apply overlay to a specific photo
-    const handleApplyOverlay = async (photoFilename) => {
+    // Handle frame upload
+    const handleFrameUpload = async (e) => {
+        e.preventDefault();
+
+        if (!selectedFile) {
+            setFrameMessage({ text: 'Please select an image file', type: 'error' });
+            return;
+        }
+
+        // Ensure correct prefix based on type
+        let finalFrameName = frameName;
+        if (frameType === 'instagram' && !finalFrameName.startsWith('instagram-')) {
+            finalFrameName = `instagram-${finalFrameName}`;
+        } else if (frameType === 'wedding' && !finalFrameName.startsWith('wedding-')) {
+            finalFrameName = `wedding-${finalFrameName}`;
+        }
+
+        setUploadingFrame(true);
+        setFrameMessage({ text: '', type: '' });
+
+        const formData = new FormData();
+        formData.append('overlay', selectedFile);
+        formData.append('name', finalFrameName);
+
         try {
-            const response = await fetch(`${API_BASE_URL}/api/photos/${photoFilename}/overlay`, {
+            const response = await fetch(`${API_ENDPOINT}/admin/overlays`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    overlayName: 'wedding-frame.png'
-                }),
+                body: formData,
             });
 
             const result = await response.json();
 
             if (result.success) {
-                alert("Overlay applied successfully!");
-                // Refresh the photos list
-                fetchPhotos();
-                // Close the lightbox
-                closeLightbox();
+                setFrameMessage({
+                    text: `${frameType.charAt(0).toUpperCase() + frameType.slice(1)} frame uploaded successfully!`,
+                    type: 'success'
+                });
+
+                // Reset form
+                setSelectedFile(null);
+                setFramePreviewUrl('');
+                setFrameName('');
+
+                // Refresh frames list
+                fetchFrames();
             } else {
-                alert("Error applying overlay: " + (result.error || "Unknown error"));
+                setFrameMessage({ text: result.error || 'Error uploading frame', type: 'error' });
             }
         } catch (error) {
-            console.error('Error applying overlay:', error);
-            alert("Error applying overlay. Please try again.");
+            console.error('Error uploading frame:', error);
+            setFrameMessage({ text: 'Error uploading frame: ' + error.message, type: 'error' });
+        } finally {
+            setUploadingFrame(false);
         }
+    };
+
+    // Handle frame deletion
+    const handleDeleteFrame = async (frameName) => {
+        setConfirmDialog({
+            isOpen: true,
+            title: 'Delete Frame',
+            message: `Are you sure you want to delete the frame "${frameName}"?`,
+            onConfirm: async () => {
+                try {
+                    setUploadingFrame(true);
+                    const response = await fetch(`${API_ENDPOINT}/admin/overlays/${frameName}`, {
+                        method: 'DELETE',
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        setFrameMessage({ text: 'Frame deleted successfully!', type: 'success' });
+                        fetchFrames();
+                    } else {
+                        setFrameMessage({ text: result.error || 'Error deleting frame', type: 'error' });
+                    }
+                } catch (error) {
+                    console.error('Error deleting frame:', error);
+                    setFrameMessage({ text: 'Error deleting frame: ' + error.message, type: 'error' });
+                } finally {
+                    setUploadingFrame(false);
+                }
+            }
+        });
     };
 
     // Format date for display
     const formatDate = (timestamp) => {
         return new Date(timestamp).toLocaleString();
+    };
+
+    // Close confirmation dialog
+    const handleCloseConfirmDialog = () => {
+        setConfirmDialog({
+            ...confirmDialog,
+            isOpen: false
+        });
+    };
+
+    // Handle confirmation
+    const handleConfirm = () => {
+        if (confirmDialog.onConfirm) {
+            confirmDialog.onConfirm();
+        }
+        handleCloseConfirmDialog();
     };
 
     return (
@@ -194,8 +355,206 @@ const AdminDashboard = () => {
                     </button>
                 </div>
 
-                {/* Overlay Management */}
-                <OverlayUpload />
+                {/* Frame Management Section */}
+                <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h2 className="text-lg font-semibold mb-4">Frame Management</h2>
+
+                    {/* Tabs for frame types */}
+                    <div className="border-b border-gray-200 mb-4">
+                        <ul className="flex flex-wrap -mb-px">
+                            <li className="mr-2">
+                                <button
+                                    onClick={() => setFrameType('standard')}
+                                    className={`inline-block p-4 ${frameType === 'standard'
+                                        ? 'text-christian-accent border-b-2 border-christian-accent'
+                                        : 'text-gray-500 hover:text-gray-700 border-b-2 border-transparent'
+                                    }`}
+                                >
+                                    Standard Frames
+                                </button>
+                            </li>
+                            <li className="mr-2">
+                                <button
+                                    onClick={() => setFrameType('instagram')}
+                                    className={`inline-block p-4 ${frameType === 'instagram'
+                                        ? 'text-christian-accent border-b-2 border-christian-accent'
+                                        : 'text-gray-500 hover:text-gray-700 border-b-2 border-transparent'
+                                    }`}
+                                >
+                                    Instagram Frames
+                                </button>
+                            </li>
+                            <li>
+                                <button
+                                    onClick={() => setFrameType('wedding')}
+                                    className={`inline-block p-4 ${frameType === 'wedding'
+                                        ? 'text-christian-accent border-b-2 border-christian-accent'
+                                        : 'text-gray-500 hover:text-gray-700 border-b-2 border-transparent'
+                                    }`}
+                                >
+                                    Wedding Frames
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+                        {/* Current Frames */}
+                        <div>
+                            <h3 className="text-md font-medium mb-2">Available {frameType.charAt(0).toUpperCase() + frameType.slice(1)} Frames</h3>
+
+                            {isLoadingFrames ? (
+                                <div className="flex justify-center items-center h-40 bg-gray-50 rounded-lg">
+                                    <Icon path={mdiLoading} size={2} className="animate-spin text-gray-400" />
+                                </div>
+                            ) : frames[frameType].length === 0 ? (
+                                <div className="flex flex-col justify-center items-center h-40 bg-gray-50 rounded-lg text-gray-500">
+                                    <p>No frames available</p>
+                                    <p className="text-sm mt-2">Upload your first frame using the form</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+                                    {frames[frameType].map((frame) => (
+                                        <div
+                                            key={frame.name}
+                                            className="border rounded-lg overflow-hidden bg-gray-50 flex"
+                                        >
+                                            <div className="w-24 h-24 p-2 flex-shrink-0">
+                                                <img
+                                                    src={`${API_BASE_URL}${frame.url}?t=${frame.timestamp}`}
+                                                    alt={frame.name}
+                                                    className="w-full h-full object-contain"
+                                                />
+                                            </div>
+                                            <div className="flex-grow p-3 flex flex-col justify-between">
+                                                <div>
+                                                    <h4 className="font-medium text-sm truncate">
+                                                        {frame.displayName}
+                                                    </h4>
+                                                    <p className="text-xs text-gray-500 mt-1">
+                                                        {new Date(frame.timestamp).toLocaleDateString()}
+                                                    </p>
+                                                </div>
+                                                <div className="flex space-x-2 mt-2">
+                                                    <button
+                                                        onClick={() => handleDeleteFrame(frame.name)}
+                                                        className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                                                        title="Delete this frame"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Upload Form */}
+                        <div>
+                            <h3 className="text-md font-medium mb-2">Upload New {frameType.charAt(0).toUpperCase() + frameType.slice(1)} Frame</h3>
+                            <form onSubmit={handleFrameUpload}>
+                                <div className="mb-4">
+                                    <label htmlFor="frameName" className="block text-sm font-medium text-gray-700 mb-1">
+                                        Frame Name
+                                    </label>
+                                    <input
+                                        type="text"
+                                        id="frameName"
+                                        value={frameName}
+                                        onChange={(e) => setFrameName(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-christian-accent"
+                                        required
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Name will be prefixed with "{frameType}-" if not already
+                                    </p>
+                                </div>
+
+                                <div className="mb-4">
+                                    <label htmlFor="frameFile" className="block text-sm font-medium text-gray-700 mb-1">
+                                        Frame Image (PNG with transparency recommended)
+                                    </label>
+                                    <input
+                                        type="file"
+                                        id="frameFile"
+                                        accept="image/*"
+                                        onChange={handleFileChange}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-christian-accent"
+                                        required
+                                    />
+                                </div>
+
+                                {framePreviewUrl && (
+                                    <div className="mb-4">
+                                        <p className="block text-sm font-medium text-gray-700 mb-1">Preview</p>
+                                        <div className="border rounded-lg overflow-hidden bg-gray-50 p-2">
+                                            <img
+                                                src={framePreviewUrl}
+                                                alt="Preview"
+                                                className="max-w-full h-auto max-h-40 mx-auto"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {frameMessage.text && (
+                                    <div className={`mb-4 p-3 rounded-md ${
+                                        frameMessage.type === 'success' ? 'bg-green-100 text-green-700' :
+                                            frameMessage.type === 'info' ? 'bg-blue-100 text-blue-700' :
+                                                'bg-red-100 text-red-700'
+                                    }`}>
+                                        {frameMessage.text}
+                                    </div>
+                                )}
+
+                                <button
+                                    type="submit"
+                                    disabled={uploadingFrame}
+                                    className={`btn btn-primary flex items-center justify-center w-full ${
+                                        frameType === 'instagram' ? 'btn-hindu' : 'btn-christian'
+                                    } ${uploadingFrame ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                >
+                                    {uploadingFrame ? (
+                                        <>
+                                            <Icon path={mdiLoading} size={1} className="animate-spin mr-2" />
+                                            Processing...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Icon path={mdiUpload} size={1} className="mr-2" />
+                                            Upload Frame
+                                        </>
+                                    )}
+                                </button>
+                            </form>
+
+                            {/* Format Guidelines */}
+                            <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-600">
+                                {frameType === 'instagram' ? (
+                                    <ul className="list-disc pl-4 space-y-1">
+                                        <li>Instagram frames should be square (1:1 aspect ratio)</li>
+                                        <li>Recommended resolution: 1080×1080 pixels</li>
+                                        <li>Transparent PNG format works best</li>
+                                    </ul>
+                                ) : frameType === 'wedding' ? (
+                                    <ul className="list-disc pl-4 space-y-1">
+                                        <li>Wedding frames should be 16:9 aspect ratio</li>
+                                        <li>Recommended resolution: 1920×1080 pixels</li>
+                                        <li>Transparent PNG format works best</li>
+                                    </ul>
+                                ) : (
+                                    <ul className="list-disc pl-4 space-y-1">
+                                        <li>Standard frames should be 16:9 aspect ratio</li>
+                                        <li>Recommended resolution: 1920×1080 pixels</li>
+                                        <li>Transparent PNG format works best</li>
+                                    </ul>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 {/* Photos gallery */}
                 <div className="bg-white rounded-lg shadow-md p-4">
@@ -362,29 +721,20 @@ const AdminDashboard = () => {
                                 <div className="text-sm text-gray-600">
                                     <p>Taken: {formatDate(selectedPhoto.timestamp)}</p>
                                     <p>Filename: {selectedPhoto.filename}</p>
-                                    {/* Display the photo URL */}
+
+                                    {/* Available formats */}
                                     <div className="mt-2">
-                                        <p className="font-medium mb-1">Photo Link:</p>
-                                        <div className="flex items-center">
-                                            <input
-                                                type="text"
-                                                value={`https://fotobox.slyrix.com/photo/${selectedPhoto.filename}`}
-                                                readOnly
-                                                className="text-xs bg-gray-100 p-2 rounded border border-gray-300 w-full"
-                                                onClick={(e) => e.target.select()}
-                                            />
-                                            <button
-                                                onClick={() => {
-                                                    navigator.clipboard.writeText(`https://fotobox.slyrix.com/photo/${selectedPhoto.filename}`);
-                                                    alert('Link copied to clipboard!');
-                                                }}
-                                                className="ml-2 p-2 bg-gray-100 rounded border border-gray-300 hover:bg-gray-200"
-                                                title="Copy link"
-                                            >
-                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                                </svg>
-                                            </button>
+                                        <p className="font-medium">Available Formats:</p>
+                                        <div className="flex flex-wrap gap-2 mt-1">
+                                            {selectedPhoto.standardUrl && (
+                                                <span className="px-2 py-1 bg-gray-100 text-xs rounded">Standard</span>
+                                            )}
+                                            {selectedPhoto.instagramUrl && (
+                                                <span className="px-2 py-1 bg-pink-100 text-xs rounded">Instagram</span>
+                                            )}
+                                            {selectedPhoto.weddingUrl && (
+                                                <span className="px-2 py-1 bg-christian-accent/20 text-xs rounded">Wedding</span>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -399,22 +749,6 @@ const AdminDashboard = () => {
                                         Download
                                     </a>
 
-                                    <a
-                                        href={`${API_BASE_URL}${selectedPhoto.qrUrl}`}
-                                        download
-                                        className="btn btn-outline btn-hindu-outline text-sm py-2"
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        Get QR Code
-                                    </a>
-
-                                    <button
-                                        onClick={() => handleApplyOverlay(selectedPhoto.filename)}
-                                        className="btn btn-primary btn-christian text-sm py-2"
-                                    >
-                                        Apply Frame
-                                    </button>
-
                                     <button
                                         onClick={() => handleDeletePhoto(selectedPhoto.filename)}
                                         className="btn text-sm py-2 bg-red-500 hover:bg-red-600 text-white"
@@ -423,6 +757,34 @@ const AdminDashboard = () => {
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Confirmation Dialog */}
+            {confirmDialog.isOpen && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-lg max-w-md w-full overflow-hidden">
+                        <div className="p-4 bg-gray-50 border-b border-gray-200">
+                            <h3 className="text-lg font-medium">{confirmDialog.title}</h3>
+                        </div>
+                        <div className="p-6">
+                            <p className="text-gray-700">{confirmDialog.message}</p>
+                        </div>
+                        <div className="p-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
+                            <button
+                                onClick={handleCloseConfirmDialog}
+                                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-md text-gray-700"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleConfirm}
+                                className="px-4 py-2 bg-red-500 hover:bg-red-600 rounded-md text-white"
+                            >
+                                Confirm
+                            </button>
                         </div>
                     </div>
                 </div>
