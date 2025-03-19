@@ -6,8 +6,8 @@ import { mdiDelete, mdiPencil, mdiImageOutline, mdiInstagram } from '@mdi/js';
 const OverlayUpload = () => {
     const [selectedFile, setSelectedFile] = useState(null);
     const [previewUrl, setPreviewUrl] = useState('');
-    const [overlayName, setOverlayName] = useState('wedding-frame.png');
-    const [overlayType, setOverlayType] = useState('standard'); // standard, instagram, special
+    const [overlayName, setOverlayName] = useState('');
+    const [overlayType, setOverlayType] = useState('custom'); // standard, instagram, custom
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState({ text: '', type: '' });
     const [availableOverlays, setAvailableOverlays] = useState([]);
@@ -61,12 +61,12 @@ const OverlayUpload = () => {
 
         switch (overlayType) {
             case 'instagram':
-                return `instagram-${baseName}-${timestamp}.png`;
-            case 'special':
-                return `${baseName}-${timestamp}.png`;
+                return `instagram-frame.png`; // Always replace the Instagram frame
             case 'standard':
-            default:
                 return 'wedding-frame.png'; // Always replace the standard frame
+            case 'custom':
+            default:
+                return `${baseName || `custom-frame-${timestamp}`}.png`;
         }
     };
 
@@ -76,6 +76,11 @@ const OverlayUpload = () => {
 
         if (!selectedFile) {
             setMessage({ text: 'Please select an image file', type: 'error' });
+            return;
+        }
+
+        if (overlayType === 'custom' && !overlayName) {
+            setMessage({ text: 'Please enter a name for the custom frame', type: 'error' });
             return;
         }
 
@@ -100,23 +105,24 @@ const OverlayUpload = () => {
             if (result.success) {
                 setMessage({
                     text: isEditing
-                        ? 'Overlay updated successfully!'
-                        : 'New overlay uploaded successfully!',
+                        ? 'Frame updated successfully!'
+                        : 'New frame uploaded successfully!',
                     type: 'success'
                 });
 
                 // Clear form and refresh overlays list
                 setSelectedFile(null);
                 setPreviewUrl('');
+                setOverlayName('');
                 setIsEditing(false);
                 setEditingOverlay(null);
                 fetchOverlays();
             } else {
-                setMessage({ text: result.error || 'Error uploading overlay', type: 'error' });
+                setMessage({ text: result.error || 'Error uploading frame', type: 'error' });
             }
         } catch (error) {
-            console.error('Error uploading overlay:', error);
-            setMessage({ text: 'Error uploading overlay: ' + error.message, type: 'error' });
+            console.error('Error uploading frame:', error);
+            setMessage({ text: 'Error uploading frame: ' + error.message, type: 'error' });
         } finally {
             setLoading(false);
         }
@@ -126,15 +132,17 @@ const OverlayUpload = () => {
     const handleEdit = (overlay) => {
         setIsEditing(true);
         setEditingOverlay(overlay);
-        setOverlayName(overlay.name);
 
         // Determine overlay type based on name
-        if (overlay.name.startsWith('instagram')) {
+        if (overlay.name === 'instagram-frame.png') {
             setOverlayType('instagram');
+            setOverlayName('');
         } else if (overlay.name === 'wedding-frame.png') {
             setOverlayType('standard');
+            setOverlayName('');
         } else {
-            setOverlayType('special');
+            setOverlayType('custom');
+            setOverlayName(overlay.name);
         }
 
         // Clear any previous upload
@@ -144,38 +152,41 @@ const OverlayUpload = () => {
 
     // Delete an overlay
     const handleDelete = async (overlay) => {
-        if (!window.confirm(`Are you sure you want to delete the "${overlay.name}" overlay?`)) {
+        if (!window.confirm(`Are you sure you want to delete the "${overlay.name}" frame?`)) {
+            return;
+        }
+
+        // Don't allow deleting standard and Instagram frames
+        if (overlay.name === 'wedding-frame.png' || overlay.name === 'instagram-frame.png') {
+            setMessage({
+                text: `Cannot delete the ${overlay.name === 'wedding-frame.png' ? 'standard' : 'Instagram'} frame. You can only replace it.`,
+                type: 'error'
+            });
             return;
         }
 
         try {
             setLoading(true);
 
-            // Don't allow deleting the standard wedding frame
-            if (overlay.name === 'wedding-frame.png') {
-                setMessage({
-                    text: 'Cannot delete the standard wedding frame. You can only replace it.',
-                    type: 'error'
-                });
-                setLoading(false);
-                return;
-            }
-
             const response = await fetch(`${API_ENDPOINT}/admin/overlays/${overlay.name}`, {
                 method: 'DELETE',
             });
 
+            if (!response.ok) {
+                throw new Error(`Server responded with status: ${response.status}`);
+            }
+
             const result = await response.json();
 
             if (result.success) {
-                setMessage({ text: 'Overlay deleted successfully!', type: 'success' });
+                setMessage({ text: 'Frame deleted successfully!', type: 'success' });
                 fetchOverlays();
             } else {
-                setMessage({ text: result.error || 'Error deleting overlay', type: 'error' });
+                setMessage({ text: result.error || 'Error deleting frame', type: 'error' });
             }
         } catch (error) {
-            console.error('Error deleting overlay:', error);
-            setMessage({ text: 'Error deleting overlay: ' + error.message, type: 'error' });
+            console.error('Error deleting frame:', error);
+            setMessage({ text: 'Error deleting frame: ' + error.message, type: 'error' });
         } finally {
             setLoading(false);
         }
@@ -187,27 +198,36 @@ const OverlayUpload = () => {
         setEditingOverlay(null);
         setSelectedFile(null);
         setPreviewUrl('');
-        setOverlayName('wedding-frame.png');
-        setOverlayType('standard');
+        setOverlayName('');
+        setOverlayType('custom');
     };
 
-    // Get icon for overlay type
-    const getOverlayTypeIcon = (name) => {
+    // Get icon and label for overlay type
+    const getOverlayTypeInfo = (name) => {
         if (name === 'wedding-frame.png') {
-            return <Icon path={mdiImageOutline} size={1} className="text-christian-accent" />;
-        } else if (name.startsWith('instagram')) {
-            return <Icon path={mdiInstagram} size={1} className="text-pink-600" />;
+            return {
+                icon: <Icon path={mdiImageOutline} size={1} className="text-christian-accent" />,
+                label: 'Standard Wedding Frame'
+            };
+        } else if (name === 'instagram-frame.png') {
+            return {
+                icon: <Icon path={mdiInstagram} size={1} className="text-pink-600" />,
+                label: 'Instagram Format Frame'
+            };
         } else {
-            return <Icon path={mdiImageOutline} size={1} className="text-hindu-accent" />;
+            return {
+                icon: <Icon path={mdiImageOutline} size={1} className="text-hindu-accent" />,
+                label: name.split('.')[0].replace(/-/g, ' ').replace(/^\w/, c => c.toUpperCase())
+            };
         }
     };
 
     return (
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 className="text-lg font-semibold mb-4">Photo Frame Overlays</h2>
+            <h2 className="text-lg font-semibold mb-4">Photo Frame Management</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Existing overlays list */}
+                {/* Existing frames list */}
                 <div>
                     <h3 className="text-md font-medium mb-3">Available Frames</h3>
 
@@ -217,44 +237,47 @@ const OverlayUpload = () => {
                         </div>
                     ) : availableOverlays.length === 0 ? (
                         <div className="bg-gray-50 rounded-lg p-4 text-center text-gray-500">
-                            <p>No custom frames available yet.</p>
+                            <p>No frames available yet.</p>
                             <p className="text-sm mt-1">Upload your first frame!</p>
                         </div>
                     ) : (
                         <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
-                            {availableOverlays.map((overlay) => (
-                                <div key={overlay.name} className="flex items-center bg-gray-50 rounded-lg p-3 border border-gray-100">
-                                    <div className="flex-shrink-0 mr-3">
-                                        {getOverlayTypeIcon(overlay.name)}
-                                    </div>
-                                    <div className="flex-grow min-w-0">
-                                        <p className="font-medium text-gray-700 truncate" title={overlay.name}>
-                                            {overlay.name === 'wedding-frame.png'
-                                                ? 'Standard Wedding Frame'
-                                                : overlay.name.split('.')[0].replace(/-/g, ' ').replace(/^\w/, c => c.toUpperCase())}
-                                        </p>
-                                        <p className="text-xs text-gray-500">
-                                            {new Date(overlay.timestamp).toLocaleDateString()}
-                                        </p>
-                                    </div>
-                                    <div className="flex-shrink-0 ml-2">
-                                        <button
-                                            onClick={() => handleEdit(overlay)}
-                                            className="p-1 text-gray-500 hover:text-christian-accent mr-1"
-                                        >
-                                            <Icon path={mdiPencil} size={0.8} />
-                                        </button>
-                                        {overlay.name !== 'wedding-frame.png' && (
+                            {availableOverlays.map((overlay) => {
+                                const typeInfo = getOverlayTypeInfo(overlay.name);
+                                return (
+                                    <div key={overlay.name} className="flex items-center bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                        <div className="flex-shrink-0 mr-3">
+                                            {typeInfo.icon}
+                                        </div>
+                                        <div className="flex-grow min-w-0">
+                                            <p className="font-medium text-gray-700 truncate" title={overlay.name}>
+                                                {typeInfo.label}
+                                            </p>
+                                            <p className="text-xs text-gray-500">
+                                                {new Date(overlay.timestamp).toLocaleDateString()}
+                                            </p>
+                                        </div>
+                                        <div className="flex-shrink-0 ml-2">
                                             <button
-                                                onClick={() => handleDelete(overlay)}
-                                                className="p-1 text-gray-500 hover:text-red-500"
+                                                onClick={() => handleEdit(overlay)}
+                                                className="p-1 text-gray-500 hover:text-christian-accent mr-1"
+                                                title="Replace this frame"
                                             >
-                                                <Icon path={mdiDelete} size={0.8} />
+                                                <Icon path={mdiPencil} size={0.8} />
                                             </button>
-                                        )}
+                                            {overlay.name !== 'wedding-frame.png' && overlay.name !== 'instagram-frame.png' && (
+                                                <button
+                                                    onClick={() => handleDelete(overlay)}
+                                                    className="p-1 text-gray-500 hover:text-red-500"
+                                                    title="Delete this frame"
+                                                >
+                                                    <Icon path={mdiDelete} size={0.8} />
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -262,7 +285,7 @@ const OverlayUpload = () => {
                 {/* Upload form */}
                 <div>
                     <h3 className="text-md font-medium mb-3">
-                        {isEditing ? 'Update Frame' : 'Upload New Frame'}
+                        {isEditing ? 'Replace Frame' : 'Upload New Frame'}
                     </h3>
                     <form onSubmit={handleSubmit}>
                         {!isEditing && (
@@ -282,7 +305,7 @@ const OverlayUpload = () => {
                                     >
                                         <Icon path={mdiImageOutline} size={1} className="mb-1 text-christian-accent" />
                                         <span className="text-xs font-medium">Standard</span>
-                                        <span className="text-xs text-gray-500">Main wedding frame</span>
+                                        <span className="text-xs text-gray-500">Main frame</span>
                                     </button>
 
                                     <button
@@ -301,52 +324,42 @@ const OverlayUpload = () => {
 
                                     <button
                                         type="button"
-                                        onClick={() => setOverlayType('special')}
+                                        onClick={() => setOverlayType('custom')}
                                         className={`flex flex-col items-center justify-center p-3 rounded border ${
-                                            overlayType === 'special'
+                                            overlayType === 'custom'
                                                 ? 'bg-hindu-accent/10 border-hindu-accent'
                                                 : 'border-gray-200 hover:bg-gray-50'
                                         }`}
                                     >
                                         <Icon path={mdiImageOutline} size={1} className="mb-1 text-hindu-accent" />
-                                        <span className="text-xs font-medium">Special</span>
-                                        <span className="text-xs text-gray-500">Other styles</span>
+                                        <span className="text-xs font-medium">Custom</span>
+                                        <span className="text-xs text-gray-500">Additional frame</span>
                                     </button>
                                 </div>
                             </div>
                         )}
 
-                        {(!isEditing || (isEditing && overlayType !== 'standard')) && (
+                        {/* Name field - only shown for custom frames or editing custom frames */}
+                        {((overlayType === 'custom' && !isEditing) || (isEditing && editingOverlay?.name !== 'wedding-frame.png' && editingOverlay?.name !== 'instagram-frame.png')) && (
                             <div className="mb-4">
                                 <label htmlFor="overlayName" className="block text-sm font-medium text-gray-700 mb-1">
-                                    {overlayType === 'standard' ? 'Frame Name' : 'Custom Name'}
+                                    Frame Name
                                 </label>
                                 <input
                                     type="text"
                                     id="overlayName"
-                                    value={isEditing ? overlayName : overlayName.split('.')[0]}
-                                    onChange={(e) => {
-                                        // Only update name if not editing the standard frame
-                                        if (!(isEditing && editingOverlay?.name === 'wedding-frame.png')) {
-                                            setOverlayName(e.target.value + (e.target.value.endsWith('.png') ? '' : '.png'));
-                                        }
-                                    }}
-                                    placeholder={overlayType === 'instagram' ? 'instagram-frame' : 'special-frame'}
+                                    value={overlayName.split('.')[0]}
+                                    onChange={(e) => setOverlayName(e.target.value + (e.target.value.endsWith('.png') ? '' : '.png'))}
+                                    placeholder="Enter a name for this frame"
                                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-christian-accent"
-                                    required
-                                    disabled={isEditing && editingOverlay?.name === 'wedding-frame.png'}
+                                    required={overlayType === 'custom'}
                                 />
-                                {isEditing && editingOverlay?.name === 'wedding-frame.png' && (
-                                    <p className="text-xs text-gray-500 mt-1">
-                                        The standard frame name cannot be changed
-                                    </p>
-                                )}
                             </div>
                         )}
 
                         <div className="mb-4">
                             <label htmlFor="overlayFile" className="block text-sm font-medium text-gray-700 mb-1">
-                                {isEditing ? 'Replace with New Image' : 'Overlay Image (PNG recommended)'}
+                                {isEditing ? 'Replace with New Image' : 'Frame Image (PNG recommended)'}
                             </label>
                             <input
                                 type="file"
@@ -354,13 +367,8 @@ const OverlayUpload = () => {
                                 accept="image/*"
                                 onChange={handleFileChange}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-christian-accent"
-                                required={!isEditing}
+                                required
                             />
-                            {isEditing && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                    Leave empty to keep current image
-                                </p>
-                            )}
                         </div>
 
                         {previewUrl && (
@@ -382,7 +390,7 @@ const OverlayUpload = () => {
                                 <div className="border rounded-lg overflow-hidden bg-gray-50 p-2">
                                     <img
                                         src={`${API_BASE_URL}${editingOverlay?.url}?t=${Date.now()}`}
-                                        alt="Current overlay"
+                                        alt="Current frame"
                                         className="max-w-full h-auto max-h-40 mx-auto"
                                         onError={(e) => {
                                             e.target.onerror = null;
@@ -425,7 +433,7 @@ const OverlayUpload = () => {
                                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                         </svg>
-                                        {isEditing ? 'Updating...' : 'Uploading...'}
+                                        {isEditing ? 'Updating...' : 'Upload Frame'}
                                     </span>
                                 ) : isEditing ? 'Update Frame' : 'Upload Frame'}
                             </button>
@@ -441,7 +449,7 @@ const OverlayUpload = () => {
                 <ul className="text-sm text-gray-500 mt-1 list-disc pl-5">
                     <li><span className="font-medium">Standard</span>: The main wedding frame used for all photos by default</li>
                     <li><span className="font-medium">Instagram</span>: Optimized for Instagram with square format</li>
-                    <li><span className="font-medium">Special</span>: Alternative frames for guests to choose from</li>
+                    <li><span className="font-medium">Custom</span>: Additional frames for guests to choose from</li>
                 </ul>
             </div>
         </div>

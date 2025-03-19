@@ -51,7 +51,12 @@ const PhotoView = () => {
                 const response = await fetch(`${API_ENDPOINT}/admin/overlays`);
                 if (response.ok) {
                     const data = await response.json();
-                    setAvailableOverlays(data);
+                    // Filter out standard and instagram overlays
+                    const customOverlays = data.filter(overlay =>
+                        overlay.name !== 'wedding-frame.png' &&
+                        !overlay.name.startsWith('instagram')
+                    );
+                    setAvailableOverlays(customOverlays);
                 }
             } catch (error) {
                 console.error('Error fetching overlays:', error);
@@ -81,17 +86,13 @@ const PhotoView = () => {
 
                 const data = await response.json();
 
-                // Determine if this is an original high-res version
-                const isOriginal = photoId.startsWith('original_') || data.isOriginal;
-
                 // Add full URLs
                 const photoWithUrls = {
                     ...data,
                     fullUrl: `${API_BASE_URL}${data.url}`,
                     fullThumbnailUrl: `${API_BASE_URL}${data.thumbnailUrl || data.url}`,
-                    fullOriginalUrl: data.originalUrl ? `${API_BASE_URL}${data.originalUrl}` : null,
-                    fullPrintUrl: data.printUrl ? `${API_BASE_URL}${data.printUrl}` : null,
-                    isOriginal: isOriginal,
+                    isInstagram: photoId.startsWith('instagram_'),
+                    isCustomFrame: photoId.startsWith('frame_')
                 };
 
                 setPhoto(photoWithUrls);
@@ -136,7 +137,7 @@ const PhotoView = () => {
                 console.error('Error sharing:', error);
                 // On error, try to fetch and share the actual file
                 try {
-                    // Always share the framed version
+                    // Share the framed version
                     const imageUrl = photo.fullUrl;
 
                     const response = await fetch(imageUrl);
@@ -160,9 +161,9 @@ const PhotoView = () => {
         }
     };
 
-    // Handle download with success indicator - download selected version
+    // Handle download with success indicator
     const handleDownload = () => {
-        // Always download the framed version - never the raw original
+        // Download the current version
         const downloadUrl = photo.fullUrl;
 
         // Create a temporary link element
@@ -177,69 +178,102 @@ const PhotoView = () => {
         setDownloadSuccess(true);
     };
 
-    // Handle switching between photo versions
-    const handleSwitchVersion = (version) => {
-        const baseId = photo.filename.replace(/^(overlay_|instagram_|print_)/, '');
-        let newPhotoId;
-
-        switch(version) {
-            case 'instagram':
-                newPhotoId = `instagram_${baseId}`;
-                break;
-            case 'print':
-                newPhotoId = `print_${baseId}`;
-                break;
-            case 'overlay':
-                // This could be dynamic based on selected overlay
-                newPhotoId = `overlay_${baseId}`;
-                break;
-            default:
-                newPhotoId = baseId;
-                break;
-        }
-
-        // Close the version options menu
-        setShowVersionOptions(false);
-
-        // Only navigate if we're switching to a different version
-        if (newPhotoId !== photoId) {
-            navigate(`/photo/${newPhotoId}`);
-        }
-    };
-
-    // Apply a specific overlay to the photo
-    const handleApplyOverlay = async (overlayName) => {
+    // Apply Instagram format
+    const handleInstagramFormat = async () => {
         if (!photo) return;
+
+        // Don't reapply if already in Instagram format
+        if (photo.isInstagram) {
+            setShowVersionOptions(false);
+            return;
+        }
 
         try {
             setLoading(true);
-            const response = await fetch(`${API_ENDPOINT}/photos/${photo.filename}/overlay`, {
+            const baseFilename = photo.filename.replace(/^(instagram_|frame_)/, '');
+
+            const response = await fetch(`${API_ENDPOINT}/photos/${baseFilename}/overlay`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    overlayName: overlayName
+                    overlayName: 'instagram-frame.png',
+                    createNewVersion: true
                 }),
             });
 
             if (!response.ok) {
-                throw new Error(`Failed to apply overlay (${response.status})`);
+                throw new Error(`Failed to apply Instagram format (${response.status})`);
             }
 
             const result = await response.json();
 
             if (result.success) {
-                // Refresh the photo with the new overlay
-                navigate(`/photo/${photo.filename}?t=${Date.now()}`);
+                // Navigate to the Instagram version
+                navigate(`/photo/instagram_${baseFilename}`);
             } else {
-                setError(result.error || 'Failed to apply overlay');
+                setError(result.error || 'Failed to apply Instagram format');
             }
         } catch (error) {
-            console.error('Error applying overlay:', error);
+            console.error('Error applying Instagram format:', error);
             setError(error.message);
         } finally {
             setLoading(false);
+            setShowVersionOptions(false);
+        }
+    };
+
+    // Apply standard frame
+    const handleStandardFrame = () => {
+        // Don't reapply if already standard frame
+        if (!photo.isInstagram && !photo.isCustomFrame) {
+            setShowVersionOptions(false);
+            return;
+        }
+
+        const baseFilename = photo.filename.replace(/^(instagram_|frame_)/, '');
+        navigate(`/photo/${baseFilename}`);
+        setShowVersionOptions(false);
+    };
+
+    // Apply custom frame
+    const handleApplyCustomFrame = async (overlayName) => {
+        if (!photo) return;
+
+        try {
+            setLoading(true);
+            const baseFilename = photo.filename.replace(/^(instagram_|frame_)/, '');
+
+            const response = await fetch(`${API_ENDPOINT}/photos/${baseFilename}/overlay`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    overlayName: overlayName,
+                    createNewVersion: true
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to apply frame (${response.status})`);
+            }
+
+            const result = await response.json();
+
+            if (result.success) {
+                // Navigate to the custom frame version
+                navigate(`/photo/frame_${baseFilename}`);
+            } else {
+                setError(result.error || 'Failed to apply frame');
+            }
+        } catch (error) {
+            console.error('Error applying frame:', error);
+            setError(error.message);
+        } finally {
+            setLoading(false);
+            setShowVersionOptions(false);
         }
     };
 
@@ -247,6 +281,13 @@ const PhotoView = () => {
     const formatDate = (timestamp) => {
         if (!timestamp) return 'Unknown date';
         return new Date(timestamp).toLocaleString();
+    };
+
+    // Get current format label
+    const getCurrentFormatLabel = () => {
+        if (photo.isInstagram) return "Instagram Format";
+        if (photo.isCustomFrame) return "Custom Frame";
+        return "Standard Frame";
     };
 
     if (loading) {
@@ -291,20 +332,6 @@ const PhotoView = () => {
         );
     }
 
-    // Now all displayed photos always have frames
-    const displayUrl = photo.fullUrl;
-
-    // Determine the label for the current version
-    const getCurrentVersionLabel = () => {
-        if (photo.filename.startsWith('instagram_')) return "Instagram Format";
-        if (photo.filename.startsWith('print_')) return "Print Version (A5)";
-        if (photo.filename.startsWith('overlay_')) {
-            const overlayName = photo.filename.split('_')[1];
-            return `${overlayName.charAt(0).toUpperCase() + overlayName.slice(1)} Frame`;
-        }
-        return "Standard Frame";
-    };
-
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
             <motion.div
@@ -334,7 +361,7 @@ const PhotoView = () => {
 
                 {/* Photo display */}
                 <div className="p-6">
-                    {/* Version selector tag - now with more options */}
+                    {/* Format selector */}
                     <div className="mb-2 flex justify-end">
                         <div className="relative">
                             <button
@@ -342,11 +369,11 @@ const PhotoView = () => {
                                 className="flex items-center text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full"
                             >
                                 <Icon path={mdiFile} size={0.8} className="mr-1" />
-                                <span>{getCurrentVersionLabel()}</span>
+                                <span>{getCurrentFormatLabel()}</span>
                                 <span className="ml-1">▼</span>
                             </button>
 
-                            {/* Enhanced version options dropdown */}
+                            {/* Format options dropdown */}
                             <AnimatePresence>
                                 {showVersionOptions && (
                                     <motion.div
@@ -356,61 +383,45 @@ const PhotoView = () => {
                                         className="absolute top-full right-0 mt-1 bg-white rounded-lg shadow-lg overflow-hidden z-10 w-56"
                                     >
                                         <div className="p-1">
-                                            {/* Standard Framed Version */}
+                                            {/* Standard Frame */}
                                             <button
-                                                onClick={() => handleSwitchVersion('standard')}
+                                                onClick={handleStandardFrame}
                                                 className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50"
                                             >
                                                 <span className="flex-1">Standard Frame</span>
-                                                {!photo.filename.startsWith('instagram_') &&
-                                                    !photo.filename.startsWith('print_') &&
-                                                    !photo.filename.startsWith('overlay_') && (
-                                                        <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
-                                                    )}
+                                                {!photo.isInstagram && !photo.isCustomFrame && (
+                                                    <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
+                                                )}
                                             </button>
 
-                                            {/* Instagram Optimized Version */}
+                                            {/* Instagram Format */}
                                             <button
-                                                onClick={() => handleSwitchVersion('instagram')}
+                                                onClick={handleInstagramFormat}
                                                 className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50 border-t"
                                             >
                                                 <span className="flex-1">Instagram Format</span>
-                                                {photo.filename.startsWith('instagram_') && (
+                                                {photo.isInstagram && (
                                                     <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
                                                 )}
                                             </button>
 
-                                            {/* Print Version */}
-                                            <button
-                                                onClick={() => handleSwitchVersion('print')}
-                                                className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50 border-t"
-                                            >
-                                                <span className="flex-1">Print Version (A5)</span>
-                                                {photo.filename.startsWith('print_') && (
-                                                    <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
-                                                )}
-                                            </button>
-
-                                            {/* Custom overlay options - dynamically generated from available overlays */}
+                                            {/* Custom frames section */}
                                             {availableOverlays.length > 0 && (
                                                 <div className="border-t pt-1 mt-1">
                                                     <div className="px-4 py-1 text-xs text-gray-500 font-medium">
-                                                        Special Frames
+                                                        Custom Frames
                                                     </div>
-                                                    {availableOverlays
-                                                        .filter(overlay => !overlay.name.includes('wedding-frame') &&
-                                                            !overlay.name.includes('instagram'))
-                                                        .map(overlay => (
-                                                            <button
-                                                                key={overlay.name}
-                                                                onClick={() => handleApplyOverlay(overlay.name)}
-                                                                className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50"
-                                                            >
+                                                    {availableOverlays.map(overlay => (
+                                                        <button
+                                                            key={overlay.name}
+                                                            onClick={() => handleApplyCustomFrame(overlay.name)}
+                                                            className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50"
+                                                        >
                                                             <span className="flex-1">
                                                                 {overlay.name.split('.')[0].replace(/-/g, ' ').replace(/^\w/, c => c.toUpperCase())}
                                                             </span>
-                                                            </button>
-                                                        ))}
+                                                        </button>
+                                                    ))}
                                                 </div>
                                             )}
                                         </div>
@@ -422,10 +433,9 @@ const PhotoView = () => {
 
                     {/* Photo in elegant frame */}
                     <div className="mb-6 relative">
-                        {/* Always display with frame */}
                         <div className="relative">
                             {/* Photo Frame with decorative border */}
-                            <div className={`${photo.filename.startsWith('print_') ? 'aspect-[1.414/1]' : ''} w-full overflow-hidden rounded-lg shadow-lg relative mb-2`}>
+                            <div className={`${photo.isInstagram ? 'aspect-square' : 'aspect-[1.414/1]'} w-full overflow-hidden rounded-lg shadow-lg relative mb-2`}>
                                 {/* Double border effect */}
                                 <div className="absolute inset-0 border-8 border-white z-10 rounded-md pointer-events-none"></div>
                                 <div className="absolute inset-2 border border-gray-200 z-10 rounded-sm pointer-events-none"></div>
@@ -436,11 +446,11 @@ const PhotoView = () => {
                                 {/* Photo itself */}
                                 <div className="absolute inset-[16px] flex items-center justify-center overflow-hidden">
                                     <img
-                                        src={displayUrl}
+                                        src={photo.fullUrl}
                                         alt="Wedding photo"
                                         className="max-w-full max-h-full object-contain"
                                         onError={(e) => {
-                                            console.error('Error loading image:', displayUrl);
+                                            console.error('Error loading image:', photo.fullUrl);
                                             e.target.src = '/placeholder-image.jpg'; // Fallback image
                                             e.target.alt = 'Image could not be loaded';
                                         }}
@@ -464,7 +474,7 @@ const PhotoView = () => {
 
                         {/* Info about choosing formats */}
                         <p className="text-sm text-gray-500 mt-1">
-                            {showVersionOptions ? 'Choose format above' : 'Use the format selector for Instagram, print and special frames'}
+                            {showVersionOptions ? 'Choose format above' : 'Use the format selector for Instagram or special frames'}
                         </p>
                     </div>
 

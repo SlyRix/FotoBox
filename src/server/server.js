@@ -1069,94 +1069,84 @@ app.post('/api/photos/:photoId/overlay', async (req, res) => {
     if (!photoId || !overlayName) {
         return res.status(400).json({
             success: false,
-            error: 'Photo ID and overlay name are required'
+            error: 'Photo ID and frame name are required'
         });
     }
 
     // Determine correct paths
     let baseFilename, sourcePhotoPath, targetPhotoPath;
 
-    if (photoId.startsWith('instagram_') || photoId.startsWith('overlay_')) {
-        // If this is already a special version, strip the prefix to get base filename
+    // Extract base filename (remove any prefixes)
+    if (photoId.startsWith('instagram_') || photoId.startsWith('frame_')) {
         baseFilename = photoId.substring(photoId.indexOf('_') + 1);
     } else {
         baseFilename = photoId;
     }
 
-    // Source is always the print version (which has no overlay) or original if print doesn't exist
-    const printPath = path.join(PRINT_PHOTOS_DIR, `print_${baseFilename}`);
-    const originalPath = path.join(ORIGINALS_DIR, `original_${baseFilename}`);
-
-    if (fs.existsSync(printPath)) {
-        sourcePhotoPath = printPath;
-    } else if (fs.existsSync(originalPath)) {
-        sourcePhotoPath = originalPath;
-    } else {
-        // If neither exists, try the standard photo
-        sourcePhotoPath = path.join(PHOTOS_DIR, baseFilename);
-        if (!fs.existsSync(sourcePhotoPath)) {
-            return res.status(404).json({
-                success: false,
-                error: 'Source photo not found'
-            });
-        }
+    // Source is always the original photo (which always has the standard frame)
+    sourcePhotoPath = path.join(PHOTOS_DIR, baseFilename);
+    if (!fs.existsSync(sourcePhotoPath)) {
+        return res.status(404).json({
+            success: false,
+            error: 'Source photo not found'
+        });
     }
 
-    // Determine target path based on overlay type
-    let targetFilename = baseFilename;
-    let targetPrefix = '';
-
-    if (overlayName.startsWith('instagram')) {
-        targetPrefix = 'instagram_';
+    // Determine target filename based on overlay type
+    let targetFilename;
+    if (overlayName === 'instagram-frame.png') {
+        targetFilename = `instagram_${baseFilename}`;
     } else if (overlayName !== 'wedding-frame.png') {
-        targetPrefix = 'overlay_';
-    }
-
-    // If creating a new version, target is a new filename
-    // Otherwise, replace the current version
-    if (createNewVersion && targetPrefix) {
-        targetFilename = `${targetPrefix}${baseFilename}`;
-        targetPhotoPath = path.join(PHOTOS_DIR, targetFilename);
+        targetFilename = `frame_${baseFilename}`;
     } else {
-        // Just update the existing photo
-        targetPhotoPath = path.join(PHOTOS_DIR, baseFilename);
+        targetFilename = baseFilename; // Standard frame - just use the base filename
     }
 
-    const overlayPath = path.join(OVERLAYS_DIR, overlayName);
+    targetPhotoPath = path.join(PHOTOS_DIR, targetFilename);
 
     // Check if overlay exists
+    const overlayPath = path.join(OVERLAYS_DIR, overlayName);
     if (!fs.existsSync(overlayPath)) {
         return res.status(404).json({
             success: false,
-            error: 'Overlay not found'
+            error: 'Frame not found'
         });
     }
 
     try {
         // Apply overlay to photo
-        const success = await applyOverlayToImage(sourcePhotoPath, overlayPath, targetPhotoPath);
+        let success;
+
+        if (overlayName === 'instagram-frame.png') {
+            // Process as Instagram format (square)
+            success = await processInstagramPhoto(sourcePhotoPath, overlayPath, targetPhotoPath);
+        } else {
+            // Process as standard or custom frame
+            success = await applyOverlayToImage(sourcePhotoPath, overlayPath, targetPhotoPath);
+        }
 
         if (success) {
-            // Regenerate thumbnail
-            await generateThumbnail(targetPhotoPath, baseFilename);
+            // Regenerate thumbnail for the new version
+            const thumbnailUrl = await generateThumbnail(targetPhotoPath, targetFilename);
 
             return res.json({
                 success: true,
-                message: 'Overlay applied successfully',
+                message: 'Frame applied successfully',
                 photoId: targetFilename,
-                url: `/photos/${targetFilename}`
+                url: `/photos/${targetFilename}`,
+                thumbnailUrl: thumbnailUrl
             });
         } else {
             return res.status(500).json({
                 success: false,
-                error: 'Failed to apply overlay'
+                error: 'Failed to apply frame'
             });
         }
     } catch (error) {
-        console.error('Error applying overlay:', error);
+        console.error('Error applying frame:', error);
         return res.status(500).json({
             success: false,
-            error: 'Server error applying overlay'
+            error: 'Server error applying frame'
         });
     }
 });
@@ -1166,24 +1156,31 @@ app.post('/api/admin/overlays', upload.single('overlay'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({
             success: false,
-            error: 'No overlay file uploaded'
+            error: 'No frame image uploaded'
         });
     }
 
-    const overlayName = req.body.name || `overlay-${Date.now()}.png`;
-    const overlayType = req.body.type || 'standard'; // standard, instagram, special
+    const overlayType = req.body.type || 'custom'; // standard, instagram, custom
+    let overlayName;
+
+    // Set the correct name based on type
+    if (overlayType === 'standard') {
+        overlayName = 'wedding-frame.png';
+    } else if (overlayType === 'instagram') {
+        overlayName = 'instagram-frame.png';
+    } else {
+        // Custom frame - use provided name or generate one
+        overlayName = req.body.name || `custom-frame-${Date.now()}.png`;
+    }
+
     const overlayPath = path.join(OVERLAYS_DIR, overlayName);
 
     try {
-        // Save the uploaded overlay
-        fs.writeFileSync(overlayPath, req.file.buffer);
-
-        // Process the overlay based on type
+        // Process the image based on type
         if (overlayType === 'instagram') {
-            // For Instagram overlays, we might want to ensure it's square
-            // This could be done with Sharp
+            // For Instagram frames, ensure it's square
             try {
-                const squareOverlay = await sharp(overlayPath)
+                const squareOverlay = await sharp(req.file.buffer)
                     .resize({
                         width: 1080,  // Instagram recommended size
                         height: 1080,
@@ -1193,26 +1190,30 @@ app.post('/api/admin/overlays', upload.single('overlay'), async (req, res) => {
                     .png()
                     .toBuffer();
 
-                // Save the processed overlay
+                // Save the processed square overlay
                 fs.writeFileSync(overlayPath, squareOverlay);
             } catch (processError) {
-                console.error('Error processing Instagram overlay:', processError);
-                // Continue anyway, as we still have the original upload
+                console.error('Error processing Instagram frame:', processError);
+                // Fall back to saving the original if processing fails
+                fs.writeFileSync(overlayPath, req.file.buffer);
             }
+        } else {
+            // Standard and custom frames - save as is
+            fs.writeFileSync(overlayPath, req.file.buffer);
         }
 
         return res.json({
             success: true,
-            message: 'Overlay uploaded successfully',
+            message: 'Frame uploaded successfully',
             name: overlayName,
             type: overlayType,
             url: `/overlays/${overlayName}`
         });
     } catch (error) {
-        console.error('Error saving overlay:', error);
+        console.error('Error saving frame:', error);
         return res.status(500).json({
             success: false,
-            error: 'Server error saving overlay'
+            error: 'Server error saving frame'
         });
     }
 });
@@ -1249,25 +1250,25 @@ app.get('/api/admin/overlays', (req, res) => {
 });
 async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath) {
     try {
-        // Get metadata of the source image
+        // Create a square version of the source image
         const metadata = await sharp(sourceImagePath).metadata();
 
         // Create a square canvas with the largest dimension
-        const maxDimension = Math.max(metadata.width, metadata.height);
+        const size = Math.max(metadata.width, metadata.height);
 
-        // Create a new image with square dimensions
+        // Create a square version of the source image
         const squareImage = await sharp(sourceImagePath)
             .resize({
-                width: maxDimension,
-                height: maxDimension,
+                width: size,
+                height: size,
                 fit: 'contain',
                 background: { r: 255, g: 255, b: 255 } // White background
             })
             .toBuffer();
 
-        // Resize the overlay to match
+        // Resize the overlay to match the square size
         const resizedOverlay = await sharp(overlayImagePath)
-            .resize(maxDimension, maxDimension, {
+            .resize(size, size, {
                 fit: 'fill'
             })
             .toBuffer();
@@ -1466,11 +1467,11 @@ app.get('/api/mosaic/info', async (req, res) => {
 app.delete('/api/admin/overlays/:name', async (req, res) => {
     const overlayName = req.params.name;
 
-    // Don't allow deleting the main wedding frame
-    if (overlayName === 'wedding-frame.png') {
+    // Don't allow deleting the main wedding frame or Instagram frame
+    if (overlayName === 'wedding-frame.png' || overlayName === 'instagram-frame.png') {
         return res.status(400).json({
             success: false,
-            error: 'Cannot delete the standard wedding frame. You can only replace it.'
+            error: `Cannot delete the ${overlayName === 'wedding-frame.png' ? 'standard' : 'Instagram'} frame. You can only replace it.`
         });
     }
 
@@ -1480,7 +1481,7 @@ app.delete('/api/admin/overlays/:name', async (req, res) => {
     if (!fs.existsSync(overlayPath)) {
         return res.status(404).json({
             success: false,
-            error: 'Overlay not found'
+            error: 'Frame not found'
         });
     }
 
@@ -1490,13 +1491,13 @@ app.delete('/api/admin/overlays/:name', async (req, res) => {
 
         return res.json({
             success: true,
-            message: 'Overlay deleted successfully'
+            message: 'Frame deleted successfully'
         });
     } catch (error) {
-        console.error('Error deleting overlay:', error);
+        console.error('Error deleting frame:', error);
         return res.status(500).json({
             success: false,
-            error: 'Server error deleting overlay'
+            error: 'Server error deleting frame'
         });
     }
 });
