@@ -1228,7 +1228,7 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
         const baseFilename = filename;
 
         // Get the client domain
-        const clientDomain = req.headers.host || 'fotobox.slyrix.com';
+        const clientDomain = 'fotobox.slyrix.com';
 
         // Create the correct photo URL - exactly matching the format shown in admin dashboard
         const photoViewUrl = `https://${clientDomain}/photo/${baseFilename}`;
