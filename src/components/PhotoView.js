@@ -453,22 +453,31 @@ const PhotoView = () => {
                         <div className="relative">
                             {/* Photo Frame with decorative border */}
                             <div
-                                className={`${photo.isInstagram ? 'aspect-square' : 'aspect-[1.414/1]'} w-full overflow-hidden rounded-lg shadow-lg relative mb-2`}>
+                                className={`${photo.isInstagram ? 'aspect-[9/16] max-w-sm mx-auto' : 'aspect-[1.414/1]'} w-full overflow-hidden rounded-lg shadow-lg relative mb-2`}>
+                                {/* Instagram format indicator */}
+                                {photo.isInstagram && (
+                                    <div
+                                        className="absolute top-0 left-0 bg-gradient-to-r from-pink-500 to-purple-500 text-white text-xs px-3 py-1 rounded-br z-20 font-medium shadow-sm">
+                                        Instagram Format
+                                    </div>
+                                )}
+
                                 {/* Double border effect */}
                                 <div
                                     className="absolute inset-0 border-8 border-white z-10 rounded-md pointer-events-none"></div>
                                 <div
                                     className="absolute inset-2 border border-gray-200 z-10 rounded-sm pointer-events-none"></div>
 
-                                {/* Inner mat/background with gradient */}
-                                <div className="absolute inset-0 bg-white"></div>
+                                {/* Inner mat/background with gradient - special gradient for Instagram photos */}
+                                {/*<div*/}
+                                {/*    className={`absolute inset-0 ${photo.isInstagram ? 'bg-gradient-to-b from-pink-50 to-purple-50' : 'bg-white'}`}></div>*/}
 
-                                {/* Photo itself */}
+                                {/* Photo itself - now using object-cover to fill the frame */}
                                 <div className="absolute inset-[16px] flex items-center justify-center overflow-hidden">
                                     <img
                                         src={photo.fullUrl}
                                         alt="Wedding photo"
-                                        className="max-w-full max-h-full object-contain"
+                                        className={`${photo.isInstagram ? 'w-full h-full object-cover' : 'max-w-full max-h-full object-contain'}`}
                                         onError={(e) => {
                                             console.error('Error loading image:', photo.fullUrl);
                                             e.target.src = '/placeholder-image.jpg'; // Fallback image
@@ -486,7 +495,9 @@ const PhotoView = () => {
                                     className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-white/60 rounded-bl-sm pointer-events-none"></div>
                                 <div
                                     className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white/60 rounded-br-sm pointer-events-none"></div>
+
                             </div>
+
                         </div>
                     </div>
 
