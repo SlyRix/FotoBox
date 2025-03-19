@@ -912,7 +912,8 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
     // QR-Code für die Foto-Ansichtsseite generieren, nicht direkt für das Bild
     const photoId = processedPhotos ? path.basename(processedPhotos.originalUrl) : filename; // Original-ID für QR-Code verwenden
     const clientDomain = 'fotobox.slyrix.com'; // Angegebene Domain verwenden
-    const photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
+    const photoViewUrl = `https://${clientDomain}/photo/${baseFilename}`;
+    const baseFilename = filename.replace(/^(instagram_|frame_|print_|original_)/, '');
 
     const qrFilename = `qr_${timestamp}.png`;
     const qrFilepath = path.join(QR_DIR, qrFilename);
@@ -924,26 +925,25 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
 
     QRCode.toFile(qrFilepath, photoViewUrl, {
         color: {
-            dark: '#000',  // Punkte
-            light: '#FFF'  // Hintergrund
-        }
+            dark: '#000',  // Points
+            light: '#FFF'  // Background
+        },
+        margin: 1,  // Add a small margin for better scanning
+        width: 300  // Create a larger QR code for better readability
     }, (qrErr) => {
         if (qrErr) {
-            console.error(`Fehler beim Generieren des QR-Codes: ${qrErr.message}`);
+            console.error(`Error generating QR code: ${qrErr.message}`);
         }
 
-        // Antwort mit allen relevanten URLs
+        // Include the full photoViewUrl in the response so the client knows the exact URL
         res.json({
             success: true,
             photo: {
                 filename: filename,
                 url: processedPhotos ? processedPhotos.publicUrl : `/photos/${filename}`,
-                thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback auf Original, wenn Thumbnail fehlschlägt
+                thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
                 qrUrl: `/qrcodes/${qrFilename}`,
-                photoViewUrl: photoViewUrl,
-                originalUrl: processedPhotos ? processedPhotos.originalUrl : null,
-                printUrl: processedPhotos ? processedPhotos.printUrl : null,
-                overlayApplied: processedPhotos ? processedPhotos.overlayApplied : false,
+                photoViewUrl: photoViewUrl,  // Include the actual URL that the QR code points to
                 timestamp: Date.now()
             }
         });
@@ -1250,33 +1250,56 @@ app.get('/api/admin/overlays', (req, res) => {
 });
 async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath) {
     try {
-        // Create a square version of the source image
+        // Get metadata of the source image
         const metadata = await sharp(sourceImagePath).metadata();
 
-        // Create a square canvas with the largest dimension
-        const size = Math.max(metadata.width, metadata.height);
+        // Instagram uses 9:16 aspect ratio (vertical rectangle)
+        const targetWidth = 1080;  // Instagram recommended width
+        const targetHeight = 1920; // 9:16 ratio for Instagram stories/posts
 
-        // Create a square version of the source image
-        const squareImage = await sharp(sourceImagePath)
+        // Resize the source image to fit within the transparent area of the Instagram overlay
+        // We'll make it smaller than the full dimensions to leave room for the frame
+        const resizedImage = await sharp(sourceImagePath)
             .resize({
-                width: size,
-                height: size,
-                fit: 'contain',
-                background: { r: 255, g: 255, b: 255 } // White background
+                width: Math.floor(targetWidth * 0.8),  // 80% of width to leave space for frame
+                height: Math.floor(targetHeight * 0.6), // 60% of height to leave space for frame
+                fit: 'inside',                         // Maintain aspect ratio
+                withoutEnlargement: true               // Don't enlarge small images
             })
             .toBuffer();
 
-        // Resize the overlay to match the square size
-        const resizedOverlay = await sharp(overlayImagePath)
-            .resize(size, size, {
-                fit: 'fill'
-            })
-            .toBuffer();
+        // The Instagram overlay should already have a transparent area for the photo
+        // We'll composite the resized photo on top of the overlay at the center position
 
-        // Composite them together
-        await sharp(squareImage)
+        // First create a blank canvas with the target dimensions
+        const canvas = await sharp({
+            create: {
+                width: targetWidth,
+                height: targetHeight,
+                channels: 4,
+                background: { r: 255, g: 255, b: 255, alpha: 0 } // Transparent
+            }
+        }).png().toBuffer();
+
+        // Position the photo in the center
+        const compositeImage = await sharp(canvas)
             .composite([
-                { input: resizedOverlay, gravity: 'center' }
+                {
+                    input: resizedImage,
+                    gravity: 'center'  // Place the photo in the center
+                }
+            ])
+            .toBuffer();
+
+        // Now apply the Instagram overlay on top
+        // The overlay should already be designed with the correct 9:16 aspect ratio
+        // and have a transparent window where the photo should show through
+        await sharp(compositeImage)
+            .composite([
+                {
+                    input: overlayImagePath,
+                    gravity: 'center'
+                }
             ])
             .jpeg({ quality: 95 })
             .toFile(outputPath);
@@ -1429,6 +1452,82 @@ app.get('/api/mosaic', async (req, res) => {
         });
     }
 });
+app.get('/qrcodes/:filename', (req, res) => {
+    const filename = req.params.filename;
+    const filepath = path.join(QR_DIR, filename);
+
+    if (!fs.existsSync(filepath)) {
+        return res.status(404).send('QR code not found');
+    }
+
+    // Set proper headers to prevent caching issues with QR codes
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Content-Type', 'image/png');
+
+    // Send the file
+    res.sendFile(filepath);
+});
+async function ensureInstagramFrameExists() {
+    const instagramFramePath = path.join(OVERLAYS_DIR, 'instagram-frame.png');
+
+    // Check if Instagram frame exists
+    if (!fs.existsSync(instagramFramePath)) {
+        console.log('Instagram frame not found, creating a default one...');
+
+        try {
+            // Create a simple default Instagram frame
+            // This creates a basic frame with 9:16 aspect ratio and a transparent center
+
+            // Create a white canvas with 9:16 aspect ratio
+            const width = 1080;
+            const height = 1920;
+
+            // Inner transparent area dimensions
+            const innerWidth = Math.floor(width * 0.8);
+            const innerHeight = Math.floor(height * 0.6);
+
+            // Create a gradient frame around the transparent area
+            const canvas = sharp({
+                create: {
+                    width: width,
+                    height: height,
+                    channels: 4,
+                    background: { r: 176, g: 137, b: 104, alpha: 1 }  // wedding-love color
+                }
+            });
+
+            // Create a transparent rectangle for the center
+            const transparentCenter = Buffer.from(
+                `<svg width="${width}" height="${height}">
+                    <rect x="${(width - innerWidth) / 2}" y="${(height - innerHeight) / 2}" 
+                          width="${innerWidth}" height="${innerHeight}" 
+                          fill="rgba(0,0,0,0)" />
+                </svg>`
+            );
+
+            // Apply the transparent center to the canvas
+            await canvas
+                .composite([
+                    {
+                        input: transparentCenter,
+                        blend: 'dest-out'  // Cut out the transparent center
+                    }
+                ])
+                .png()
+                .toFile(instagramFramePath);
+
+            console.log('Default Instagram frame created successfully.');
+            return true;
+        } catch (error) {
+            console.error('Error creating default Instagram frame:', error);
+            return false;
+        }
+    }
+
+    return true;
+}
 
 // Add an info endpoint to check mosaic status
 app.get('/api/mosaic/info', async (req, res) => {
@@ -1516,6 +1615,12 @@ server.listen(PORT, () => {
     console.log(`Overlays directory: ${OVERLAYS_DIR}`);
     console.log(`Print versions directory: ${PRINT_PHOTOS_DIR}`);
     console.log(`Original photos directory: ${ORIGINALS_DIR}`);
+    const weddingFramePath = path.join(OVERLAYS_DIR, 'wedding-frame.png');
+    if (!fs.existsSync(weddingFramePath)) {
+        console.log('Warning: Standard wedding frame not found at:', weddingFramePath);
+        console.log('Please upload a standard wedding frame via the admin interface.');
+    }
+
 });
 
 // Cleanup on server shutdown
