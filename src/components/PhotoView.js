@@ -383,7 +383,7 @@ const PhotoView = () => {
                                 onClick={() => setShowVersionOptions(!showVersionOptions)}
                                 className="flex items-center text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full"
                             >
-                                <Icon path={mdiFile} size={0.8} className="mr-1" />
+                                <Icon path={mdiFile} size={0.8} className="mr-1"/>
                                 <span>{getCurrentFormatLabel()}</span>
                                 <span className="ml-1">▼</span>
                             </button>
@@ -405,7 +405,8 @@ const PhotoView = () => {
                                             >
                                                 <span className="flex-1">Standard Frame</span>
                                                 {!photo.isInstagram && !photo.isCustomFrame && (
-                                                    <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
+                                                    <span
+                                                        className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
                                                 )}
                                             </button>
 
@@ -416,7 +417,8 @@ const PhotoView = () => {
                                             >
                                                 <span className="flex-1">Instagram Format</span>
                                                 {photo.isInstagram && (
-                                                    <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
+                                                    <span
+                                                        className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
                                                 )}
                                             </button>
 
@@ -450,10 +452,13 @@ const PhotoView = () => {
                     <div className="mb-6 relative">
                         <div className="relative">
                             {/* Photo Frame with decorative border */}
-                            <div className={`${photo.isInstagram ? 'aspect-square' : 'aspect-[1.414/1]'} w-full overflow-hidden rounded-lg shadow-lg relative mb-2`}>
+                            <div
+                                className={`${photo.isInstagram ? 'aspect-square' : 'aspect-[1.414/1]'} w-full overflow-hidden rounded-lg shadow-lg relative mb-2`}>
                                 {/* Double border effect */}
-                                <div className="absolute inset-0 border-8 border-white z-10 rounded-md pointer-events-none"></div>
-                                <div className="absolute inset-2 border border-gray-200 z-10 rounded-sm pointer-events-none"></div>
+                                <div
+                                    className="absolute inset-0 border-8 border-white z-10 rounded-md pointer-events-none"></div>
+                                <div
+                                    className="absolute inset-2 border border-gray-200 z-10 rounded-sm pointer-events-none"></div>
 
                                 {/* Inner mat/background with gradient */}
                                 <div className="absolute inset-0 bg-white"></div>
@@ -473,34 +478,26 @@ const PhotoView = () => {
                                 </div>
 
                                 {/* Subtle "corners" overlay to indicate frame */}
-                                <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-white/60 rounded-tl-sm pointer-events-none"></div>
-                                <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-white/60 rounded-tr-sm pointer-events-none"></div>
-                                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-white/60 rounded-bl-sm pointer-events-none"></div>
-                                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white/60 rounded-br-sm pointer-events-none"></div>
+                                <div
+                                    className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-white/60 rounded-tl-sm pointer-events-none"></div>
+                                <div
+                                    className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-white/60 rounded-tr-sm pointer-events-none"></div>
+                                <div
+                                    className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-white/60 rounded-bl-sm pointer-events-none"></div>
+                                <div
+                                    className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white/60 rounded-br-sm pointer-events-none"></div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Photo info */}
-                    <div className="mb-6 text-center">
-                        <p className="text-gray-600 font-display">
-                            Taken on {formatDate(photo.timestamp)}
-                        </p>
-
-                        {/* Info about choosing formats */}
-                        <p className="text-sm text-gray-500 mt-1">
-                            {showVersionOptions ? 'Choose format above' : 'Use the format selector for Instagram or special frames'}
-                        </p>
-                    </div>
-
                     {/* Action buttons */}
-                    <div className="flex justify-center space-x-4">
+                    <div className="flex flex-col sm:flex-row justify-center gap-3 sm:gap-4">
                         {/* Download button with success indicator */}
                         <motion.button
                             onClick={handleDownload}
-                            className="relative btn btn-outline btn-christian-outline flex items-center"
-                            whileHover={{scale: 1.05}}
-                            whileTap={{scale: 0.95}}
+                            className="relative btn btn-outline btn-christian-outline flex items-center justify-center w-full sm:w-auto text-sm sm:text-base py-2 sm:py-3"
+                            whileHover={{scale: 1.02}}
+                            whileTap={{scale: 0.98}}
                         >
                             <AnimatePresence mode="wait">
                                 {downloadSuccess ? (
@@ -511,7 +508,7 @@ const PhotoView = () => {
                                         exit={{scale: 0.5, opacity: 0}}
                                         className="mr-2 text-green-500"
                                     >
-                                        <Icon path={mdiCheck} size={1}/>
+                                        <Icon path={mdiCheck} size={0.9}/>
                                     </motion.div>
                                 ) : (
                                     <motion.div
@@ -521,20 +518,22 @@ const PhotoView = () => {
                                         exit={{scale: 0.5, opacity: 0}}
                                         className="mr-2"
                                     >
-                                        <Icon path={mdiDownload} size={1}/>
+                                        <Icon path={mdiDownload} size={0.9}/>
                                     </motion.div>
                                 )}
                             </AnimatePresence>
-                            {downloadSuccess ? "Downloaded!" : "Download Photo"}
+                            <span className="whitespace-nowrap">
+            {downloadSuccess ? "Downloaded!" : "Download Photo"}
+        </span>
                         </motion.button>
 
                         {/* Share button with options */}
-                        <div className="relative">
+                        <div className="relative w-full sm:w-auto">
                             <motion.button
                                 onClick={handleShareImage}
-                                className="btn btn-primary btn-hindu flex items-center"
-                                whileHover={{scale: 1.05}}
-                                whileTap={{scale: 0.95}}
+                                className="btn btn-primary btn-hindu flex items-center justify-center w-full text-sm sm:text-base py-2 sm:py-3"
+                                whileHover={{scale: 1.02}}
+                                whileTap={{scale: 0.98}}
                             >
                                 <AnimatePresence mode="wait">
                                     {shareSuccess ? (
@@ -545,7 +544,7 @@ const PhotoView = () => {
                                             exit={{scale: 0.5, opacity: 0}}
                                             className="mr-2"
                                         >
-                                            <Icon path={mdiCheck} size={1}/>
+                                            <Icon path={mdiCheck} size={0.9}/>
                                         </motion.div>
                                     ) : (
                                         <motion.div
@@ -555,40 +554,47 @@ const PhotoView = () => {
                                             exit={{scale: 0.5, opacity: 0}}
                                             className="mr-2"
                                         >
-                                            <Icon path={mdiShareVariant} size={1}/>
+                                            <Icon path={mdiShareVariant} size={0.9}/>
                                         </motion.div>
                                     )}
                                 </AnimatePresence>
-                                {shareSuccess ? "Shared!" : "Share Photo"}
+                                <span className="whitespace-nowrap">
+                {shareSuccess ? "Shared!" : "Share Photo"}
+            </span>
                             </motion.button>
 
-                            {/* Share options popup */}
+                            {/* Share options popup - Improved for mobile */}
                             <AnimatePresence>
                                 {showShareOptions && (
                                     <motion.div
                                         initial={{opacity: 0, y: 10, scale: 0.9}}
                                         animate={{opacity: 1, y: 0, scale: 1}}
                                         exit={{opacity: 0, y: 10, scale: 0.9}}
-                                        className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-lg shadow-elegant overflow-hidden z-10"
+                                        className={`absolute ${isMobile ? 'top-full mt-2' : 'bottom-full mb-2'} left-0 right-0 bg-white rounded-lg shadow-elegant overflow-hidden z-10`}
                                     >
                                         <div
                                             className="flex justify-between items-center px-4 py-2 bg-gray-50 border-b">
                                             <span className="text-sm font-medium">Share via</span>
                                             <button
                                                 onClick={() => setShowShareOptions(false)}
-                                                className="text-gray-500 hover:text-gray-700"
+                                                className="text-gray-500 hover:text-gray-700 p-1"
                                             >
                                                 <Icon path={mdiClose} size={0.8}/>
                                             </button>
                                         </div>
-                                        <div className="p-1">
+
+                                        {/* Grid layout for sharing options on mobile */}
+                                        <div className={`${isMobile ? 'grid grid-cols-2' : 'flex flex-col'}`}>
                                             {/* Instagram */}
                                             <a
                                                 href={`https://www.instagram.com/?url=${encodeURIComponent(window.location.href)}`}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="flex items-center px-4 py-3 hover:bg-gray-50"
-                                                onClick={() => setShareSuccess(true)}
+                                                className={`flex items-center px-4 py-3 hover:bg-gray-50 ${isMobile ? 'border-r border-b' : ''}`}
+                                                onClick={() => {
+                                                    setShareSuccess(true);
+                                                    setShowShareOptions(false);
+                                                }}
                                             >
                                                 <Icon path={mdiInstagram} size={1.2} className="text-pink-600 mr-3"/>
                                                 <span>Instagram</span>
@@ -599,8 +605,11 @@ const PhotoView = () => {
                                                 href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="flex items-center px-4 py-3 hover:bg-gray-50 border-t"
-                                                onClick={() => setShareSuccess(true)}
+                                                className={`flex items-center px-4 py-3 hover:bg-gray-50 ${isMobile ? 'border-b' : 'border-t'}`}
+                                                onClick={() => {
+                                                    setShareSuccess(true);
+                                                    setShowShareOptions(false);
+                                                }}
                                             >
                                                 <Icon path={mdiFacebook} size={1.2} className="text-blue-600 mr-3"/>
                                                 <span>Facebook</span>
@@ -611,8 +620,11 @@ const PhotoView = () => {
                                                 href={`https://wa.me/?text=${encodeURIComponent('Check out this photo from Rushel & Sivani\'s wedding! ' + window.location.href)}`}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="flex items-center px-4 py-3 hover:bg-gray-50 border-t"
-                                                onClick={() => setShareSuccess(true)}
+                                                className={`flex items-center px-4 py-3 hover:bg-gray-50 ${isMobile ? 'border-r' : 'border-t'}`}
+                                                onClick={() => {
+                                                    setShareSuccess(true);
+                                                    setShowShareOptions(false);
+                                                }}
                                             >
                                                 <Icon path={mdiWhatsapp} size={1.2} className="text-green-600 mr-3"/>
                                                 <span>WhatsApp</span>
@@ -621,8 +633,11 @@ const PhotoView = () => {
                                             {/* Email */}
                                             <a
                                                 href={`mailto:?subject=Wedding Photo&body=${encodeURIComponent('Check out this photo from Rushel & Sivani\'s wedding!\n\n' + window.location.href)}`}
-                                                className="flex items-center px-4 py-3 hover:bg-gray-50 border-t"
-                                                onClick={() => setShareSuccess(true)}
+                                                className={`flex items-center px-4 py-3 hover:bg-gray-50 ${isMobile ? '' : 'border-t'}`}
+                                                onClick={() => {
+                                                    setShareSuccess(true);
+                                                    setShowShareOptions(false);
+                                                }}
                                             >
                                                 <Icon path={mdiEmail} size={1.2} className="text-gray-600 mr-3"/>
                                                 <span>Email</span>
@@ -633,7 +648,6 @@ const PhotoView = () => {
                             </AnimatePresence>
                         </div>
                     </div>
-
                     {/* Wedding info and social tags */}
                     <div className="mt-10 text-center">
                         <div className="fancy-divider my-6"></div>
