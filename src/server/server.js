@@ -641,7 +641,7 @@ async function generateThumbnail(sourceFilePath, filename) {
     }
 }
 
-// Process Instagram photos (9:16 aspect ratio)
+// Final Instagram photo processing with correct frame placement
 async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath) {
     try {
         // Ensure source image exists
@@ -656,71 +656,87 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
             return false;
         }
 
-        // Instagram uses 9:16 aspect ratio
-        const targetWidth = 1080;   // Instagram recommended width
-        const targetHeight = 1920;  // 9:16 ratio for stories
+        // Read the overlay to detect the transparent area
+        const overlayBuffer = await fs.promises.readFile(overlayImagePath);
+        const overlayMetadata = await sharp(overlayBuffer).metadata();
 
-        // Create a full-sized white background
-        const whiteBackground = await sharp({
+        // Fixed Instagram dimensions (9:16 ratio)
+        const targetWidth = 1080;
+        const targetHeight = 1920;
+
+        // Read the source image
+        const sourceBuffer = await fs.promises.readFile(sourceImagePath);
+        const sourceMetadata = await sharp(sourceBuffer).metadata();
+
+        // THIS IS THE KEY DIFFERENCE:
+        // We're not resizing the overlay frame at all - we use it as is
+        // We only resize the user's photo to fit within the transparent area
+
+        // Define the position and size of the transparent window in the frame
+        // These should match the transparent area of your Instagram frame template
+        const windowWidth = targetWidth * 0.85;    // 85% of the frame width
+        const windowHeight = targetHeight * 0.6;   // 60% of the frame height
+        const windowX = (targetWidth - windowWidth) / 2;
+        const windowY = targetHeight * 0.2;    // Position at 20% from the top
+
+        // Resize the source image to fit within the transparent window
+        // while maintaining aspect ratio
+        const resizedImage = await sharp(sourceBuffer)
+            .resize({
+                width: Math.floor(windowWidth),
+                height: Math.floor(windowHeight),
+                fit: 'inside', // Maintain aspect ratio
+                position: 'center'
+            })
+            .toBuffer();
+
+        const resizedMetadata = await sharp(resizedImage).metadata();
+
+        // Calculate position to center the image in the window
+        const posX = Math.floor(windowX + (windowWidth - resizedMetadata.width) / 2);
+        const posY = Math.floor(windowY + (windowHeight - resizedMetadata.height) / 2);
+
+        // Create a blank canvas with white background
+        const canvas = await sharp({
             create: {
                 width: targetWidth,
                 height: targetHeight,
                 channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 1 } // Solid white
+                background: { r: 255, g: 255, b: 255, alpha: 1 }
             }
         })
-            .jpeg()
+            .png()
             .toBuffer();
 
-        // Resize the source image to cover the entire target dimensions
-        // This ensures the photo fills the entire frame in both dimensions
-        const resizedImage = await sharp(sourceImagePath)
-            .resize({
-                width: targetWidth,
-                height: targetHeight,
-                fit: 'cover',     // IMPORTANT: use 'cover' to fill the entire area
-                position: 'center' // Center the image
-            })
-            .toBuffer();
-
-        // Composite the resized image onto the white background
-        const withImage = await sharp(whiteBackground)
+        // Composite the source image at the calculated position
+        const withPhotoComposite = await sharp(canvas)
             .composite([
                 {
                     input: resizedImage,
-                    gravity: 'center'
+                    top: posY,
+                    left: posX
                 }
             ])
             .toBuffer();
 
-        // Now get the overlay and ensure it's exactly the right size
-        const resizedOverlay = await sharp(overlayImagePath)
-            .resize({
-                width: targetWidth,
-                height: targetHeight,
-                fit: 'fill'  // Fill entire space
-            })
-            .toBuffer();
-
-        // Final composition with overlay on top
-        await sharp(withImage)
+        // Finally, overlay the frame template on top
+        await sharp(withPhotoComposite)
             .composite([
                 {
-                    input: resizedOverlay,
-                    blend: 'over'  // This preserves transparency in the overlay
+                    input: overlayBuffer,
+                    gravity: 'center'
                 }
             ])
             .jpeg({ quality: 95 })
             .toFile(outputPath);
 
-        console.log(`Instagram photo processed successfully: ${outputPath}`);
+        console.log(`Instagram photo processed with frame template: ${outputPath}`);
         return true;
     } catch (error) {
         console.error('Error processing Instagram photo:', error);
         return false;
     }
 }
-
 // Ensure Instagram frame exists or create a default one
 async function ensureInstagramFrameExists() {
     const instagramFramePath = path.join(OVERLAYS_DIR, 'instagram-frame.png');
