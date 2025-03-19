@@ -657,7 +657,7 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
             return false;
         }
 
-        // 1. First, read the frame as-is without any resizing
+        // 1. First, analyze the frame to get its dimensions and detect the transparent area
         const frameBuffer = await fs.promises.readFile(overlayImagePath);
         const frameMetadata = await sharp(frameBuffer).metadata();
 
@@ -667,31 +667,33 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
 
         console.log(`Frame dimensions: ${frameWidth}x${frameHeight}`);
 
-        // 2. Read the source photo
+        // 2. Analyze the source photo
         const sourceBuffer = await fs.promises.readFile(sourceImagePath);
+        const sourceMetadata = await sharp(sourceBuffer).metadata();
 
-        // 3. Resize the source photo to completely fill the middle transparent area
-        // We'll make it larger than needed to ensure it covers the transparent area
-        // The transparent area appears to be roughly 60-70% of the height
-        const sourceResized = await sharp(sourceBuffer)
+        console.log(`Source image dimensions: ${sourceMetadata.width}x${sourceMetadata.height}`);
+
+        // 3. Resize and crop the source photo to fit the target dimensions
+        // We'll make it cover the frame area, which will allow us to position it correctly
+        const resizedSource = await sharp(sourceBuffer)
             .resize({
-                width: frameWidth,      // Same width as frame
-                height: frameHeight,    // Same height as frame
-                fit: 'cover',           // Fill the entire area
-                position: 'center'      // Center the image
+                width: frameWidth,
+                height: frameHeight,
+                fit: 'cover',       // This ensures the image fills the entire area
+                position: 'center'  // Center the image
             })
             .toBuffer();
 
-        // 4. Create our composition - photo first, then frame overlay on top
-        await sharp(sourceResized)      // Start with the resized photo
+        // 4. Create the composite - start with the resized source photo, then overlay the frame on top
+        await sharp(resizedSource)
             .composite([{
-                input: frameBuffer,     // Add the frame on top
-                blend: 'over'           // Keep transparency in the frame
+                input: frameBuffer,
+                blend: 'over'       // This preserves transparency in the frame
             }])
             .jpeg({ quality: 95 })
             .toFile(outputPath);
 
-        console.log(`Instagram photo processed with frame-first approach: ${outputPath}`);
+        console.log(`Instagram photo processed successfully: ${outputPath}`);
         return true;
     } catch (error) {
         console.error('Error processing Instagram photo:', error);
