@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { API_BASE_URL, API_ENDPOINT } from '../App';
 import Icon from '@mdi/react';
 import { mdiDownload, mdiShareVariant, mdiClose, mdiInstagram, mdiFacebook, mdiWhatsapp, mdiEmail, mdiHeartOutline, mdiLoading, mdiCheck, mdiFile } from '@mdi/js';
+import HeartSpinner from './HeartSpinner';
+
 
 const PhotoView = () => {
     const { photoId } = useParams();
@@ -308,16 +310,7 @@ const PhotoView = () => {
     if (loading) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10">
-                <div className="text-center">
-                    <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-                        className="mb-6 text-wedding-love"
-                    >
-                        <Icon path={mdiLoading} size={4} />
-                    </motion.div>
-                    <p className="text-xl font-display text-gray-700">Loading photo...</p>
-                </div>
+                <HeartSpinner />
             </div>
         );
     }
@@ -395,7 +388,7 @@ const PhotoView = () => {
                                         initial={{opacity: 0, y: 10, scale: 0.9}}
                                         animate={{opacity: 1, y: 0, scale: 1}}
                                         exit={{opacity: 0, y: 10, scale: 0.9}}
-                                        className="absolute top-full right-0 mt-1 bg-white rounded-lg shadow-lg overflow-hidden z-10 w-56"
+                                        className="absolute top-full right-0 mt-1 bg-white rounded-lg shadow-lg overflow-hidden z-50 w-56"
                                     >
                                         <div className="p-1">
                                             {/* Standard Frame */}
