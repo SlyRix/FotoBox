@@ -1,57 +1,23 @@
-// server.js - Complete implementation for the FotoBox server
-
+// server/index.js
 const express = require('express');
 const cors = require('cors');
-const { exec } = require('child_process');
+const {exec} = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
 const bodyParser = require('body-parser');
 const http = require('http');
 const WebSocket = require('ws');
-const compression = require('compression');
-const sharp = require('sharp');
+const compression = require('compression'); // Add compression
+const sharp = require('sharp'); // Add sharp for image processing
 const multer = require('multer');
-const url = require('url');
-const os = require('os');
-
-// Configure multer for file uploads
-const upload = multer({
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
-});
-
-// Photo counter for mosaic regeneration
+const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 let photoCounter = 0;
-const MOSAIC_PHOTO_INTERVAL = 10; // Regenerate mosaic every 10 photos
+const MOSAIC_PHOTO_INTERVAL = 3; // Regenerate every 10th photo
 
-// Flag to track ongoing photo captures
-const captureInProgress = { status: false };
-
-// Create express app
-const app = express();
-const PORT = process.env.PORT || 5000;
-
-// Define directory paths
-const PHOTOS_DIR = path.join(__dirname, 'public', 'photos');
-const QR_DIR = path.join(__dirname, 'public', 'qrcodes');
-const PREVIEW_DIR = path.join(__dirname, 'public', 'preview');
-const THUMBNAILS_DIR = path.join(__dirname, 'public', 'thumbnails');
-const OVERLAYS_DIR = path.join(__dirname, 'public', 'overlays');
-const INSTAGRAM_DIR = path.join(PHOTOS_DIR, 'instagram');
-const WEDDING_DIR = path.join(PHOTOS_DIR, 'wedding');
-const TMP_DIR = path.join(os.tmpdir(), 'fotobox');
-
-// Create required directories
-[PHOTOS_DIR, QR_DIR, PREVIEW_DIR, THUMBNAILS_DIR, OVERLAYS_DIR, INSTAGRAM_DIR, WEDDING_DIR, TMP_DIR].forEach(dir => {
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
-});
-
-// Basic diagnostics on startup
+// Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
 try {
-    // Check if fswebcam is available
     exec('fswebcam --version', (error, stdout) => {
         if (error) {
             console.log(`fswebcam available: NO - ${error.message}`);
@@ -60,7 +26,6 @@ try {
         }
     });
 
-    // Check for webcam devices
     exec('v4l2-ctl --list-devices', (error, stdout) => {
         if (error) {
             console.log(`Webcam detection: FAILED - ${error.message}`);
@@ -70,7 +35,6 @@ try {
         }
     });
 
-    // Check if gphoto2 is available for DSLR camera support
     exec('gphoto2 --version', (error, stdout) => {
         if (error) {
             console.log(`gphoto2 available: NO - ${error.message}`);
@@ -82,13 +46,36 @@ try {
     console.log(`Camera diagnostics error: ${err.message}`);
 }
 
-// Configure middleware
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Track ongoing captures to prevent conflicts
+const captureInProgress = {status: false};
+
+// Directory paths
+const PHOTOS_DIR = path.join(__dirname, 'public', 'photos');
+const QR_DIR = path.join(__dirname, 'public', 'qrcodes');
+const PREVIEW_DIR = path.join(__dirname, 'public', 'preview');
+const THUMBNAILS_DIR = path.join(__dirname, 'public', 'thumbnails');
+const OVERLAYS_DIR = path.join(__dirname, 'public', 'overlays');
+// Neue Verzeichnispfade für Dual-Format-Fotos
+const PRINT_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'print');
+const ORIGINALS_DIR = path.join(__dirname, 'public', 'photos', 'originals');
+
+// Create required directories
+[PHOTOS_DIR, QR_DIR, PREVIEW_DIR, THUMBNAILS_DIR, OVERLAYS_DIR, PRINT_PHOTOS_DIR, ORIGINALS_DIR].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, {recursive: true});
+    }
+});
+
+// Middleware
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow requests with no origin (e.g., mobile apps, curl)
+        // Allow requests with no origin (like mobile apps, curl requests)
         if (!origin) return callback(null, true);
 
-        // Allow specific origins
+        // List of allowed origins
         const allowedOrigins = [
             'http://localhost:3000',
             'https://localhost:3000',
@@ -96,7 +83,7 @@ app.use(cors({
             'https://fotobox.slyrix.com'
         ];
 
-        if (allowedOrigins.indexOf(origin) !== -1) {
+        if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
             callback(null, true);
         } else {
             console.log('CORS blocked request from:', origin);
@@ -109,10 +96,9 @@ app.use(cors({
     optionsSuccessStatus: 204
 }));
 
-// Enable compression for responses
+// Add compression middleware
 app.use(compression());
 
-// Parse JSON request bodies
 app.use(bodyParser.json());
 
 // Serve static files with caching
@@ -126,7 +112,6 @@ app.use(express.static(path.join(__dirname, 'public'), {
     }
 }));
 
-// Set CORS headers for all responses
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', req.headers.origin);
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
@@ -134,25 +119,24 @@ app.use((req, res, next) => {
     next();
 });
 
-// WebSocket server variables
+// WebSocket server for webcam preview
 let wsServer;
 let previewInterval = null;
 let activeStreams = new Map(); // Track active streaming clients
 
-// Initialize WebSocket server for real-time communication
+// Initialize WebSocket server
 function setupWebSocketServer(server) {
     console.log('=== SETTING UP WEBSOCKET SERVER ===');
 
-    wsServer = new WebSocket.Server({ server });
+    wsServer = new WebSocket.Server({server});
     console.log(`WebSocket server created: ${wsServer ? 'YES' : 'NO'}`);
 
     wsServer.on('connection', (ws, req) => {
         const clientId = Date.now().toString();
-        const clientIp = req.socket.remoteAddress;
-        console.log(`New WebSocket connection from ${clientIp} (ID: ${clientId})`);
+        console.log(`New WebSocket connection from ${req.socket.remoteAddress} (ID: ${clientId})`);
 
-        // Store client in map with streaming status
-        activeStreams.set(clientId, { ws, isStreaming: false });
+        // Store client in our map
+        activeStreams.set(clientId, {ws, isStreaming: false});
 
         // Send welcome message
         ws.send(JSON.stringify({
@@ -161,19 +145,19 @@ function setupWebSocketServer(server) {
             timestamp: Date.now()
         }));
 
-        // Handle messages from client
+        // Handle client messages
         ws.on('message', (message) => {
             try {
                 const data = JSON.parse(message);
 
-                // Handle ping/keepalive
                 if (data.type === 'ping') {
-                    ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+                    ws.send(JSON.stringify({type: 'pong', timestamp: Date.now()}));
                     return;
                 }
 
-                // Handle preview streaming requests
+                // Handle stream start/stop requests
                 if (data.type === 'startPreview') {
+                    // Start streaming if not already streaming for this client
                     const clientInfo = activeStreams.get(clientId);
                     if (clientInfo && !clientInfo.isStreaming) {
                         clientInfo.isStreaming = true;
@@ -181,6 +165,7 @@ function setupWebSocketServer(server) {
                         startWebcamPreview();
                     }
                 } else if (data.type === 'stopPreview') {
+                    // Stop streaming for this client
                     const clientInfo = activeStreams.get(clientId);
                     if (clientInfo && clientInfo.isStreaming) {
                         clientInfo.isStreaming = false;
@@ -197,7 +182,7 @@ function setupWebSocketServer(server) {
         ws.on('close', () => {
             console.log(`Client disconnected (ID: ${clientId})`);
 
-            // Clean up client's streaming state
+            // Cleanup this client's streams
             const clientInfo = activeStreams.get(clientId);
             if (clientInfo && clientInfo.isStreaming) {
                 clientInfo.isStreaming = false;
@@ -206,28 +191,10 @@ function setupWebSocketServer(server) {
 
             activeStreams.delete(clientId);
         });
-
-        // Handle client errors
-        ws.on('error', (error) => {
-            console.error(`WebSocket error for client ${clientId}:`, error);
-        });
     });
 }
 
-// Broadcast message to all streaming clients
-function broadcastToStreamingClients(message) {
-    for (const [_, client] of activeStreams) {
-        if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
-            try {
-                client.ws.send(JSON.stringify(message));
-            } catch (error) {
-                console.error('Error broadcasting to client:', error);
-            }
-        }
-    }
-}
-
-// Start webcam preview via WebSocket
+// Start webcam preview
 function startWebcamPreview() {
     // Check if any clients are actively streaming
     let hasActiveStreamers = false;
@@ -238,7 +205,7 @@ function startWebcamPreview() {
         }
     }
 
-    // Do nothing if preview is already running or no active clients
+    // If preview is already running or no active clients, do nothing
     if (previewInterval || !hasActiveStreamers) return;
 
     console.log('Starting webcam preview...');
@@ -319,7 +286,7 @@ function startWebcamPreview() {
     capturePreviewFrame();
 }
 
-// Stop webcam preview
+// Update the stopWebcamPreview function to handle new structure
 function stopWebcamPreview() {
     // Check if any clients are still streaming
     let hasActiveStreamers = false;
@@ -354,25 +321,177 @@ function stopWebcamPreview() {
     }
 }
 
-// Apply an overlay to an image
+function sendFrameToClients(base64Image) {
+    let activeClientCount = 0;
+    for (const [_, client] of activeStreams) {
+        if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
+            try {
+                client.ws.send(JSON.stringify({
+                    type: 'previewFrame',
+                    imageData: `data:image/jpeg;base64,${base64Image}`,
+                    timestamp: Date.now()
+                }));
+                activeClientCount++;
+            } catch (err) {
+                console.error(`Error sending frame to client: ${err.message}`);
+            }
+        }
+    }
+
+    // If no active clients, stop preview
+    if (activeClientCount === 0 && previewInterval) {
+        previewInterval.stop();
+    }
+}
+
+function startLegacyWebcamPreview() {
+    console.log('Using legacy preview method');
+
+    // Function to capture and send preview frame
+    const capturePreviewFrame = () => {
+        const timestamp = Date.now();
+        const previewPath = path.join(PREVIEW_DIR, `preview_${timestamp}.jpg`);
+
+        // Use fswebcam with optimized settings for smoother preview
+        exec(`fswebcam -d /dev/video0 -r 320x240 --fps 30 --no-banner --skip 1 --jpeg 80 ${previewPath}`, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Error capturing preview: ${error.message}`);
+                return;
+            }
+
+            // Check if file exists
+            if (!fs.existsSync(previewPath)) {
+                console.error('Preview file was not created');
+                return;
+            }
+
+            // Read the captured image
+            fs.readFile(previewPath, (err, imageData) => {
+                if (err) {
+                    console.error(`Error reading preview file: ${err.message}`);
+                    return;
+                }
+
+                // Send to all active clients
+                sendFrameToClients(imageData.toString('base64'));
+
+                // Delete the preview file to save space
+                fs.unlink(previewPath, () => {});
+            });
+        });
+    };
+
+    // Send initial preview status
+    broadcastToStreamingClients({
+        type: 'previewStatus',
+        status: 'active',
+        message: 'Webcam preview active (legacy mode)'
+    });
+
+    // Start the preview interval with a shorter interval for smoother preview
+    previewInterval = setInterval(capturePreviewFrame, 200); // 5 fps
+
+    // Capture first frame immediately
+    capturePreviewFrame();
+}
+
+// Helper function to broadcast to all streaming clients
+function broadcastToStreamingClients(message) {
+    for (const [_, client] of activeStreams) {
+        if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(JSON.stringify(message));
+        }
+    }
+}
+
+// Neue Funktion zur Verarbeitung von Fotos in zwei Formaten - mit A5 QUERFORMAT
+async function processPhotoWithDualFormats(sourceFilePath, filename) {
+    // Pfade für verschiedene Versionen
+    const originalFilename = `original_${filename}`;
+    const printFilename = `print_${filename}`;
+    const originalPath = path.join(ORIGINALS_DIR, originalFilename);
+    const printPath = path.join(PRINT_PHOTOS_DIR, printFilename);
+    const publicPath = path.join(PHOTOS_DIR, filename); // Öffentlich sichtbare Version
+
+    try {
+        // 1. Originalbild speichern (unverändert)
+        await fs.promises.copyFile(sourceFilePath, originalPath);
+
+        // 2. A5-Format-Version für den Druck erstellen - QUERFORMAT (1.414:1 Seitenverhältnis)
+        await sharp(sourceFilePath)
+            .resize({
+                width: 2480,         // ~A5 bei 300dpi
+                height: 1748,        // A5-Querformat (1.414:1)
+                fit: 'contain',      // Bild in den Rahmen einpassen ohne Beschneiden
+                background: { r: 255, g: 255, b: 255 } // Weißer Hintergrund statt schwarz
+            })
+            .jpeg({ quality: 90 })
+            .toFile(printPath);
+
+        // 3. Hauptversion (mit Rahmen) erstellen - diese wird in der App angezeigt
+        // Overlay prüfen und anwenden
+        const defaultOverlayPath = path.join(OVERLAYS_DIR, 'wedding-frame.png');
+        let overlayApplied = false;
+
+        if (fs.existsSync(defaultOverlayPath)) {
+            try {
+                // Rahmen auf die A5-Version anwenden
+                const success = await applyOverlayToImage(printPath, defaultOverlayPath, publicPath);
+                overlayApplied = success;
+            } catch (error) {
+                console.error('Error applying default overlay:', error);
+                // Bei Fehler A5-Version ohne Rahmen kopieren
+                await fs.promises.copyFile(printPath, publicPath);
+            }
+        } else {
+            // Kein Overlay verfügbar, A5-Version kopieren
+            await fs.promises.copyFile(printPath, publicPath);
+        }
+
+        // 4. Thumbnail für Galerie-Ansicht erstellen
+        const thumbnailUrl = await generateThumbnail(publicPath, filename);
+
+        return {
+            originalPath: originalPath,
+            originalUrl: `/photos/originals/${originalFilename}`,
+            printPath: printPath,
+            printUrl: `/photos/print/${printFilename}`,
+            publicPath: publicPath,
+            publicUrl: `/photos/${filename}`,
+            thumbnailUrl: thumbnailUrl,
+            overlayApplied: overlayApplied
+        };
+    } catch (error) {
+        console.error('Error processing photo with dual formats:', error);
+        throw error;
+    }
+}
+
+// Überarbeitete applyOverlayToImage-Funktion
 async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath) {
     try {
-        // Get dimensions of the input image
+        // Check if this is an Instagram overlay
+        const overlayFilename = path.basename(overlayImagePath);
+        if (overlayFilename.startsWith('instagram')) {
+            return processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath);
+        }
+
+        // Standard overlay process
         const metadata = await sharp(sourceImagePath).metadata();
 
-        // Resize overlay to match the input image dimensions
+        // Resize overlay to match source image dimensions
         const resizedOverlay = await sharp(overlayImagePath)
             .resize(metadata.width, metadata.height, {
                 fit: 'fill'
             })
             .toBuffer();
 
-        // Composite the images
+        // Composite them together
         await sharp(sourceImagePath)
             .composite([
                 { input: resizedOverlay, gravity: 'center' }
             ])
-            .jpeg({ quality: 95 }) // Higher quality for better frame details
+            .jpeg({ quality: 95 })
             .toFile(outputPath);
 
         return true;
@@ -382,24 +501,24 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
     }
 }
 
-// Generate a thumbnail for a photo
+// Aktualisierte Thumbnail-Generierungsfunktion - mit A5 QUERFORMAT
 async function generateThumbnail(sourceFilePath, filename) {
-    // Create thumbnail directory if it doesn't exist
+    // Thumbnail-Verzeichnis erstellen, wenn es nicht existiert
     if (!fs.existsSync(THUMBNAILS_DIR)) {
         fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
     }
 
     const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${filename}`);
 
-    // Generate thumbnail only if it doesn't already exist
+    // Thumbnail nur generieren, wenn es noch nicht existiert
     if (!fs.existsSync(thumbnailPath)) {
         try {
             await sharp(sourceFilePath)
                 .resize({
-                    width: 300,
-                    height: 200,
-                    fit: 'contain',
-                    background: { r: 255, g: 255, b: 255 }
+                    width: 424,         // A5-Querformat (1.414:1)
+                    height: 300,
+                    fit: 'contain',     // Bild nicht beschneiden
+                    background: { r: 255, g: 255, b: 255 } // Weißer Hintergrund statt schwarz
                 })
                 .jpeg({ quality: 80, progressive: true })
                 .toFile(thumbnailPath);
@@ -415,187 +534,32 @@ async function generateThumbnail(sourceFilePath, filename) {
     return `/thumbnails/thumb_${filename}`;
 }
 
-// Process photo with three formats: Standard, Instagram, and Wedding Frame
-async function processPhotoWithThreeFormats(sourceFilePath, filename) {
-    // Create required directories if they don't exist
-    if (!fs.existsSync(INSTAGRAM_DIR)) {
-        fs.mkdirSync(INSTAGRAM_DIR, { recursive: true });
+app.get('/photos/:filename', (req, res) => {
+    const filename = req.params.filename;
+    let filepath;
+
+    // Bestimmen, in welchem Verzeichnis das Foto zu finden ist
+    if (filename.startsWith('original_')) {
+        filepath = path.join(ORIGINALS_DIR, filename);
+    } else if (filename.startsWith('print_')) {
+        filepath = path.join(PRINT_PHOTOS_DIR, filename);
+    } else {
+        filepath = path.join(PHOTOS_DIR, filename);
     }
-    if (!fs.existsSync(WEDDING_DIR)) {
-        fs.mkdirSync(WEDDING_DIR, { recursive: true });
+
+    if (!fs.existsSync(filepath)) {
+        return res.status(404).send('Photo not found');
     }
 
-    // Set up filenames and paths
-    const instagramFilename = `instagram_${filename}`;
-    const weddingFilename = `wedding_${filename}`;
+    // Set proper headers for download
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'image/jpeg');
 
-    const instagramPath = path.join(INSTAGRAM_DIR, instagramFilename);
-    const weddingPath = path.join(WEDDING_DIR, weddingFilename);
-    const standardPath = path.join(PHOTOS_DIR, filename);
+    // Send the file
+    res.sendFile(filepath);
+});
 
-    try {
-        // 1. Create standard version (with standard frame)
-        await sharp(sourceFilePath)
-            .resize({
-                width: 1920, // Standard 16:9 HD resolution
-                height: 1080,
-                fit: 'contain',
-                background: { r: 255, g: 255, b: 255 }
-            })
-            .jpeg({ quality: 90 })
-            .toFile(standardPath);
-
-        // 2. Create Instagram version (square 1:1)
-        await sharp(sourceFilePath)
-            .resize({
-                width: 1080, // Instagram standard size
-                height: 1080,
-                fit: 'contain',
-                background: { r: 255, g: 255, b: 255 }
-            })
-            .jpeg({ quality: 90 })
-            .toFile(instagramPath);
-
-        // 3. Create wedding frame version (same as standard but with special wedding frame)
-        await sharp(sourceFilePath)
-            .resize({
-                width: 1920,
-                height: 1080,
-                fit: 'contain',
-                background: { r: 255, g: 255, b: 255 }
-            })
-            .jpeg({ quality: 90 })
-            .toFile(weddingPath);
-
-        // 4. Apply appropriate frames to each version
-        let overlayApplied = {
-            standard: false,
-            instagram: false,
-            wedding: false
-        };
-
-        // Standard frame
-        const standardOverlayPath = path.join(OVERLAYS_DIR, 'standard-frame.png');
-        if (fs.existsSync(standardOverlayPath)) {
-            try {
-                overlayApplied.standard = await applyOverlayToImage(standardPath, standardOverlayPath, standardPath);
-            } catch (error) {
-                console.error('Error applying standard overlay:', error);
-            }
-        }
-
-        // Instagram specific frame
-        const instagramOverlayPath = path.join(OVERLAYS_DIR, 'instagram-frame.png');
-        if (fs.existsSync(instagramOverlayPath)) {
-            try {
-                overlayApplied.instagram = await applyOverlayToImage(instagramPath, instagramOverlayPath, instagramPath);
-            } catch (error) {
-                console.error('Error applying Instagram overlay:', error);
-            }
-        }
-
-        // Wedding special frame
-        const weddingOverlayPath = path.join(OVERLAYS_DIR, 'wedding-frame.png');
-        if (fs.existsSync(weddingOverlayPath)) {
-            try {
-                overlayApplied.wedding = await applyOverlayToImage(weddingPath, weddingOverlayPath, weddingPath);
-            } catch (error) {
-                console.error('Error applying wedding overlay:', error);
-            }
-        }
-
-        // 5. Generate thumbnails for gallery view
-        const thumbnailUrl = await generateThumbnail(standardPath, filename);
-
-        // Return all paths and URLs
-        return {
-            standardPath: standardPath,
-            standardUrl: `/photos/${filename}`,
-            instagramPath: instagramPath,
-            instagramUrl: `/photos/instagram/${instagramFilename}`,
-            weddingPath: weddingPath,
-            weddingUrl: `/photos/wedding/${weddingFilename}`,
-            thumbnailUrl: thumbnailUrl,
-            overlayApplied: overlayApplied
-        };
-    } catch (error) {
-        console.error('Error processing photo with multiple formats:', error);
-        throw error;
-    }
-}
-
-// Generate QR code and respond to photo capture request
-async function generateQRAndRespond(req, res, filename, timestamp, processedPhotos = null) {
-    // Generate QR code for the photo viewer page
-    const photoId = filename; // Use standard version for QR code
-    const clientDomain = req.headers.host || 'fotobox.slyrix.com';
-    const photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
-
-    const qrFilename = `qr_${timestamp}.png`;
-    const qrFilepath = path.join(QR_DIR, qrFilename);
-
-    // If no processed photos available, generate thumbnail for the main file
-    const thumbnailUrl = processedPhotos
-        ? processedPhotos.thumbnailUrl
-        : await generateThumbnail(path.join(PHOTOS_DIR, filename), filename);
-
-    QRCode.toFile(qrFilepath, photoViewUrl, {
-        color: {
-            dark: '#000',  // Points
-            light: '#FFF'  // Background
-        }
-    }, (qrErr) => {
-        if (qrErr) {
-            console.error(`Error generating QR code: ${qrErr.message}`);
-        }
-
-        // Respond with all relevant URLs
-        res.json({
-            success: true,
-            photo: {
-                filename: filename,
-                url: processedPhotos ? processedPhotos.standardUrl : `/photos/${filename}`,
-                thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
-                qrUrl: `/qrcodes/${qrFilename}`,
-                photoViewUrl: photoViewUrl,
-                instagramUrl: processedPhotos ? processedPhotos.instagramUrl : null,
-                weddingUrl: processedPhotos ? processedPhotos.weddingUrl : null,
-                overlayApplied: processedPhotos ? processedPhotos.overlayApplied : false,
-                timestamp: Date.now()
-            }
-        });
-    });
-}
-
-// Helper function to regenerate mosaic in background
-function regenerateMosaicInBackground() {
-    // Check if we have enough photos for a mosaic
-    const files = fs.readdirSync(THUMBNAILS_DIR);
-    const photoCount = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file)).length;
-
-    if (photoCount >= 10) {
-        // Use fetch to call our own API endpoint without waiting for response
-        try {
-            // Use child_process.exec to make a request to our own server
-            const serverUrl = `http://localhost:${PORT}/api/mosaic?t=${Date.now()}`;
-            exec(`curl "${serverUrl}"`, (error, stdout, stderr) => {
-                if (error) {
-                    console.error('Error triggering mosaic generation:', error);
-                } else {
-                    console.log('Mosaic regeneration triggered');
-                }
-            });
-        } catch (error) {
-            console.error('Error triggering mosaic regeneration:', error);
-        }
-    }
-}
-
-//==============================
-// API ENDPOINTS
-//==============================
-
-// Get server and camera status
+// API Endpoints
 app.get('/api/status', (req, res) => {
     // Check webcam status
     exec('v4l2-ctl --list-devices', (webcamError, webcamStdout) => {
@@ -640,68 +604,51 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-// Get list of all photos
+// Get list of all photos - with Type-Parameter
 app.get('/api/photos', (req, res) => {
-    // Query parameter for type
-    const type = req.query.type || 'standard'; // 'standard', 'instagram', 'wedding'
-    const limit = parseInt(req.query.limit) || 0; // Optional limit parameter
+    // Abfrageparameter für Typ abrufen (Standard: mit Rahmen)
+    const type = req.query.type || 'framed'; // 'framed', 'original', 'print'
 
-    // Select directory based on type
+    // Verzeichnis basierend auf Typ auswählen
     let dirToScan;
     switch (type) {
-        case 'instagram':
-            dirToScan = INSTAGRAM_DIR;
+        case 'original':
+            dirToScan = ORIGINALS_DIR;
             break;
-        case 'wedding':
-            dirToScan = WEDDING_DIR;
+        case 'print':
+            dirToScan = PRINT_PHOTOS_DIR;
             break;
-        case 'standard':
+        case 'framed':
         default:
             dirToScan = PHOTOS_DIR;
             break;
     }
 
-    if (!fs.existsSync(dirToScan)) {
-        return res.status(404).json({ error: 'Requested photo type directory not found' });
-    }
-
     fs.readdir(dirToScan, (err, files) => {
         if (err) {
-            return res.status(500).json({ error: 'Error retrieving photos' });
+            return res.status(500).json({error: 'Fehler beim Abrufen der Fotos'});
         }
 
-        // Filter for image files
+        // Nach Bilddateien filtern
         const photoFiles = files.filter(file =>
             /\.(jpg|jpeg|png)$/i.test(file)
         );
 
-        // Add timestamps and sort by newest
+        // Zeitstempel hinzufügen und nach neuesten sortieren
         const photos = photoFiles.map(file => {
             try {
                 const stats = fs.statSync(path.join(dirToScan, file));
-                const baseFilename = file.replace(/^(instagram_|wedding_)/, '');
-
-                // Check which versions exist
-                const standardPath = path.join(PHOTOS_DIR, baseFilename);
-                const instagramPath = path.join(INSTAGRAM_DIR, `instagram_${baseFilename}`);
-                const weddingPath = path.join(WEDDING_DIR, `wedding_${baseFilename}`);
-
-                const standardExists = fs.existsSync(standardPath);
-                const instagramExists = fs.existsSync(instagramPath);
-                const weddingExists = fs.existsSync(weddingPath);
+                const baseFilename = file.replace(/^(original_|print_)/, '');
 
                 return {
                     filename: file,
                     baseFilename: baseFilename,
-                    url: type === 'instagram'
-                        ? `/photos/instagram/${file}`
-                        : (type === 'wedding'
-                            ? `/photos/wedding/${file}`
-                            : `/photos/${file}`),
-                    standardUrl: standardExists ? `/photos/${baseFilename}` : null,
-                    instagramUrl: instagramExists ? `/photos/instagram/instagram_${baseFilename}` : null,
-                    weddingUrl: weddingExists ? `/photos/wedding/wedding_${baseFilename}` : null,
-                    thumbnailUrl: `/thumbnails/thumb_${baseFilename}`,
+                    url: type === 'original'
+                        ? `/photos/originals/${file}`
+                        : (type === 'print' ? `/photos/print/${file}` : `/photos/${file}`),
+                    originalUrl: `/photos/originals/original_${baseFilename}`,
+                    printUrl: `/photos/print/print_${baseFilename}`,
+                    thumbnailUrl: `/thumbnails/thumb_${baseFilename}`, // Thumbnail-URL hinzufügen
                     qrUrl: `/qrcodes/qr_${baseFilename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`,
                     timestamp: stats.mtime.getTime()
                 };
@@ -711,169 +658,17 @@ app.get('/api/photos', (req, res) => {
             }
         }).filter(photo => photo !== null).sort((a, b) => b.timestamp - a.timestamp);
 
-        // Apply limit if specified
-        const limitedPhotos = limit > 0 ? photos.slice(0, limit) : photos;
-
-        res.json(limitedPhotos);
+        res.json(photos);
     });
 });
 
-// Get specific photo details
-app.get('/api/photos/:photoId', (req, res) => {
-    const photoId = req.params.photoId;
-
-    // Input validation
-    if (!photoId || typeof photoId !== 'string') {
-        return res.status(400).json({
-            success: false,
-            error: 'Invalid Photo ID'
-        });
-    }
-
-    // Determine photo type from ID
-    let filepath;
-    let photoType = 'standard';
-
-    if (photoId.startsWith('instagram_')) {
-        filepath = path.join(INSTAGRAM_DIR, photoId);
-        photoType = 'instagram';
-    } else if (photoId.startsWith('wedding_')) {
-        filepath = path.join(WEDDING_DIR, photoId);
-        photoType = 'wedding';
-    } else {
-        filepath = path.join(PHOTOS_DIR, photoId);
-    }
-
-    // Check if file exists
-    if (!fs.existsSync(filepath)) {
-        console.log(`Photo not found: ${photoId}`);
-
-        // If not a special version, look in other directories
-        if (!photoId.startsWith('instagram_') && !photoId.startsWith('wedding_')) {
-            // Search for same base ID in other directories
-            const baseId = photoId;
-
-            const instagramPath = path.join(INSTAGRAM_DIR, `instagram_${baseId}`);
-            const weddingPath = path.join(WEDDING_DIR, `wedding_${baseId}`);
-
-            if (fs.existsSync(instagramPath)) {
-                filepath = instagramPath;
-                photoType = 'instagram';
-            } else if (fs.existsSync(weddingPath)) {
-                filepath = weddingPath;
-                photoType = 'wedding';
-            } else {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Photo not found'
-                });
-            }
-        } else {
-            return res.status(404).json({
-                success: false,
-                error: 'Photo not found'
-            });
-        }
-    }
-
-    try {
-        // Get file stats for timestamp
-        const stats = fs.statSync(filepath);
-
-        // Generate QR code path
-        const baseFilename = photoId.replace(/^(instagram_|wedding_)/, '');
-        const qrFilename = `qr_${baseFilename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`;
-
-        // Check if thumbnail exists
-        const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${baseFilename}`);
-        const hasThumbnail = fs.existsSync(thumbnailPath);
-
-        // Get client domain from request or config
-        const clientDomain = req.headers.host || 'fotobox.slyrix.com';
-
-        // Various URLs for different versions
-        let standardUrl = `/photos/${baseFilename}`;
-        let instagramUrl = `/photos/instagram/instagram_${baseFilename}`;
-        let weddingUrl = `/photos/wedding/wedding_${baseFilename}`;
-
-        // Check which versions actually exist
-        const standardExists = fs.existsSync(path.join(PHOTOS_DIR, baseFilename));
-        const instagramExists = fs.existsSync(path.join(INSTAGRAM_DIR, `instagram_${baseFilename}`));
-        const weddingExists = fs.existsSync(path.join(WEDDING_DIR, `wedding_${baseFilename}`));
-
-        // Create photoViewUrl based on requested type
-        const photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
-
-        // Return photo data
-        res.json({
-            success: true,
-            filename: photoId,
-            url: photoType === 'instagram'
-                ? instagramUrl
-                : (photoType === 'wedding'
-                    ? weddingUrl
-                    : standardUrl),
-            standardUrl: standardExists ? standardUrl : null,
-            instagramUrl: instagramExists ? instagramUrl : null,
-            weddingUrl: weddingExists ? weddingUrl : null,
-            thumbnailUrl: hasThumbnail ? `/thumbnails/thumb_${baseFilename}` : null,
-            qrUrl: `/qrcodes/${qrFilename}`,
-            photoViewUrl: photoViewUrl,
-            photoType: photoType,
-            timestamp: stats.mtime.getTime()
-        });
-    } catch (error) {
-        console.error(`Error retrieving photo ${photoId}:`, error);
-        res.status(500).json({
-            success: false,
-            error: 'Server error retrieving photo'
-        });
-    }
-});
-
-// Get a specific photo file - for direct file access
-app.get('/photos/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const filepath = path.join(PHOTOS_DIR, filename);
-
-    if (!fs.existsSync(filepath)) {
-        return res.status(404).send('Photo not found');
-    }
-
-    res.sendFile(filepath);
-});
-
-// Get an Instagram format photo
-app.get('/photos/instagram/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const filepath = path.join(INSTAGRAM_DIR, filename);
-
-    if (!fs.existsSync(filepath)) {
-        return res.status(404).send('Instagram photo not found');
-    }
-
-    res.sendFile(filepath);
-});
-
-// Get a Wedding format photo
-app.get('/photos/wedding/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const filepath = path.join(WEDDING_DIR, filename);
-
-    if (!fs.existsSync(filepath)) {
-        return res.status(404).send('Wedding photo not found');
-    }
-
-    res.sendFile(filepath);
-});
-
-// Take a new photo
+// Take a new photo - using gphoto2 for final capture - mit Dual-Format
 app.post('/api/photos/capture', async (req, res) => {
     // Prevent multiple simultaneous capture requests
     if (captureInProgress.status) {
         return res.status(429).json({
             success: false,
-            error: 'A photo capture is already in progress. Please try again in a moment.'
+            error: 'Eine Fotoaufnahme ist bereits im Gange. Bitte versuche es in einem Moment noch einmal.'
         });
     }
 
@@ -881,7 +676,7 @@ app.post('/api/photos/capture', async (req, res) => {
 
     // Generate unique filename based on timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `photo_${timestamp}.jpg`;
+    const filename = `wedding_${timestamp}.jpg`;
     const filepath = path.join(PHOTOS_DIR, filename);
 
     console.log(`Taking photo with camera: ${filename}`);
@@ -903,7 +698,7 @@ app.post('/api/photos/capture', async (req, res) => {
     // Build the gphoto2 command for high quality camera capture
     const captureCommand = `gphoto2 --force-overwrite --capture-image-and-download --filename "${filepath}"`;
 
-    exec(captureCommand, async (error, stdout, stderr) => {
+    exec(captureCommand, (error, stdout, stderr) => {
         // Resume preview if it was active
         if (wasPreviewActive) {
             setTimeout(() => {
@@ -917,9 +712,9 @@ app.post('/api/photos/capture', async (req, res) => {
         }
 
         if (error || stderr.includes('ERROR')) {
-            console.error(`Error taking photo: ${error ? error.message : stderr}`);
+            console.error(`Fehler bei der Fotoaufnahme: ${error ? error.message : stderr}`);
 
-            // Fallback to webcam if gphoto2 fails
+            // Bei gphoto2-Fehler auf Webcam als Backup zurückgreifen
             const fallbackCommand = `fswebcam -d /dev/video0 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
 
             exec(fallbackCommand, async (fbError, fbStdout, fbStderr) => {
@@ -928,19 +723,19 @@ app.post('/api/photos/capture', async (req, res) => {
                 if (fbError) {
                     return res.status(500).json({
                         success: false,
-                        error: 'Photo capture failed with both camera and webcam'
+                        error: 'Fotoaufnahme sowohl mit Kamera als auch mit Webcam fehlgeschlagen'
                     });
                 }
 
-                console.log(`Photo taken with webcam as fallback`);
+                console.log(`Foto mit Webcam als Fallback aufgenommen`);
 
                 try {
-                    // Process photo with three formats
-                    const processedPhotos = await processPhotoWithThreeFormats(filepath, filename);
+                    // Dual-Format-Verarbeitung für das Webcam-Foto
+                    const processedPhotos = await processPhotoWithDualFormats(filepath, filename);
 
                     // Increment photo counter for mosaic generation
                     photoCounter++;
-
+                    console.log(`Foto mit Webcam als Fallback aufgenommen`);
                     // Check if we should regenerate mosaic (every 10th photo)
                     if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
                         console.log(`Captured ${photoCounter} photos. Regenerating mosaic.`);
@@ -949,8 +744,8 @@ app.post('/api/photos/capture', async (req, res) => {
 
                     generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
                 } catch (err) {
-                    console.error('Error in multi-format processing:', err);
-                    // Try to continue with standard processing
+                    console.error('Fehler bei der Dual-Format-Verarbeitung:', err);
+                    // Versuchen, mit Standardverarbeitung fortzufahren
                     generateQRAndRespond(req, res, filename, timestamp);
                 }
             });
@@ -959,46 +754,218 @@ app.post('/api/photos/capture', async (req, res) => {
         }
 
         captureInProgress.status = false;
-        console.log(`Photo successfully taken with camera: ${filename}`);
+        console.log(`Foto erfolgreich mit Kamera aufgenommen: ${filename}`);
 
-        // Process photo with multiple formats
-        processPhotoWithThreeFormats(filepath, filename)
+        // Dual-Format-Verarbeitung für die Kameraaufnahme
+        processPhotoWithDualFormats(filepath, filename)
             .then(processedPhotos => {
                 // Increment photo counter for mosaic generation
                 photoCounter++;
-
+                console.log(`photocount ${photoCounter}`);
                 // Check if we should regenerate mosaic (every 10th photo)
                 if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
-                    console.log(`Captured ${photoCounter} photos. Regenerating mosaic.`);
+                    console.log(`regenerate mosaic`);
                     regenerateMosaicInBackground();
                 }
 
                 generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
             })
             .catch(err => {
-                console.error('Error in multi-format processing:', err);
-                // Try to continue with standard processing
+                console.error('Fehler bei der Dual-Format-Verarbeitung:', err);
+                // Versuchen, mit Standardverarbeitung fortzufahren
                 generateQRAndRespond(req, res, filename, timestamp);
             });
     });
 });
 
-// Delete a photo (all versions)
+// Helper function to regenerate mosaic in background
+function regenerateMosaicInBackground() {
+    // Check if we have enough photos for a mosaic
+    const files = fs.readdirSync(THUMBNAILS_DIR);
+    const photoCount = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file)).length;
+
+    if (photoCount >= 10) {
+        // Use the internal URL for the server to call itself
+        const serverUrl = `http://localhost:${PORT}/api/mosaic?t=${Date.now()}`;
+        console.log('Mosaic regenerated');
+
+        // Make the request without waiting for response
+        fetch(serverUrl)
+            .then(response => {
+                if (response.ok) {
+                    console.log('Mosaic regenerated successfully');
+                } else {
+                    console.log('Mosaic regeneration returned status:', response.status);
+                }
+            })
+            .catch(err => console.error('Error regenerating mosaic:', err));
+    }
+}
+// API-Endpunkt zum Abrufen eines einzelnen Fotos nach ID - mit allen Versionen
+app.get('/api/photos/:photoId', (req, res) => {
+    const photoId = req.params.photoId;
+
+    // Eingabevalidierung
+    if (!photoId || typeof photoId !== 'string') {
+        return res.status(400).json({
+            success: false,
+            error: 'Ungültige Foto-ID'
+        });
+    }
+
+    // Bestimmen, ob dies ein Original oder eine andere Variante ist
+    let filepath;
+    let isOriginal = false;
+
+    if (photoId.startsWith('original_')) {
+        // Original-Version angefordert
+        filepath = path.join(ORIGINALS_DIR, photoId);
+        isOriginal = true;
+    } else if (photoId.startsWith('print_')) {
+        // Druckbare Version angefordert
+        filepath = path.join(PRINT_PHOTOS_DIR, photoId);
+    } else {
+        // Standard-Version (mit Rahmen) angefordert
+        filepath = path.join(PHOTOS_DIR, photoId);
+    }
+
+    // Prüfen, ob die Datei existiert
+    if (!fs.existsSync(filepath)) {
+        console.log(`Foto nicht gefunden: ${photoId}`);
+
+        // Wenn es sich um keine spezielle Version handelt, in anderen Ordnern suchen
+        if (!photoId.startsWith('original_') && !photoId.startsWith('print_')) {
+            // Nach gleicher Basis-ID in anderen Ordnern suchen
+            const baseId = photoId.replace(/^(original_|print_)/, '');
+
+            const originalPath = path.join(ORIGINALS_DIR, `original_${baseId}`);
+            const printPath = path.join(PRINT_PHOTOS_DIR, `print_${baseId}`);
+
+            if (fs.existsSync(originalPath)) {
+                filepath = originalPath;
+                isOriginal = true;
+            } else if (fs.existsSync(printPath)) {
+                filepath = printPath;
+            } else {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Foto nicht gefunden'
+                });
+            }
+        } else {
+            return res.status(404).json({
+                success: false,
+                error: 'Foto nicht gefunden'
+            });
+        }
+    }
+
+    try {
+        // Dateieigenschaften für Zeitstempel abrufen
+        const stats = fs.statSync(filepath);
+
+        // QR-Code-Pfad generieren
+        const baseFilename = photoId.replace(/^(original_|print_)/, '');
+        const qrFilename = `qr_${baseFilename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`;
+
+        // Prüfen, ob Thumbnail existiert
+        const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${baseFilename}`);
+        const hasThumbnail = fs.existsSync(thumbnailPath);
+
+        // Client-Domain aus Anfrage oder Konfiguration ermitteln
+        const clientDomain = req.headers.host || 'fotobox.slyrix.com';
+
+        // Verschiedene URLs für verschiedene Versionen zusammenstellen
+        let normalUrl = `/photos/${baseFilename}`;
+        let originalUrl = `/photos/originals/original_${baseFilename}`;
+        let printUrl = `/photos/print/print_${baseFilename}`;
+
+        // Basierend auf angeforderten Bild-Typ die korrekte photoViewUrl erstellen
+        const photoViewUrl = isOriginal
+            ? `https://${clientDomain}/photo/original_${baseFilename}`
+            : `https://${clientDomain}/photo/${baseFilename}`;
+
+        // Fotodaten zurückgeben
+        res.json({
+            success: true,
+            filename: photoId,
+            url: isOriginal ? originalUrl : normalUrl,
+            originalUrl: originalUrl,
+            printUrl: printUrl,
+            thumbnailUrl: hasThumbnail ? `/thumbnails/thumb_${baseFilename}` : null,
+            qrUrl: `/qrcodes/${qrFilename}`,
+            photoViewUrl: photoViewUrl,
+            isOriginal: isOriginal,
+            timestamp: stats.mtime.getTime()
+        });
+    } catch (error) {
+        console.error(`Fehler beim Abrufen des Fotos ${photoId}:`, error);
+        res.status(500).json({
+            success: false,
+            error: 'Serverfehler beim Abrufen des Fotos'
+        });
+    }
+});
+
+// Hilfsfunktion für QR-Code-Generierung und Antwort
+async function generateQRAndRespond(req, res, filename, timestamp, processedPhotos = null) {
+    // QR-Code für die Foto-Ansichtsseite generieren, nicht direkt für das Bild
+    const photoId = processedPhotos ? path.basename(processedPhotos.originalUrl) : filename; // Original-ID für QR-Code verwenden
+    const clientDomain = 'fotobox.slyrix.com'; // Angegebene Domain verwenden
+    const photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
+
+    const qrFilename = `qr_${timestamp}.png`;
+    const qrFilepath = path.join(QR_DIR, qrFilename);
+
+    // Wenn keine verarbeiteten Fotos vorliegen, Thumbnail für die Hauptdatei erstellen
+    const thumbnailUrl = processedPhotos
+        ? processedPhotos.thumbnailUrl
+        : await generateThumbnail(path.join(PHOTOS_DIR, filename), filename);
+
+    QRCode.toFile(qrFilepath, photoViewUrl, {
+        color: {
+            dark: '#000',  // Punkte
+            light: '#FFF'  // Hintergrund
+        }
+    }, (qrErr) => {
+        if (qrErr) {
+            console.error(`Fehler beim Generieren des QR-Codes: ${qrErr.message}`);
+        }
+
+        // Antwort mit allen relevanten URLs
+        res.json({
+            success: true,
+            photo: {
+                filename: filename,
+                url: processedPhotos ? processedPhotos.publicUrl : `/photos/${filename}`,
+                thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback auf Original, wenn Thumbnail fehlschlägt
+                qrUrl: `/qrcodes/${qrFilename}`,
+                photoViewUrl: photoViewUrl,
+                originalUrl: processedPhotos ? processedPhotos.originalUrl : null,
+                printUrl: processedPhotos ? processedPhotos.printUrl : null,
+                overlayApplied: processedPhotos ? processedPhotos.overlayApplied : false,
+                timestamp: Date.now()
+            }
+        });
+    });
+}
+
+// Delete a photo - alle Versionen
 app.delete('/api/photos/:filename', (req, res) => {
     const filename = req.params.filename;
-    const baseFilename = filename.replace(/^(instagram_|wedding_)/, '');
+    const baseFilename = filename.replace(/^(original_|print_)/, '');
 
     const filepaths = [
-        path.join(PHOTOS_DIR, baseFilename),                    // Standard version
-        path.join(INSTAGRAM_DIR, `instagram_${baseFilename}`),  // Instagram version
-        path.join(WEDDING_DIR, `wedding_${baseFilename}`),      // Wedding version
-        path.join(THUMBNAILS_DIR, `thumb_${baseFilename}`)      // Thumbnail
+        path.join(PHOTOS_DIR, baseFilename),                        // Standard-Version
+        path.join(ORIGINALS_DIR, `original_${baseFilename}`),       // Original-Version
+        path.join(PRINT_PHOTOS_DIR, `print_${baseFilename}`),       // Druck-Version
+        path.join(THUMBNAILS_DIR, `thumb_${baseFilename}`)          // Thumbnail
     ];
 
     let success = true;
     let errorMessage = '';
 
-    // Delete all versions
+    // Alle Versionen löschen
     for (const filepath of filepaths) {
         if (fs.existsSync(filepath)) {
             try {
@@ -1012,7 +979,7 @@ app.delete('/api/photos/:filename', (req, res) => {
         }
     }
 
-    // Delete QR code
+    // QR-Code auch löschen
     const qrPath = path.join(QR_DIR, `qr_${baseFilename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`);
     if (fs.existsSync(qrPath)) {
         try {
@@ -1020,7 +987,7 @@ app.delete('/api/photos/:filename', (req, res) => {
             console.log(`Deleted QR code: ${qrPath}`);
         } catch (err) {
             console.error(`Error deleting QR code ${qrPath}:`, err);
-            // Not considering QR code deletion failure as critical
+            // QR-Code-Löschfehler nicht als kritisch betrachten
         }
     }
 
@@ -1031,336 +998,30 @@ app.delete('/api/photos/:filename', (req, res) => {
     }
 });
 
-// Get list of available frames
-app.get('/api/frames', (req, res) => {
-    try {
-        if (!fs.existsSync(OVERLAYS_DIR)) {
-            return res.json([]);
-        }
+// Send print command (placeholder for future implementation)
+app.post('/api/photos/print', (req, res) => {
+    const {filename} = req.body;
 
-        const files = fs.readdirSync(OVERLAYS_DIR);
-        const overlays = files
-            .filter(file => /\.(png|jpg|jpeg)$/i.test(file))
-            .map(file => {
-                const stats = fs.statSync(path.join(OVERLAYS_DIR, file));
-
-                // Determine frame type based on filename prefix
-                let frameType = 'standard';
-                if (file.startsWith('instagram-')) {
-                    frameType = 'instagram';
-                } else if (file.startsWith('wedding-')) {
-                    frameType = 'wedding';
-                }
-
-                return {
-                    name: file,
-                    displayName: file.replace(/\.(png|jpg|jpeg)$/i, '').replace(/^(instagram-|wedding-)/, ''),
-                    url: `/overlays/${file}`,
-                    timestamp: stats.mtime.getTime(),
-                    size: stats.size,
-                    type: frameType
-                };
-            })
-            .sort((a, b) => b.timestamp - a.timestamp);
-
-        return res.json(overlays);
-    } catch (error) {
-        console.error('Error listing frames:', error);
-        return res.status(500).json({
-            success: false,
-            error: 'Server error listing frames'
-        });
+    if (!filename) {
+        return res.status(400).json({error: 'Filename is required'});
     }
+
+    // This is where you would implement the printing logic
+    // Für A5-Druck sollten wir die print_-Version verwenden
+    const printFilename = filename.startsWith('print_') ? filename : `print_${filename}`;
+
+    console.log(`Print request received for: ${printFilename}`);
+
+    res.json({
+        success: true,
+        message: 'Print request received. Printing functionality will be implemented later.'
+    });
 });
 
-// Upload a new frame overlay
-app.post('/api/admin/overlays', upload.single('overlay'), async (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({
-            success: false,
-            error: 'No overlay file uploaded'
-        });
-    }
-
-    const overlayName = req.body.name || `overlay-${Date.now()}.png`;
-    const overlayPath = path.join(OVERLAYS_DIR, overlayName);
-
-    try {
-        // Save the uploaded overlay
-        fs.writeFileSync(overlayPath, req.file.buffer);
-
-        return res.json({
-            success: true,
-            message: 'Overlay uploaded successfully',
-            name: overlayName,
-            url: `/overlays/${overlayName}`
-        });
-    } catch (error) {
-        console.error('Error saving overlay:', error);
-        return res.status(500).json({
-            success: false,
-            error: 'Server error saving overlay'
-        });
-    }
-});
-
-// Delete a frame overlay
-app.delete('/api/admin/overlays/:name', (req, res) => {
-    const overlayName = req.params.name;
-    const overlayPath = path.join(OVERLAYS_DIR, overlayName);
-
-    if (!fs.existsSync(overlayPath)) {
-        return res.status(404).json({
-            success: false,
-            error: 'Overlay not found'
-        });
-    }
-
-    try {
-        fs.unlinkSync(overlayPath);
-        return res.json({
-            success: true,
-            message: 'Overlay deleted successfully'
-        });
-    } catch (error) {
-        console.error('Error deleting overlay:', error);
-        return res.status(500).json({
-            success: false,
-            error: 'Server error deleting overlay'
-        });
-    }
-});
-
-// Apply a frame to an existing photo
-app.post('/api/photos/:photoId/apply-frame', async (req, res) => {
-    const photoId = req.params.photoId;
-    const { frameName, photoType = 'standard' } = req.body;
-
-    if (!photoId || !frameName) {
-        return res.status(400).json({
-            success: false,
-            error: 'Photo ID and frame name are required'
-        });
-    }
-
-    try {
-        // Determine source path based on photo type
-        let sourcePhotoPath;
-        let baseFilename = photoId.replace(/^(instagram_|wedding_)/, '');
-
-        switch (photoType) {
-            case 'instagram':
-                sourcePhotoPath = path.join(INSTAGRAM_DIR, `instagram_${baseFilename}`);
-                break;
-            case 'wedding':
-                sourcePhotoPath = path.join(WEDDING_DIR, `wedding_${baseFilename}`);
-                break;
-            default:
-                sourcePhotoPath = path.join(PHOTOS_DIR, baseFilename);
-        }
-
-        const overlayPath = path.join(OVERLAYS_DIR, frameName);
-
-        if (!fs.existsSync(sourcePhotoPath)) {
-            return res.status(404).json({
-                success: false,
-                error: `Source photo not found: ${photoType} version of ${baseFilename}`
-            });
-        }
-
-        if (!fs.existsSync(overlayPath)) {
-            return res.status(404).json({
-                success: false,
-                error: `Frame overlay not found: ${frameName}`
-            });
-        }
-
-        // Apply the overlay
-        const success = await applyOverlayToImage(sourcePhotoPath, overlayPath, sourcePhotoPath);
-
-        if (success) {
-            // If this is the standard version, regenerate the thumbnail
-            if (photoType === 'standard') {
-                await generateThumbnail(sourcePhotoPath, baseFilename);
-            }
-
-            return res.json({
-                success: true,
-                message: `Applied frame '${frameName}' to ${photoType} version of photo`,
-                photoId: photoId,
-                type: photoType
-            });
-        } else {
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to apply frame to photo'
-            });
-        }
-    } catch (error) {
-        console.error('Error applying frame:', error);
-        return res.status(500).json({
-            success: false,
-            error: 'Server error applying frame to photo'
-        });
-    }
-});
-
-// Generate Instagram version for an existing photo
-app.post('/api/photos/:photoId/instagram', async (req, res) => {
-    const photoId = req.params.photoId;
-    const { frameName } = req.body;
-
-    if (!photoId) {
-        return res.status(400).json({
-            success: false,
-            error: 'Photo ID is required'
-        });
-    }
-
-    try {
-        // Get the base filename
-        const baseFilename = photoId.replace(/^(instagram_|wedding_)/, '');
-
-        // Find the source photo (prefer standard version)
-        const standardPath = path.join(PHOTOS_DIR, baseFilename);
-
-        if (!fs.existsSync(standardPath)) {
-            return res.status(404).json({
-                success: false,
-                error: 'Source photo not found'
-            });
-        }
-
-        // Create Instagram directory if needed
-        if (!fs.existsSync(INSTAGRAM_DIR)) {
-            fs.mkdirSync(INSTAGRAM_DIR, { recursive: true });
-        }
-
-        // Generate Instagram version
-        const instagramFilename = `instagram_${baseFilename}`;
-        const instagramPath = path.join(INSTAGRAM_DIR, instagramFilename);
-
-        // Create square Instagram version
-        await sharp(standardPath)
-            .resize({
-                width: 1080,
-                height: 1080,
-                fit: 'contain',
-                background: { r: 255, g: 255, b: 255 }
-            })
-            .jpeg({ quality: 90 })
-            .toFile(instagramPath);
-
-        // Apply frame if specified
-        let overlayApplied = false;
-        if (frameName) {
-            const overlayPath = path.join(OVERLAYS_DIR, frameName);
-            if (fs.existsSync(overlayPath)) {
-                overlayApplied = await applyOverlayToImage(instagramPath, overlayPath, instagramPath);
-            }
-        } else {
-            // Try to use default Instagram frame
-            const defaultInstagramFrame = path.join(OVERLAYS_DIR, 'instagram-frame.png');
-            if (fs.existsSync(defaultInstagramFrame)) {
-                overlayApplied = await applyOverlayToImage(instagramPath, defaultInstagramFrame, instagramPath);
-            }
-        }
-
-        return res.json({
-            success: true,
-            message: 'Instagram version generated successfully',
-            photoId: instagramFilename,
-            url: `/photos/instagram/${instagramFilename}`,
-            overlayApplied
-        });
-    } catch (error) {
-        console.error('Error generating Instagram version:', error);
-        return res.status(500).json({
-            success: false,
-            error: 'Server error generating Instagram version'
-        });
-    }
-});
-
-// Generate Wedding version for an existing photo
-app.post('/api/photos/:photoId/wedding', async (req, res) => {
-    const photoId = req.params.photoId;
-    const { frameName } = req.body;
-
-    if (!photoId) {
-        return res.status(400).json({
-            success: false,
-            error: 'Photo ID is required'
-        });
-    }
-
-    try {
-        // Get the base filename
-        const baseFilename = photoId.replace(/^(instagram_|wedding_)/, '');
-
-        // Find the source photo (prefer standard version)
-        const standardPath = path.join(PHOTOS_DIR, baseFilename);
-
-        if (!fs.existsSync(standardPath)) {
-            return res.status(404).json({
-                success: false,
-                error: 'Source photo not found'
-            });
-        }
-
-        // Create Wedding directory if needed
-        if (!fs.existsSync(WEDDING_DIR)) {
-            fs.mkdirSync(WEDDING_DIR, { recursive: true });
-        }
-
-        // Generate Wedding version
-        const weddingFilename = `wedding_${baseFilename}`;
-        const weddingPath = path.join(WEDDING_DIR, weddingFilename);
-
-        // Create wedding version (16:9 aspect ratio)
-        await sharp(standardPath)
-            .resize({
-                width: 1920,
-                height: 1080,
-                fit: 'contain',
-                background: { r: 255, g: 255, b: 255 }
-            })
-            .jpeg({ quality: 90 })
-            .toFile(weddingPath);
-
-        // Apply frame if specified
-        let overlayApplied = false;
-        if (frameName) {
-            const overlayPath = path.join(OVERLAYS_DIR, frameName);
-            if (fs.existsSync(overlayPath)) {
-                overlayApplied = await applyOverlayToImage(weddingPath, overlayPath, weddingPath);
-            }
-        } else {
-            // Try to use default Wedding frame
-            const defaultWeddingFrame = path.join(OVERLAYS_DIR, 'wedding-frame.png');
-            if (fs.existsSync(defaultWeddingFrame)) {
-                overlayApplied = await applyOverlayToImage(weddingPath, defaultWeddingFrame, weddingPath);
-            }
-        }
-
-        return res.json({
-            success: true,
-            message: 'Wedding version generated successfully',
-            photoId: weddingFilename,
-            url: `/photos/wedding/${weddingFilename}`,
-            overlayApplied
-        });
-    } catch (error) {
-        console.error('Error generating Wedding version:', error);
-        return res.status(500).json({
-            success: false,
-            error: 'Server error generating Wedding version'
-        });
-    }
-});
-
-// Regenerate thumbnails for all photos
+// Route to generate thumbnails for all existing photos
 app.get('/api/admin/generate-thumbnails', async (req, res) => {
+    // In a real app, check admin authentication here
+
     try {
         const files = fs.readdirSync(PHOTOS_DIR);
         const photoFiles = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file));
@@ -1398,7 +1059,234 @@ app.get('/api/admin/generate-thumbnails', async (req, res) => {
     }
 });
 
-// Generate photo mosaic
+// Endpoint to apply overlay to a photo
+app.post('/api/photos/:photoId/overlay', async (req, res) => {
+    const photoId = req.params.photoId;
+    const overlayName = req.body.overlayName;
+    const createNewVersion = req.body.createNewVersion || false;
+
+    // Validate inputs
+    if (!photoId || !overlayName) {
+        return res.status(400).json({
+            success: false,
+            error: 'Photo ID and overlay name are required'
+        });
+    }
+
+    // Determine correct paths
+    let baseFilename, sourcePhotoPath, targetPhotoPath;
+
+    if (photoId.startsWith('instagram_') || photoId.startsWith('overlay_')) {
+        // If this is already a special version, strip the prefix to get base filename
+        baseFilename = photoId.substring(photoId.indexOf('_') + 1);
+    } else {
+        baseFilename = photoId;
+    }
+
+    // Source is always the print version (which has no overlay) or original if print doesn't exist
+    const printPath = path.join(PRINT_PHOTOS_DIR, `print_${baseFilename}`);
+    const originalPath = path.join(ORIGINALS_DIR, `original_${baseFilename}`);
+
+    if (fs.existsSync(printPath)) {
+        sourcePhotoPath = printPath;
+    } else if (fs.existsSync(originalPath)) {
+        sourcePhotoPath = originalPath;
+    } else {
+        // If neither exists, try the standard photo
+        sourcePhotoPath = path.join(PHOTOS_DIR, baseFilename);
+        if (!fs.existsSync(sourcePhotoPath)) {
+            return res.status(404).json({
+                success: false,
+                error: 'Source photo not found'
+            });
+        }
+    }
+
+    // Determine target path based on overlay type
+    let targetFilename = baseFilename;
+    let targetPrefix = '';
+
+    if (overlayName.startsWith('instagram')) {
+        targetPrefix = 'instagram_';
+    } else if (overlayName !== 'wedding-frame.png') {
+        targetPrefix = 'overlay_';
+    }
+
+    // If creating a new version, target is a new filename
+    // Otherwise, replace the current version
+    if (createNewVersion && targetPrefix) {
+        targetFilename = `${targetPrefix}${baseFilename}`;
+        targetPhotoPath = path.join(PHOTOS_DIR, targetFilename);
+    } else {
+        // Just update the existing photo
+        targetPhotoPath = path.join(PHOTOS_DIR, baseFilename);
+    }
+
+    const overlayPath = path.join(OVERLAYS_DIR, overlayName);
+
+    // Check if overlay exists
+    if (!fs.existsSync(overlayPath)) {
+        return res.status(404).json({
+            success: false,
+            error: 'Overlay not found'
+        });
+    }
+
+    try {
+        // Apply overlay to photo
+        const success = await applyOverlayToImage(sourcePhotoPath, overlayPath, targetPhotoPath);
+
+        if (success) {
+            // Regenerate thumbnail
+            await generateThumbnail(targetPhotoPath, baseFilename);
+
+            return res.json({
+                success: true,
+                message: 'Overlay applied successfully',
+                photoId: targetFilename,
+                url: `/photos/${targetFilename}`
+            });
+        } else {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to apply overlay'
+            });
+        }
+    } catch (error) {
+        console.error('Error applying overlay:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error applying overlay'
+        });
+    }
+});
+
+// Endpoint to upload a new overlay template
+app.post('/api/admin/overlays', upload.single('overlay'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({
+            success: false,
+            error: 'No overlay file uploaded'
+        });
+    }
+
+    const overlayName = req.body.name || `overlay-${Date.now()}.png`;
+    const overlayType = req.body.type || 'standard'; // standard, instagram, special
+    const overlayPath = path.join(OVERLAYS_DIR, overlayName);
+
+    try {
+        // Save the uploaded overlay
+        fs.writeFileSync(overlayPath, req.file.buffer);
+
+        // Process the overlay based on type
+        if (overlayType === 'instagram') {
+            // For Instagram overlays, we might want to ensure it's square
+            // This could be done with Sharp
+            try {
+                const squareOverlay = await sharp(overlayPath)
+                    .resize({
+                        width: 1080,  // Instagram recommended size
+                        height: 1080,
+                        fit: 'contain',
+                        background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background
+                    })
+                    .png()
+                    .toBuffer();
+
+                // Save the processed overlay
+                fs.writeFileSync(overlayPath, squareOverlay);
+            } catch (processError) {
+                console.error('Error processing Instagram overlay:', processError);
+                // Continue anyway, as we still have the original upload
+            }
+        }
+
+        return res.json({
+            success: true,
+            message: 'Overlay uploaded successfully',
+            name: overlayName,
+            type: overlayType,
+            url: `/overlays/${overlayName}`
+        });
+    } catch (error) {
+        console.error('Error saving overlay:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error saving overlay'
+        });
+    }
+});
+
+// Get list of available overlays
+app.get('/api/admin/overlays', (req, res) => {
+    try {
+        if (!fs.existsSync(OVERLAYS_DIR)) {
+            return res.json([]);
+        }
+
+        const files = fs.readdirSync(OVERLAYS_DIR);
+        const overlays = files
+            .filter(file => /\.(png|jpg|jpeg)$/i.test(file))
+            .map(file => {
+                const stats = fs.statSync(path.join(OVERLAYS_DIR, file));
+                return {
+                    name: file,
+                    url: `/overlays/${file}`,
+                    timestamp: stats.mtime.getTime(),
+                    size: stats.size
+                };
+            })
+            .sort((a, b) => b.timestamp - a.timestamp);
+
+        return res.json(overlays);
+    } catch (error) {
+        console.error('Error listing overlays:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error listing overlays'
+        });
+    }
+});
+async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath) {
+    try {
+        // Get metadata of the source image
+        const metadata = await sharp(sourceImagePath).metadata();
+
+        // Create a square canvas with the largest dimension
+        const maxDimension = Math.max(metadata.width, metadata.height);
+
+        // Create a new image with square dimensions
+        const squareImage = await sharp(sourceImagePath)
+            .resize({
+                width: maxDimension,
+                height: maxDimension,
+                fit: 'contain',
+                background: { r: 255, g: 255, b: 255 } // White background
+            })
+            .toBuffer();
+
+        // Resize the overlay to match
+        const resizedOverlay = await sharp(overlayImagePath)
+            .resize(maxDimension, maxDimension, {
+                fit: 'fill'
+            })
+            .toBuffer();
+
+        // Composite them together
+        await sharp(squareImage)
+            .composite([
+                { input: resizedOverlay, gravity: 'center' }
+            ])
+            .jpeg({ quality: 95 })
+            .toFile(outputPath);
+
+        return true;
+    } catch (error) {
+        console.error('Error processing Instagram photo:', error);
+        return false;
+    }
+}
+
 app.get('/api/mosaic', async (req, res) => {
     try {
         // Get all photos (using thumbnails for better performance)
@@ -1421,8 +1309,10 @@ app.get('/api/mosaic', async (req, res) => {
         const targetWidth = 1920;
         const targetHeight = 1080;
 
-        // Limit to 100 photos max
-        let photoCount = Math.min(photoFiles.length, 100);
+        // Start with a simple calculation for how many photos to use
+        // Dynamically determine the number of columns and rows
+        let photoCount = photoFiles.length; // Limit to 100 photos max
+        // let photoCount = Math.min(photoFiles.length, 100); // Limit to 100 photos max
 
         // Try to determine optimal grid dimensions
         let cols = Math.ceil(Math.sqrt(photoCount * targetWidth / targetHeight));
@@ -1445,7 +1335,6 @@ app.get('/api/mosaic', async (req, res) => {
         const mosaicWidth = tileWidth * cols;
         const mosaicHeight = tileHeight * rows;
 
-        // Create a blank canvas
         const mosaic = sharp({
             create: {
                 width: mosaicWidth,
@@ -1540,39 +1429,98 @@ app.get('/api/mosaic', async (req, res) => {
     }
 });
 
+// Add an info endpoint to check mosaic status
+app.get('/api/mosaic/info', async (req, res) => {
+    try {
+        const files = fs.readdirSync(THUMBNAILS_DIR);
+        const photoFiles = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file));
+
+        const mosaicFilepath = path.join(PHOTOS_DIR, 'mosaic.png');
+        const mosaicExists = fs.existsSync(mosaicFilepath);
+        let mosaicStats = null;
+
+        if (mosaicExists) {
+            const stats = fs.statSync(mosaicFilepath);
+            mosaicStats = {
+                lastModified: stats.mtime,
+                size: stats.size,
+                url: '/photos/mosaic.png'
+            };
+        }
+
+        res.json({
+            success: true,
+            photoCount: photoFiles.length,
+            requiredCount: 10,
+            hasMosaic: mosaicExists,
+            mosaic: mosaicStats
+        });
+    } catch (error) {
+        console.error('Error checking mosaic info:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to check mosaic info'
+        });
+    }
+});
+app.delete('/api/admin/overlays/:name', async (req, res) => {
+    const overlayName = req.params.name;
+
+    // Don't allow deleting the main wedding frame
+    if (overlayName === 'wedding-frame.png') {
+        return res.status(400).json({
+            success: false,
+            error: 'Cannot delete the standard wedding frame. You can only replace it.'
+        });
+    }
+
+    const overlayPath = path.join(OVERLAYS_DIR, overlayName);
+
+    // Check if overlay exists
+    if (!fs.existsSync(overlayPath)) {
+        return res.status(404).json({
+            success: false,
+            error: 'Overlay not found'
+        });
+    }
+
+    try {
+        // Delete the overlay file
+        fs.unlinkSync(overlayPath);
+
+        return res.json({
+            success: true,
+            message: 'Overlay deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error deleting overlay:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error deleting overlay'
+        });
+    }
+});
+
+
+
 // Create HTTP server and attach WebSocket server
 const server = http.createServer(app);
 setupWebSocketServer(server);
 
 // Start the server
 server.listen(PORT, () => {
-    console.log(`=== FOTOBOX SERVER STARTED ===`);
     console.log(`Server running on port ${PORT}`);
     console.log(`Photos directory: ${PHOTOS_DIR}`);
     console.log(`QR codes directory: ${QR_DIR}`);
     console.log(`Overlays directory: ${OVERLAYS_DIR}`);
-    console.log(`Instagram photos directory: ${INSTAGRAM_DIR}`);
-    console.log(`Wedding frame photos directory: ${WEDDING_DIR}`);
+    console.log(`Print versions directory: ${PRINT_PHOTOS_DIR}`);
+    console.log(`Original photos directory: ${ORIGINALS_DIR}`);
 });
 
 // Cleanup on server shutdown
 process.on('SIGINT', () => {
-    console.log('Server shutting down...');
     if (previewInterval) {
         clearInterval(previewInterval);
     }
-
-    // Close any open WebSocket connections
-    if (wsServer) {
-        wsServer.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.close(1000, 'Server shutting down');
-            }
-        });
-    }
-
-    console.log('Cleanup complete');
-    process.exit(0);
+    process.exit();
 });
-
-module.exports = app;

@@ -19,7 +19,7 @@ const PhotoView = () => {
     const [shareSuccess, setShareSuccess] = useState(false);
     const [downloadSuccess, setDownloadSuccess] = useState(false);
     const [showVersionOptions, setShowVersionOptions] = useState(false);
-    const [selectedVersion, setSelectedVersion] = useState('standard'); // 'standard', 'instagram', 'wedding'
+    const [availableOverlays, setAvailableOverlays] = useState([]);
 
     // Detect mobile and iOS devices and screen orientation
     useEffect(() => {
@@ -44,6 +44,23 @@ const PhotoView = () => {
         };
     }, []);
 
+    // Fetch available overlays
+    useEffect(() => {
+        const fetchOverlays = async () => {
+            try {
+                const response = await fetch(`${API_ENDPOINT}/admin/overlays`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setAvailableOverlays(data);
+                }
+            } catch (error) {
+                console.error('Error fetching overlays:', error);
+            }
+        };
+
+        fetchOverlays();
+    }, []);
+
     // Fetch the specific photo data
     useEffect(() => {
         const fetchPhoto = async () => {
@@ -64,26 +81,20 @@ const PhotoView = () => {
 
                 const data = await response.json();
 
+                // Determine if this is an original high-res version
+                const isOriginal = photoId.startsWith('original_') || data.isOriginal;
+
                 // Add full URLs
                 const photoWithUrls = {
                     ...data,
                     fullUrl: `${API_BASE_URL}${data.url}`,
                     fullThumbnailUrl: `${API_BASE_URL}${data.thumbnailUrl || data.url}`,
-                    fullInstagramUrl: data.instagramUrl ? `${API_BASE_URL}${data.instagramUrl}` : null,
-                    fullWeddingUrl: data.weddingUrl ? `${API_BASE_URL}${data.weddingUrl}` : data.fullUrl,
-                    // Default version is the main one (with standard frame)
-                    currentVersion: 'standard'
+                    fullOriginalUrl: data.originalUrl ? `${API_BASE_URL}${data.originalUrl}` : null,
+                    fullPrintUrl: data.printUrl ? `${API_BASE_URL}${data.printUrl}` : null,
+                    isOriginal: isOriginal,
                 };
 
                 setPhoto(photoWithUrls);
-                // Set selected version based on URL
-                if (photoId.startsWith('instagram_')) {
-                    setSelectedVersion('instagram');
-                } else if (photoId.startsWith('wedding_')) {
-                    setSelectedVersion('wedding');
-                } else {
-                    setSelectedVersion('standard');
-                }
             } catch (error) {
                 console.error('Error fetching photo:', error);
                 setError(error.message);
@@ -125,8 +136,8 @@ const PhotoView = () => {
                 console.error('Error sharing:', error);
                 // On error, try to fetch and share the actual file
                 try {
-                    // Get the appropriate URL for sharing based on selected version
-                    const imageUrl = getVersionUrl();
+                    // Always share the framed version
+                    const imageUrl = photo.fullUrl;
 
                     const response = await fetch(imageUrl);
                     const blob = await response.blob();
@@ -140,7 +151,7 @@ const PhotoView = () => {
                 } catch (innerError) {
                     console.error('Error sharing file:', innerError);
                     // Fallback to opening in new tab
-                    window.open(getVersionUrl(), '_blank');
+                    window.open(photo.fullUrl, '_blank');
                 }
             }
         } else {
@@ -149,32 +160,15 @@ const PhotoView = () => {
         }
     };
 
-    // Get URL for the current selected version
-    const getVersionUrl = () => {
-        if (!photo) return '';
-
-        switch (selectedVersion) {
-            case 'instagram':
-                // Use Instagram version if available, otherwise use standard
-                return photo.fullInstagramUrl || photo.fullUrl;
-            case 'wedding':
-                // Wedding frame version
-                return photo.fullWeddingUrl || photo.fullUrl;
-            default:
-                // Default to standard framed version
-                return photo.fullUrl;
-        }
-    };
-
-    // Handle download with success indicator
+    // Handle download with success indicator - download selected version
     const handleDownload = () => {
-        // Get the URL for the current selected version
-        const downloadUrl = getVersionUrl();
+        // Always download the framed version - never the raw original
+        const downloadUrl = photo.fullUrl;
 
         // Create a temporary link element
         const link = document.createElement('a');
         link.href = downloadUrl;
-        link.download = `${selectedVersion}_${photo.filename || "wedding-photo.jpg"}`;
+        link.download = photo.filename || "wedding-photo.jpg";
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -185,26 +179,74 @@ const PhotoView = () => {
 
     // Handle switching between photo versions
     const handleSwitchVersion = (version) => {
-        setSelectedVersion(version);
+        const baseId = photo.filename.replace(/^(overlay_|instagram_|print_)/, '');
+        let newPhotoId;
+
+        switch(version) {
+            case 'instagram':
+                newPhotoId = `instagram_${baseId}`;
+                break;
+            case 'print':
+                newPhotoId = `print_${baseId}`;
+                break;
+            case 'overlay':
+                // This could be dynamic based on selected overlay
+                newPhotoId = `overlay_${baseId}`;
+                break;
+            default:
+                newPhotoId = baseId;
+                break;
+        }
+
+        // Close the version options menu
         setShowVersionOptions(false);
+
+        // Only navigate if we're switching to a different version
+        if (newPhotoId !== photoId) {
+            navigate(`/photo/${newPhotoId}`);
+        }
+    };
+
+    // Apply a specific overlay to the photo
+    const handleApplyOverlay = async (overlayName) => {
+        if (!photo) return;
+
+        try {
+            setLoading(true);
+            const response = await fetch(`${API_ENDPOINT}/photos/${photo.filename}/overlay`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    overlayName: overlayName
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to apply overlay (${response.status})`);
+            }
+
+            const result = await response.json();
+
+            if (result.success) {
+                // Refresh the photo with the new overlay
+                navigate(`/photo/${photo.filename}?t=${Date.now()}`);
+            } else {
+                setError(result.error || 'Failed to apply overlay');
+            }
+        } catch (error) {
+            console.error('Error applying overlay:', error);
+            setError(error.message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     // Format date for display
     const formatDate = (timestamp) => {
         if (!timestamp) return 'Unknown date';
         return new Date(timestamp).toLocaleString();
-    };
-
-    // Generate a version name for display
-    const getVersionLabel = (versionKey) => {
-        switch (versionKey) {
-            case 'instagram':
-                return 'Instagram';
-            case 'wedding':
-                return 'Wedding Frame';
-            default:
-                return 'Standard';
-        }
     };
 
     if (loading) {
@@ -249,6 +291,20 @@ const PhotoView = () => {
         );
     }
 
+    // Now all displayed photos always have frames
+    const displayUrl = photo.fullUrl;
+
+    // Determine the label for the current version
+    const getCurrentVersionLabel = () => {
+        if (photo.filename.startsWith('instagram_')) return "Instagram Format";
+        if (photo.filename.startsWith('print_')) return "Print Version (A5)";
+        if (photo.filename.startsWith('overlay_')) {
+            const overlayName = photo.filename.split('_')[1];
+            return `${overlayName.charAt(0).toUpperCase() + overlayName.slice(1)} Frame`;
+        }
+        return "Standard Frame";
+    };
+
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-christian-accent/10 to-hindu-secondary/10 p-4">
             <motion.div
@@ -278,7 +334,7 @@ const PhotoView = () => {
 
                 {/* Photo display */}
                 <div className="p-6">
-                    {/* Version selector tag */}
+                    {/* Version selector tag - now with more options */}
                     <div className="mb-2 flex justify-end">
                         <div className="relative">
                             <button
@@ -286,11 +342,11 @@ const PhotoView = () => {
                                 className="flex items-center text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full"
                             >
                                 <Icon path={mdiFile} size={0.8} className="mr-1" />
-                                <span>{getVersionLabel(selectedVersion)}</span>
+                                <span>{getCurrentVersionLabel()}</span>
                                 <span className="ml-1">▼</span>
                             </button>
 
-                            {/* Version options dropdown - SIMPLIFIED */}
+                            {/* Enhanced version options dropdown */}
                             <AnimatePresence>
                                 {showVersionOptions && (
                                     <motion.div
@@ -300,41 +356,62 @@ const PhotoView = () => {
                                         className="absolute top-full right-0 mt-1 bg-white rounded-lg shadow-lg overflow-hidden z-10 w-56"
                                     >
                                         <div className="p-1">
-                                            {/* Standard Version - Main photo with frame */}
+                                            {/* Standard Framed Version */}
                                             <button
                                                 onClick={() => handleSwitchVersion('standard')}
                                                 className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50"
                                             >
-                                                <span className="flex-1">Standard</span>
-                                                {selectedVersion === 'standard' && (
+                                                <span className="flex-1">Standard Frame</span>
+                                                {!photo.filename.startsWith('instagram_') &&
+                                                    !photo.filename.startsWith('print_') &&
+                                                    !photo.filename.startsWith('overlay_') && (
+                                                        <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
+                                                    )}
+                                            </button>
+
+                                            {/* Instagram Optimized Version */}
+                                            <button
+                                                onClick={() => handleSwitchVersion('instagram')}
+                                                className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50 border-t"
+                                            >
+                                                <span className="flex-1">Instagram Format</span>
+                                                {photo.filename.startsWith('instagram_') && (
                                                     <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
                                                 )}
                                             </button>
 
-                                            {/* Instagram Version */}
-                                            {photo.fullInstagramUrl && (
-                                                <button
-                                                    onClick={() => handleSwitchVersion('instagram')}
-                                                    className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50 border-t"
-                                                >
-                                                    <span className="flex-1">Instagram</span>
-                                                    {selectedVersion === 'instagram' && (
-                                                        <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
-                                                    )}
-                                                </button>
-                                            )}
+                                            {/* Print Version */}
+                                            <button
+                                                onClick={() => handleSwitchVersion('print')}
+                                                className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50 border-t"
+                                            >
+                                                <span className="flex-1">Print Version (A5)</span>
+                                                {photo.filename.startsWith('print_') && (
+                                                    <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
+                                                )}
+                                            </button>
 
-                                            {/* Wedding Frame Version */}
-                                            {photo.fullWeddingUrl && (
-                                                <button
-                                                    onClick={() => handleSwitchVersion('wedding')}
-                                                    className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50 border-t"
-                                                >
-                                                    <span className="flex-1">Wedding Frame</span>
-                                                    {selectedVersion === 'wedding' && (
-                                                        <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded">Current</span>
-                                                    )}
-                                                </button>
+                                            {/* Custom overlay options - dynamically generated from available overlays */}
+                                            {availableOverlays.length > 0 && (
+                                                <div className="border-t pt-1 mt-1">
+                                                    <div className="px-4 py-1 text-xs text-gray-500 font-medium">
+                                                        Special Frames
+                                                    </div>
+                                                    {availableOverlays
+                                                        .filter(overlay => !overlay.name.includes('wedding-frame') &&
+                                                            !overlay.name.includes('instagram'))
+                                                        .map(overlay => (
+                                                            <button
+                                                                key={overlay.name}
+                                                                onClick={() => handleApplyOverlay(overlay.name)}
+                                                                className="flex items-center w-full px-4 py-2 text-left hover:bg-gray-50"
+                                                            >
+                                                            <span className="flex-1">
+                                                                {overlay.name.split('.')[0].replace(/-/g, ' ').replace(/^\w/, c => c.toUpperCase())}
+                                                            </span>
+                                                            </button>
+                                                        ))}
+                                                </div>
                                             )}
                                         </div>
                                     </motion.div>
@@ -345,17 +422,37 @@ const PhotoView = () => {
 
                     {/* Photo in elegant frame */}
                     <div className="mb-6 relative">
-                        <div className="rounded-lg overflow-hidden shadow-card">
-                            <img
-                                src={getVersionUrl()}
-                                alt="Wedding photo"
-                                className="w-full h-auto"
-                                onError={(e) => {
-                                    console.error('Error loading image:', getVersionUrl());
-                                    e.target.src = '/placeholder-image.jpg'; // Fallback image
-                                    e.target.alt = 'Image could not be loaded';
-                                }}
-                            />
+                        {/* Always display with frame */}
+                        <div className="relative">
+                            {/* Photo Frame with decorative border */}
+                            <div className={`${photo.filename.startsWith('print_') ? 'aspect-[1.414/1]' : ''} w-full overflow-hidden rounded-lg shadow-lg relative mb-2`}>
+                                {/* Double border effect */}
+                                <div className="absolute inset-0 border-8 border-white z-10 rounded-md pointer-events-none"></div>
+                                <div className="absolute inset-2 border border-gray-200 z-10 rounded-sm pointer-events-none"></div>
+
+                                {/* Inner mat/background with gradient */}
+                                <div className="absolute inset-0 bg-white"></div>
+
+                                {/* Photo itself */}
+                                <div className="absolute inset-[16px] flex items-center justify-center overflow-hidden">
+                                    <img
+                                        src={displayUrl}
+                                        alt="Wedding photo"
+                                        className="max-w-full max-h-full object-contain"
+                                        onError={(e) => {
+                                            console.error('Error loading image:', displayUrl);
+                                            e.target.src = '/placeholder-image.jpg'; // Fallback image
+                                            e.target.alt = 'Image could not be loaded';
+                                        }}
+                                    />
+                                </div>
+
+                                {/* Subtle "corners" overlay to indicate frame */}
+                                <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-white/60 rounded-tl-sm pointer-events-none"></div>
+                                <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-white/60 rounded-tr-sm pointer-events-none"></div>
+                                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-white/60 rounded-bl-sm pointer-events-none"></div>
+                                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white/60 rounded-br-sm pointer-events-none"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -363,6 +460,11 @@ const PhotoView = () => {
                     <div className="mb-6 text-center">
                         <p className="text-gray-600 font-display">
                             Taken on {formatDate(photo.timestamp)}
+                        </p>
+
+                        {/* Info about choosing formats */}
+                        <p className="text-sm text-gray-500 mt-1">
+                            {showVersionOptions ? 'Choose format above' : 'Use the format selector for Instagram, print and special frames'}
                         </p>
                     </div>
 
