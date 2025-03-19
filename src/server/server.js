@@ -656,47 +656,69 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
             return false;
         }
 
-        // Instagram uses 9:16 aspect ratio (vertical rectangle)
+        // Instagram uses 9:16 aspect ratio
         const targetWidth = 1080;  // Instagram recommended width
-        const targetHeight = 1920; // 9:16 ratio for Instagram stories/posts
+        const targetHeight = 1920; // 9:16 ratio for stories
 
-        // Resize the source image to fit within the transparent area of the Instagram overlay
-        // We'll make it smaller than the full dimensions to leave room for the frame
-        const resizedImage = await sharp(sourceImagePath)
-            .resize({
-                width: Math.floor(targetWidth * 0.8),  // 80% of width to leave space for frame
-                height: Math.floor(targetHeight * 0.6), // 60% of height to leave space for frame
-                fit: 'inside',                         // Maintain aspect ratio
-                withoutEnlargement: true               // Don't enlarge small images
-            })
-            .toBuffer();
-
-        // Create a blank canvas with the target dimensions
+        // First, create a white background canvas with Instagram dimensions
         const canvas = await sharp({
             create: {
                 width: targetWidth,
                 height: targetHeight,
                 channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 0 } // Transparent
+                background: { r: 255, g: 255, b: 255, alpha: 1 } // White background
             }
-        }).png().toBuffer();
+        })
+            .jpeg()
+            .toBuffer();
 
-        // Position the photo in the center
-        const compositeImage = await sharp(canvas)
+        // Get metadata of source image to determine resizing approach
+        const imageMetadata = await sharp(sourceImagePath).metadata();
+
+        // Determine if image is portrait or landscape to adapt filling strategy
+        const isPortrait = imageMetadata.height > imageMetadata.width;
+
+        // Resize source image to fit Instagram dimensions while preserving aspect ratio
+        // For portrait (vertical) images, fit by height
+        // For landscape (horizontal) images, fit by width
+        const resizedImage = await sharp(sourceImagePath)
+            .resize({
+                width: isPortrait ? null : targetWidth,
+                height: isPortrait ? targetHeight : null,
+                fit: 'contain',
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
+            })
+            .toBuffer();
+
+        // Composite resized image centered on the white canvas
+        const withPhotoComposite = await sharp(canvas)
             .composite([
                 {
                     input: resizedImage,
-                    gravity: 'center'  // Place the photo in the center
+                    gravity: 'center'
                 }
             ])
             .toBuffer();
 
-        // Apply the Instagram overlay on top
-        await sharp(compositeImage)
+        // Now apply the Instagram overlay on top
+        // The overlay should cover the entire image
+        // Resize overlay to exactly match target dimensions
+        const resizedOverlay = await sharp(overlayImagePath)
+            .resize({
+                width: targetWidth,
+                height: targetHeight,
+                fit: 'fill'  // Fill entire space
+            })
+            .toBuffer();
+
+        // Final composite with the overlay on top
+        await sharp(withPhotoComposite)
             .composite([
                 {
-                    input: overlayImagePath,
-                    gravity: 'center'
+                    input: resizedOverlay,
+                    gravity: 'center',
+                    // Use 'overlay' blend mode to preserve transparent areas in overlay
+                    blend: 'over'
                 }
             ])
             .jpeg({ quality: 95 })
@@ -1202,14 +1224,16 @@ function regenerateMosaicInBackground() {
 // Fixed QR code generation function
 async function generateQRAndRespond(req, res, filename, timestamp, processedPhotos = null) {
     try {
-        // Extract the base filename (without any prefixes)
-        const baseFilename = filename.replace(/^(instagram_|frame_|print_|original_)/, '');
+        // Get the base filename WITHOUT removing file extension (keep the .jpg)
+        const baseFilename = filename;
 
         // Get the client domain
         const clientDomain = req.headers.host || 'fotobox.slyrix.com';
 
-        // Create the correct photo URL
+        // Create the correct photo URL - exactly matching the format shown in admin dashboard
         const photoViewUrl = `https://${clientDomain}/photo/${baseFilename}`;
+
+        console.log(`Generating QR code for URL: ${photoViewUrl}`);
 
         const qrFilename = `qr_${timestamp}.png`;
         const qrFilepath = path.join(QR_DIR, qrFilename);
