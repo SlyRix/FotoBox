@@ -642,6 +642,7 @@ async function generateThumbnail(sourceFilePath, filename) {
 }
 
 // Final Instagram photo processing with correct frame placement
+// Complete fix for Instagram frame processing
 async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath) {
     try {
         // Ensure source image exists
@@ -656,87 +657,94 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
             return false;
         }
 
-        // Read the overlay to detect the transparent area
-        const overlayBuffer = await fs.promises.readFile(overlayImagePath);
-        const overlayMetadata = await sharp(overlayBuffer).metadata();
-
-        // Fixed Instagram dimensions (9:16 ratio)
+        // Fixed Instagram story dimensions (9:16 ratio)
         const targetWidth = 1080;
         const targetHeight = 1920;
 
         // Read the source image
         const sourceBuffer = await fs.promises.readFile(sourceImagePath);
-        const sourceMetadata = await sharp(sourceBuffer).metadata();
 
-        // THIS IS THE KEY DIFFERENCE:
-        // We're not resizing the overlay frame at all - we use it as is
-        // We only resize the user's photo to fit within the transparent area
+        // Read the overlay frame
+        const overlayBuffer = await fs.promises.readFile(overlayImagePath);
 
-        // Define the position and size of the transparent window in the frame
-        // These should match the transparent area of your Instagram frame template
-        const windowWidth = targetWidth * 0.85;    // 85% of the frame width
-        const windowHeight = targetHeight * 0.6;   // 60% of the frame height
-        const windowX = (targetWidth - windowWidth) / 2;
-        const windowY = targetHeight * 0.2;    // Position at 20% from the top
-
-        // Resize the source image to fit within the transparent window
-        // while maintaining aspect ratio
-        const resizedImage = await sharp(sourceBuffer)
-            .resize({
-                width: Math.floor(windowWidth),
-                height: Math.floor(windowHeight),
-                fit: 'inside', // Maintain aspect ratio
-                position: 'center'
-            })
-            .toBuffer();
-
-        const resizedMetadata = await sharp(resizedImage).metadata();
-
-        // Calculate position to center the image in the window
-        const posX = Math.floor(windowX + (windowWidth - resizedMetadata.width) / 2);
-        const posY = Math.floor(windowY + (windowHeight - resizedMetadata.height) / 2);
-
-        // Create a blank canvas with white background
+        // 1. Create a blank canvas with the full Instagram dimensions (9:16)
+        // Using cream-colored background to match the frame
         const canvas = await sharp({
             create: {
                 width: targetWidth,
                 height: targetHeight,
                 channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 1 }
+                background: { r: 255, g: 252, b: 235, alpha: 1 } // Cream background to match frame
             }
         })
-            .png()
+            .png() // Use PNG to preserve transparency for compositing
             .toBuffer();
 
-        // Composite the source image at the calculated position
+        // 2. Resize the source image to completely fill the middle section
+        // Based on the example, transparent area is roughly 60% of height starting at ~20% from top
+        const photoAreaHeight = Math.floor(targetHeight * 0.6);
+        const topPosition = Math.floor(targetHeight * 0.2);
+
+        const resizedImage = await sharp(sourceBuffer)
+            .resize({
+                width: targetWidth,
+                height: photoAreaHeight,
+                fit: 'cover',  // Fill the entire area
+                position: 'center'
+            })
+            .toBuffer();
+
+        // 3. Composite the photo onto the canvas
         const withPhotoComposite = await sharp(canvas)
             .composite([
                 {
                     input: resizedImage,
-                    top: posY,
-                    left: posX
+                    top: topPosition,
+                    left: 0
                 }
             ])
             .toBuffer();
 
-        // Finally, overlay the frame template on top
+        // 4. CRUCIAL CHANGE: DO NOT RESIZE THE OVERLAY FRAME
+        // Just use it directly at its original size, which should already be 1080x1920
+        // Resize it only if needed to match target dimensions
+
+        // Check overlay dimensions
+        const overlayMetadata = await sharp(overlayBuffer).metadata();
+        let finalOverlay = overlayBuffer;
+
+        // Only resize if necessary (not already at target dimensions)
+        if (overlayMetadata.width !== targetWidth || overlayMetadata.height !== targetHeight) {
+            console.log(`Resizing overlay from ${overlayMetadata.width}x${overlayMetadata.height} to ${targetWidth}x${targetHeight}`);
+            finalOverlay = await sharp(overlayBuffer)
+                .resize({
+                    width: targetWidth,
+                    height: targetHeight,
+                    fit: 'fill'
+                })
+                .toBuffer();
+        }
+
+        // 5. Apply the overlay frame
         await sharp(withPhotoComposite)
             .composite([
                 {
-                    input: overlayBuffer,
-                    gravity: 'center'
+                    input: finalOverlay,
+                    top: 0,
+                    left: 0
                 }
             ])
             .jpeg({ quality: 95 })
             .toFile(outputPath);
 
-        console.log(`Instagram photo processed with frame template: ${outputPath}`);
+        console.log(`Instagram photo processed successfully: ${outputPath}`);
         return true;
     } catch (error) {
         console.error('Error processing Instagram photo:', error);
         return false;
     }
 }
+
 // Ensure Instagram frame exists or create a default one
 async function ensureInstagramFrameExists() {
     const instagramFramePath = path.join(OVERLAYS_DIR, 'instagram-frame.png');
