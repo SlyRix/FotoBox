@@ -647,97 +647,51 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
     try {
         // Ensure source image exists
         if (!fs.existsSync(sourceImagePath)) {
-            console.error(`Source image for Instagram format not found: ${sourceImagePath}`);
+            console.error(`Source image not found: ${sourceImagePath}`);
             return false;
         }
 
         // Ensure overlay exists
         if (!fs.existsSync(overlayImagePath)) {
-            console.error(`Instagram overlay not found: ${overlayImagePath}`);
+            console.error(`Frame overlay not found: ${overlayImagePath}`);
             return false;
         }
 
-        // Fixed Instagram story dimensions (9:16 ratio)
-        const targetWidth = 1080;
-        const targetHeight = 1920;
+        // 1. First, read the frame as-is without any resizing
+        const frameBuffer = await fs.promises.readFile(overlayImagePath);
+        const frameMetadata = await sharp(frameBuffer).metadata();
 
-        // Read the source image
+        // Get frame dimensions - we'll use these as our target dimensions
+        const frameWidth = frameMetadata.width;
+        const frameHeight = frameMetadata.height;
+
+        console.log(`Frame dimensions: ${frameWidth}x${frameHeight}`);
+
+        // 2. Read the source photo
         const sourceBuffer = await fs.promises.readFile(sourceImagePath);
 
-        // Read the overlay frame
-        const overlayBuffer = await fs.promises.readFile(overlayImagePath);
-
-        // 1. Create a blank canvas with the full Instagram dimensions (9:16)
-        // Using cream-colored background to match the frame
-        const canvas = await sharp({
-            create: {
-                width: targetWidth,
-                height: targetHeight,
-                channels: 4,
-                background: { r: 255, g: 252, b: 235, alpha: 1 } // Cream background to match frame
-            }
-        })
-            .png() // Use PNG to preserve transparency for compositing
-            .toBuffer();
-
-        // 2. Resize the source image to completely fill the middle section
-        // Based on the example, transparent area is roughly 60% of height starting at ~20% from top
-        const photoAreaHeight = Math.floor(targetHeight * 0.6);
-        const topPosition = Math.floor(targetHeight * 0.2);
-
-        const resizedImage = await sharp(sourceBuffer)
+        // 3. Resize the source photo to completely fill the middle transparent area
+        // We'll make it larger than needed to ensure it covers the transparent area
+        // The transparent area appears to be roughly 60-70% of the height
+        const sourceResized = await sharp(sourceBuffer)
             .resize({
-                width: targetWidth,
-                height: photoAreaHeight,
-                fit: 'cover',  // Fill the entire area
-                position: 'center'
+                width: frameWidth,      // Same width as frame
+                height: frameHeight,    // Same height as frame
+                fit: 'cover',           // Fill the entire area
+                position: 'center'      // Center the image
             })
             .toBuffer();
 
-        // 3. Composite the photo onto the canvas
-        const withPhotoComposite = await sharp(canvas)
-            .composite([
-                {
-                    input: resizedImage,
-                    top: topPosition,
-                    left: 0
-                }
-            ])
-            .toBuffer();
-
-        // 4. CRUCIAL CHANGE: DO NOT RESIZE THE OVERLAY FRAME
-        // Just use it directly at its original size, which should already be 1080x1920
-        // Resize it only if needed to match target dimensions
-
-        // Check overlay dimensions
-        const overlayMetadata = await sharp(overlayBuffer).metadata();
-        let finalOverlay = overlayBuffer;
-
-        // Only resize if necessary (not already at target dimensions)
-        if (overlayMetadata.width !== targetWidth || overlayMetadata.height !== targetHeight) {
-            console.log(`Resizing overlay from ${overlayMetadata.width}x${overlayMetadata.height} to ${targetWidth}x${targetHeight}`);
-            finalOverlay = await sharp(overlayBuffer)
-                .resize({
-                    width: targetWidth,
-                    height: targetHeight,
-                    fit: 'fill'
-                })
-                .toBuffer();
-        }
-
-        // 5. Apply the overlay frame
-        await sharp(withPhotoComposite)
-            .composite([
-                {
-                    input: finalOverlay,
-                    top: 0,
-                    left: 0
-                }
-            ])
+        // 4. Create our composition - photo first, then frame overlay on top
+        await sharp(sourceResized)      // Start with the resized photo
+            .composite([{
+                input: frameBuffer,     // Add the frame on top
+                blend: 'over'           // Keep transparency in the frame
+            }])
             .jpeg({ quality: 95 })
             .toFile(outputPath);
 
-        console.log(`Instagram photo processed successfully: ${outputPath}`);
+        console.log(`Instagram photo processed with frame-first approach: ${outputPath}`);
         return true;
     } catch (error) {
         console.error('Error processing Instagram photo:', error);
