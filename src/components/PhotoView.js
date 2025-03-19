@@ -124,58 +124,73 @@ const PhotoView = () => {
 
     // Handle share functionality for mobile devices
     const handleShareImage = async () => {
-        if (navigator.share) {
-            try {
-                // Try to share the URL first as it's most compatible
+        if (!photo || !photo.filename) return;
+
+        try {
+            // The correct file URL from your backend
+            console.log(`Downloading for share${API_BASE_URL}${photo.url}`);
+            const imageUrl = `${API_BASE_URL}${photo.url}`;
+
+            // Fetch the image from the server
+            const response = await fetch(imageUrl);
+            if (!response.ok) throw new Error("Failed to fetch image from server.");
+
+            const blob = await response.blob();
+            const file = new File([blob], photo.filename, { type: blob.type });
+
+            // Check if the browser supports file sharing
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                await navigator.share({
+                    title: 'Wedding Photo',
+                    text: 'Check out this photo from Rushel & Sivani\'s wedding! 💕',
+                    files: [file],
+                });
+                setShareSuccess(true);
+            } else {
+                console.log("File sharing not supported, falling back to link sharing.");
+                // Fallback to link sharing
                 await navigator.share({
                     title: 'Wedding Photo',
                     text: 'Check out this photo from Rushel & Sivani\'s wedding!',
                     url: window.location.href
                 });
                 setShareSuccess(true);
-            } catch (error) {
-                console.error('Error sharing:', error);
-                // On error, try to fetch and share the actual file
-                try {
-                    // Share the framed version
-                    const imageUrl = photo.fullUrl;
-
-                    const response = await fetch(imageUrl);
-                    const blob = await response.blob();
-                    const file = new File([blob], photo.filename, { type: blob.type });
-
-                    await navigator.share({
-                        files: [file],
-                        title: 'Wedding Photo',
-                    });
-                    setShareSuccess(true);
-                } catch (innerError) {
-                    console.error('Error sharing file:', innerError);
-                    // Fallback to opening in new tab
-                    window.open(photo.fullUrl, '_blank');
-                }
             }
-        } else {
-            // Show share options if Web Share API is not available
-            setShowShareOptions(!showShareOptions);
+        } catch (error) {
+            console.error('Error sharing file:', error);
+            alert("Sharing failed. Try downloading the photo and sharing manually.");
         }
     };
 
     // Handle download with success indicator
-    const handleDownload = () => {
-        // Download the current version
-        const downloadUrl = photo.fullUrl;
+    const handleDownload = async () => {
+        if (!photo || !photo.filename) return;
 
-        // Create a temporary link element
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = photo.filename || "wedding-photo.jpg";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        try {
+            // Fetch the image file from the server
+            const imageUrl = `${API_BASE_URL}${photo.url}`;
+            const response = await fetch(imageUrl);
+            if (!response.ok) throw new Error("Failed to fetch image for download.");
 
-        // Show success indicator
-        setDownloadSuccess(true);
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+
+            // Create a temporary download link
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = photo.filename || "wedding-photo.jpg";
+            document.body.appendChild(link);
+            link.click();
+
+            // Clean up
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+
+            setDownloadSuccess(true);
+        } catch (error) {
+            console.error('Download failed:', error);
+            alert("Download failed. Try again or save manually.");
+        }
     };
 
     // Apply Instagram format
