@@ -707,7 +707,7 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
             .resize({
                 width: targetWidth,
                 height: targetHeight,
-                fit: 'fill'  // Fill entire space
+                fit: 'cover'  // Fill entire space
             })
             .toBuffer();
 
