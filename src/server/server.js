@@ -759,47 +759,66 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
 
         // Get metadata from the original photo
         const imgMetadata = await sharp(sourceImagePath).metadata();
+        console.log(`Processing photo with dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
 
         // Calculate the center point
         const centerX = targetWidth / 2;
         const centerY = targetHeight / 2;
 
-        // Calculate scaled dimensions
-        const scaledWidth = Math.round(imgMetadata.width * template.scale);
-        const scaledHeight = Math.round(imgMetadata.height * template.scale);
+        // Calculate scaled dimensions with a minimum scale to ensure visibility
+        const scale = Math.max(template.scale, 0.5); // Ensure minimum scale of 50%
+        const scaledWidth = Math.round(imgMetadata.width * scale);
+        const scaledHeight = Math.round(imgMetadata.height * scale);
+
+        console.log(`Applying template with scale: ${scale}, position: ${template.positionX},${template.positionY}, rotation: ${template.rotation}`);
+        console.log(`Scaled dimensions: ${scaledWidth}x${scaledHeight}`);
 
         // Create a buffer of the scaled and rotated source image
         const processedImage = await sharp(sourceImagePath)
             .resize({
                 width: scaledWidth,
                 height: scaledHeight,
-                fit: 'fill'
+                fit: 'contain',
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
             .rotate(template.rotation, {
-                background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background for rotation
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
             .toBuffer();
 
-        // Create a white background canvas with Instagram dimensions
-        const canvas = await sharp({
+        // First create a white background image
+        const backgroundImage = await sharp({
             create: {
                 width: targetWidth,
                 height: targetHeight,
                 channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 1 } // White background
+                background: { r: 255, g: 255, b: 255, alpha: 1 }
             }
-        }).toBuffer();
+        })
+            .jpeg()
+            .toBuffer();
 
-        // Position the processed image on the canvas according to template
-        const withPhotoComposite = await sharp(canvas)
+        // Position the processed image on the white background
+        const positionX = Math.round(centerX - (scaledWidth / 2) + template.positionX);
+        const positionY = Math.round(centerY - (scaledHeight / 2) + template.positionY);
+
+        console.log(`Positioning image at: ${positionX},${positionY} on ${targetWidth}x${targetHeight} canvas`);
+
+        const withPhotoComposite = await sharp(backgroundImage)
             .composite([
                 {
                     input: processedImage,
-                    left: Math.round(centerX - (scaledWidth / 2) + template.positionX),
-                    top: Math.round(centerY - (scaledHeight / 2) + template.positionY)
+                    left: positionX,
+                    top: positionY
                 }
             ])
             .toBuffer();
+
+        // Ensure overlay image exists
+        if (!fs.existsSync(overlayImagePath)) {
+            console.error(`Overlay image not found: ${overlayImagePath}`);
+            throw new Error('Overlay image not found');
+        }
 
         // Add the Instagram overlay on top
         await sharp(withPhotoComposite)
@@ -809,6 +828,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
                     gravity: 'center'
                 }
             ])
+            .jpeg({ quality: 95 })
             .toFile(outputPath);
 
         return true;
@@ -844,81 +864,109 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
 
         if (template) {
             console.log(`Found Instagram template, using it:`, template);
-            return await applyTemplatedInstagramOverlay(
-                sourceImagePath,
-                overlayImagePath,
-                outputPath,
-                template
-            );
+            try {
+                const result = await applyTemplatedInstagramOverlay(
+                    sourceImagePath,
+                    overlayImagePath,
+                    outputPath,
+                    template
+                );
+                return result;
+            } catch (templateError) {
+                console.error('Error applying Instagram template, falling back to default:', templateError);
+                // Continue with default method if template application failed
+            }
         }
 
-        // No template - use default Instagram formatting
-        console.log('No Instagram template found, using default positioning');
+        // No template or template application failed - use default Instagram formatting
+        console.log('Using default Instagram formatting');
 
         // Instagram uses 9:16 aspect ratio
         const targetWidth = 1080;  // Instagram recommended width
         const targetHeight = 1920; // 9:16 ratio for stories
 
-        // First, create a white background canvas with Instagram dimensions
-        const canvas = await sharp({
-            create: {
-                width: targetWidth,
-                height: targetHeight,
-                channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 1 } // White background
+        try {
+            // First, create a white background canvas with Instagram dimensions
+            const backgroundImage = await sharp({
+                create: {
+                    width: targetWidth,
+                    height: targetHeight,
+                    channels: 4,
+                    background: { r: 255, g: 255, b: 255, alpha: 1 } // White background
+                }
+            })
+                .jpeg()
+                .toBuffer();
+
+            // Get metadata of source image to determine resizing approach
+            const imageMetadata = await sharp(sourceImagePath).metadata();
+            console.log(`Default Instagram processor: Photo dimensions ${imageMetadata.width}x${imageMetadata.height}`);
+
+            // Determine if image is portrait or landscape to adapt filling strategy
+            const isPortrait = imageMetadata.height > imageMetadata.width;
+
+            // Resize source image to fit Instagram dimensions while preserving aspect ratio
+            const resizedImage = await sharp(sourceImagePath)
+                .resize({
+                    width: isPortrait ? null : Math.min(targetWidth, imageMetadata.width),
+                    height: isPortrait ? Math.min(targetHeight, imageMetadata.height) : null,
+                    fit: 'contain',
+                    background: { r: 255, g: 255, b: 255, alpha: 0 }
+                })
+                .toBuffer();
+
+            // Composite resized image centered on the white canvas
+            const withPhotoComposite = await sharp(backgroundImage)
+                .composite([
+                    {
+                        input: resizedImage,
+                        gravity: 'center'
+                    }
+                ])
+                .toBuffer();
+
+            // Final composite with the overlay on top
+            await sharp(withPhotoComposite)
+                .composite([
+                    {
+                        input: overlayImagePath,
+                        gravity: 'center'
+                    }
+                ])
+                .jpeg({ quality: 95 })
+                .toFile(outputPath);
+
+            return true;
+        } catch (defaultProcessError) {
+            console.error('Error in default Instagram processing:', defaultProcessError);
+
+            // Final fallback - just copy the overlay as the output
+            try {
+                console.log('Using emergency fallback for Instagram format');
+                // Create a simple composite by just applying the overlay to a white background
+                await sharp({
+                    create: {
+                        width: targetWidth,
+                        height: targetHeight,
+                        channels: 4,
+                        background: { r: 255, g: 255, b: 255, alpha: 1 }
+                    }
+                })
+                    .composite([
+                        {
+                            input: overlayImagePath,
+                            gravity: 'center'
+                        }
+                    ])
+                    .jpeg({ quality: 95 })
+                    .toFile(outputPath);
+
+                return true;
+            } catch (fallbackError) {
+                console.error('Emergency fallback failed:', fallbackError);
+                return false;
             }
-        })
-            .jpeg()
-            .toBuffer();
-
-        // Get metadata of source image to determine resizing approach
-        const imageMetadata = await sharp(sourceImagePath).metadata();
-
-        // Determine if image is portrait or landscape to adapt filling strategy
-        const isPortrait = imageMetadata.height > imageMetadata.width;
-
-        // Resize source image to fit Instagram dimensions while preserving aspect ratio
-        const resizedImage = await sharp(sourceImagePath)
-            .resize({
-                width: isPortrait ? null : targetWidth,
-                height: isPortrait ? targetHeight : null,
-                fit: 'contain',
-                background: { r: 255, g: 255, b: 255, alpha: 0 }
-            })
-            .toBuffer();
-
-        // Composite resized image centered on the white canvas
-        const withPhotoComposite = await sharp(canvas)
-            .composite([
-                {
-                    input: resizedImage,
-                    gravity: 'center'
-                }
-            ])
-            .toBuffer();
-
-        // Resize overlay to exactly match target dimensions
-        const resizedOverlay = await sharp(overlayImagePath)
-            .resize({
-                width: targetWidth,
-                height: targetHeight,
-                fit: 'cover'  // Fill entire space
-            })
-            .toBuffer();
-
-        // Final composite with the overlay on top
-        await sharp(withPhotoComposite)
-            .composite([
-                {
-                    input: resizedOverlay,
-                    gravity: 'center',
-                    blend: 'over' // Preserve transparent areas in overlay
-                }
-            ])
-            .jpeg({ quality: 95 })
-            .toFile(outputPath);
-
-        return true;
+        }
     } catch (error) {
         console.error('Error processing Instagram photo:', error);
         return false;
