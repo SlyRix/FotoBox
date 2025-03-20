@@ -761,29 +761,17 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
         const imgMetadata = await sharp(sourceImagePath).metadata();
         console.log(`Processing photo with dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
 
-        // Use a reasonable default scale if template scale is too small or too large
-        let scale = parseFloat(template.scale) || 1.0;
-        if (isNaN(scale) || scale < 0.1) scale = 0.1;
-        if (scale > 2.0) scale = 2.0;
+        // Calculate the center point
+        const centerX = targetWidth / 2;
+        const centerY = targetHeight / 2;
 
-        // Calculate scaled dimensions
+        // Calculate scaled dimensions with a minimum scale to ensure visibility
+        const scale = Math.max(template.scale, 0.5); // Ensure minimum scale of 50%
         const scaledWidth = Math.round(imgMetadata.width * scale);
         const scaledHeight = Math.round(imgMetadata.height * scale);
 
         console.log(`Applying template with scale: ${scale}, position: ${template.positionX},${template.positionY}, rotation: ${template.rotation}`);
         console.log(`Scaled dimensions: ${scaledWidth}x${scaledHeight}`);
-
-        // First create a white background image
-        await sharp({
-            create: {
-                width: targetWidth,
-                height: targetHeight,
-                channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 1 }
-            }
-        })
-            .jpeg()
-            .toFile(outputPath);
 
         // Create a buffer of the scaled and rotated source image
         const processedImage = await sharp(sourceImagePath)
@@ -793,105 +781,38 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
                 fit: 'contain',
                 background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
-            .rotate(template.rotation || 0, {
+            .rotate(template.rotation, {
                 background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
             .toBuffer();
 
-        // Calculate position with boundary enforcement
-        const posX = parseInt(template.positionX) || 0;
-        const posY = parseInt(template.positionY) || 0;
-
-        // Calculate center position
-        const centerX = Math.floor(targetWidth / 2);
-        const centerY = Math.floor(targetHeight / 2);
-
-        // Calculate top-left position with constraints to keep image within boundaries
-        let left = centerX - Math.floor(scaledWidth / 2) + posX;
-        let top = centerY - Math.floor(scaledHeight / 2) + posY;
-
-        // Enforce boundaries - ensure the image stays within the canvas
-        if (left < 0) left = 0;
-        if (top < 0) top = 0;
-        if (left + scaledWidth > targetWidth) left = targetWidth - scaledWidth;
-        if (top + scaledHeight > targetHeight) top = targetHeight - scaledHeight;
-
-        // If the image is larger than the canvas, resize it to fit
-        if (scaledWidth > targetWidth || scaledHeight > targetHeight) {
-            console.log(`Image too large (${scaledWidth}x${scaledHeight}), resizing to fit canvas`);
-            const aspectRatio = scaledWidth / scaledHeight;
-
-            if (scaledWidth > targetWidth) {
-                const newWidth = targetWidth;
-                const newHeight = Math.floor(newWidth / aspectRatio);
-                left = 0;
-                top = Math.max(0, Math.floor((targetHeight - newHeight) / 2));
-
-                // Recreate the processed image with the new dimensions
-                const resizedImage = await sharp(processedImage)
-                    .resize({
-                        width: newWidth,
-                        height: newHeight,
-                        fit: 'contain',
-                        background: { r: 255, g: 255, b: 255, alpha: 0 }
-                    })
-                    .toBuffer();
-
-                await sharp(outputPath)
-                    .composite([
-                        {
-                            input: resizedImage,
-                            left,
-                            top
-                        }
-                    ])
-                    .toFile(`${outputPath}.tmp`);
-
-                fs.renameSync(`${outputPath}.tmp`, outputPath);
-            } else if (scaledHeight > targetHeight) {
-                const newHeight = targetHeight;
-                const newWidth = Math.floor(newHeight * aspectRatio);
-                top = 0;
-                left = Math.max(0, Math.floor((targetWidth - newWidth) / 2));
-
-                // Recreate the processed image with the new dimensions
-                const resizedImage = await sharp(processedImage)
-                    .resize({
-                        width: newWidth,
-                        height: newHeight,
-                        fit: 'contain',
-                        background: { r: 255, g: 255, b: 255, alpha: 0 }
-                    })
-                    .toBuffer();
-
-                await sharp(outputPath)
-                    .composite([
-                        {
-                            input: resizedImage,
-                            left,
-                            top
-                        }
-                    ])
-                    .toFile(`${outputPath}.tmp`);
-
-                fs.renameSync(`${outputPath}.tmp`, outputPath);
+        // First create a white background image
+        const backgroundImage = await sharp({
+            create: {
+                width: targetWidth,
+                height: targetHeight,
+                channels: 4,
+                background: { r: 255, g: 255, b: 255, alpha: 1 }
             }
-        } else {
-            // Normal case - image fits within canvas
-            console.log(`Positioning image at: ${left},${top} on ${targetWidth}x${targetHeight} canvas`);
+        })
+            .jpeg()
+            .toBuffer();
 
-            await sharp(outputPath)
-                .composite([
-                    {
-                        input: processedImage,
-                        left,
-                        top
-                    }
-                ])
-                .toFile(`${outputPath}.tmp`);
+        // Position the processed image on the white background
+        const positionX = Math.round(centerX - (scaledWidth / 2) + template.positionX);
+        const positionY = Math.round(centerY - (scaledHeight / 2) + template.positionY);
 
-            fs.renameSync(`${outputPath}.tmp`, outputPath);
-        }
+        console.log(`Positioning image at: ${positionX},${positionY} on ${targetWidth}x${targetHeight} canvas`);
+
+        const withPhotoComposite = await sharp(backgroundImage)
+            .composite([
+                {
+                    input: processedImage,
+                    left: positionX,
+                    top: positionY
+                }
+            ])
+            .toBuffer();
 
         // Ensure overlay image exists
         if (!fs.existsSync(overlayImagePath)) {
@@ -900,17 +821,15 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
         }
 
         // Add the Instagram overlay on top
-        await sharp(outputPath)
+        await sharp(withPhotoComposite)
             .composite([
                 {
                     input: overlayImagePath,
                     gravity: 'center'
                 }
             ])
-            .toFile(`${outputPath}.final`);
-
-        // Replace the original file with the final one
-        fs.renameSync(`${outputPath}.final`, outputPath);
+            .jpeg({ quality: 95 })
+            .toFile(outputPath);
 
         return true;
     } catch (error) {
