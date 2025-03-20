@@ -14,6 +14,7 @@ const multer = require('multer');
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 let photoCounter = 0;
 const MOSAIC_PHOTO_INTERVAL = 3; // Regenerate every 3rd photo
+const photoAdjustments = {};
 
 // Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
@@ -1835,7 +1836,300 @@ app.get('/api/mosaic/info', async (req, res) => {
         });
     }
 });
+// Add this code to your src/server/server.js file
 
+// Define an object to store photo adjustments
+const photoAdjustments = {};
+
+// Handle photo adjustments
+app.post('/api/admin/photo-adjustments', async (req, res) => {
+    const { photoId, overlayName, adjustments } = req.body;
+
+    if (!photoId || !overlayName || !adjustments) {
+        return res.status(400).json({
+            success: false,
+            error: 'Photo ID, overlay name, and adjustments are required'
+        });
+    }
+
+    try {
+        // Save the adjustments to our in-memory store
+        // In a production app, you might want to save this to a database
+        photoAdjustments[`${photoId}_${overlayName}`] = {
+            scale: adjustments.scale || 1,
+            rotation: adjustments.rotation || 0,
+            positionX: adjustments.positionX || 0,
+            positionY: adjustments.positionY || 0,
+            timestamp: Date.now()
+        };
+
+        // Determine correct paths
+        let baseFilename, sourcePhotoPath, targetPhotoPath;
+
+        // Extract base filename (remove any prefixes)
+        if (photoId.startsWith('instagram_') || photoId.startsWith('frame_')) {
+            baseFilename = photoId.substring(photoId.indexOf('_') + 1);
+        } else {
+            baseFilename = photoId;
+        }
+
+        // Source is always the original photo (which has no frame)
+        const originalPath = path.join(ORIGINALS_DIR, `original_${baseFilename}`);
+        const standardPath = path.join(PHOTOS_DIR, baseFilename);
+
+        // Use original if available, otherwise use standard
+        if (fs.existsSync(originalPath)) {
+            sourcePhotoPath = originalPath;
+        } else if (fs.existsSync(standardPath)) {
+            sourcePhotoPath = standardPath;
+        } else {
+            return res.status(404).json({
+                success: false,
+                error: 'Source photo not found'
+            });
+        }
+
+        // Determine target filename based on overlay type
+        let targetFilename;
+        if (overlayName === 'instagram-frame.png') {
+            targetFilename = `instagram_${baseFilename}`;
+        } else if (overlayName !== 'wedding-frame.png') {
+            targetFilename = `frame_${baseFilename}`;
+        } else {
+            targetFilename = baseFilename; // Standard frame - just use the base filename
+        }
+
+        targetPhotoPath = path.join(PHOTOS_DIR, targetFilename);
+
+        // Check if overlay exists
+        const overlayPath = path.join(OVERLAYS_DIR, overlayName);
+        if (!fs.existsSync(overlayPath)) {
+            return res.status(404).json({
+                success: false,
+                error: 'Frame overlay not found'
+            });
+        }
+
+        // Apply the adjustments and create the composited image
+        await applyAdjustedOverlay(
+            sourcePhotoPath,
+            overlayPath,
+            targetPhotoPath,
+            {
+                scale: adjustments.scale || 1,
+                rotation: adjustments.rotation || 0,
+                positionX: adjustments.positionX || 0,
+                positionY: adjustments.positionY || 0
+            },
+            overlayName
+        );
+
+        // Regenerate thumbnail for the adjusted photo
+        const thumbnailUrl = await generateThumbnail(targetPhotoPath, targetFilename);
+
+        return res.json({
+            success: true,
+            message: 'Photo adjustments applied successfully',
+            photoId: targetFilename,
+            url: `/photos/${targetFilename}`,
+            thumbnailUrl: thumbnailUrl
+        });
+    } catch (error) {
+        console.error('Error applying photo adjustments:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error applying adjustments: ' + error.message
+        });
+    }
+});
+
+// Function to apply overlay with custom positioning adjustments
+async function applyAdjustedOverlay(sourceImagePath, overlayImagePath, outputPath, adjustments, overlayName) {
+    try {
+        // Ensure source image exists
+        if (!fs.existsSync(sourceImagePath)) {
+            throw new Error(`Source image not found: ${sourceImagePath}`);
+        }
+
+        // Ensure overlay exists
+        if (!fs.existsSync(overlayImagePath)) {
+            throw new Error(`Overlay not found: ${overlayImagePath}`);
+        }
+
+        // Special handling for Instagram format
+        if (overlayName === 'instagram-frame.png') {
+            return await applyAdjustedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, adjustments);
+        }
+
+        // Get metadata from source image and overlay
+        const imgMetadata = await sharp(sourceImagePath).metadata();
+        const overlayMetadata = await sharp(overlayImagePath).metadata();
+
+        // Determine if the overlay is standard (A5 landscape) or custom
+        const isStandardFormat = overlayName === 'wedding-frame.png';
+
+        // Standard format dimensions are fixed at A5 landscape (1.414:1)
+        let canvasWidth, canvasHeight;
+
+        if (isStandardFormat) {
+            // A5 landscape ratio
+            canvasWidth = 2480;  // ~A5 at 300dpi
+            canvasHeight = 1748; // A5-landscape (1.414:1)
+        } else {
+            // Custom frame - use the overlay's dimensions
+            canvasWidth = overlayMetadata.width;
+            canvasHeight = overlayMetadata.height;
+        }
+
+        // Calculate the center point for positioning
+        const centerX = canvasWidth / 2;
+        const centerY = canvasHeight / 2;
+
+        // Calculate scaled dimensions
+        const scaledWidth = Math.round(imgMetadata.width * adjustments.scale);
+        const scaledHeight = Math.round(imgMetadata.height * adjustments.scale);
+
+        // Create a buffer of the scaled and rotated source image
+        const processedImage = await sharp(sourceImagePath)
+            .resize({
+                width: scaledWidth,
+                height: scaledHeight,
+                fit: 'fill'
+            })
+            .rotate(adjustments.rotation, {
+                background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background for rotation
+            })
+            .toBuffer();
+
+        // Create a white background canvas
+        const canvas = await sharp({
+            create: {
+                width: canvasWidth,
+                height: canvasHeight,
+                channels: 4,
+                background: { r: 255, g: 255, b: 255, alpha: 1 } // White background
+            }
+        }).toBuffer();
+
+        // Position the processed image on the canvas
+        const withPhotoComposite = await sharp(canvas)
+            .composite([
+                {
+                    input: processedImage,
+                    left: Math.round(centerX - (scaledWidth / 2) + adjustments.positionX),
+                    top: Math.round(centerY - (scaledHeight / 2) + adjustments.positionY)
+                }
+            ])
+            .toBuffer();
+
+        // Add the overlay on top
+        await sharp(withPhotoComposite)
+            .composite([
+                {
+                    input: overlayImagePath,
+                    gravity: 'center'
+                }
+            ])
+            .toFile(outputPath);
+
+        return true;
+    } catch (error) {
+        console.error('Error applying adjusted overlay:', error);
+        throw error;
+    }
+}
+
+// Special function for Instagram format (9:16 ratio)
+async function applyAdjustedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, adjustments) {
+    try {
+        // Instagram uses 9:16 aspect ratio
+        const targetWidth = 1080;  // Instagram recommended width
+        const targetHeight = 1920; // 9:16 ratio for stories
+
+        // Get metadata from the original photo
+        const imgMetadata = await sharp(sourceImagePath).metadata();
+
+        // Calculate the center point
+        const centerX = targetWidth / 2;
+        const centerY = targetHeight / 2;
+
+        // Calculate scaled dimensions
+        const scaledWidth = Math.round(imgMetadata.width * adjustments.scale);
+        const scaledHeight = Math.round(imgMetadata.height * adjustments.scale);
+
+        // Create a buffer of the scaled and rotated source image
+        const processedImage = await sharp(sourceImagePath)
+            .resize({
+                width: scaledWidth,
+                height: scaledHeight,
+                fit: 'fill'
+            })
+            .rotate(adjustments.rotation, {
+                background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background for rotation
+            })
+            .toBuffer();
+
+        // Create a white background canvas with Instagram dimensions
+        const canvas = await sharp({
+            create: {
+                width: targetWidth,
+                height: targetHeight,
+                channels: 4,
+                background: { r: 255, g: 255, b: 255, alpha: 1 } // White background
+            }
+        }).toBuffer();
+
+        // Position the processed image on the canvas
+        const withPhotoComposite = await sharp(canvas)
+            .composite([
+                {
+                    input: processedImage,
+                    left: Math.round(centerX - (scaledWidth / 2) + adjustments.positionX),
+                    top: Math.round(centerY - (scaledHeight / 2) + adjustments.positionY)
+                }
+            ])
+            .toBuffer();
+
+        // Add the Instagram overlay on top
+        await sharp(withPhotoComposite)
+            .composite([
+                {
+                    input: overlayImagePath,
+                    gravity: 'center'
+                }
+            ])
+            .toFile(outputPath);
+
+        return true;
+    } catch (error) {
+        console.error('Error applying adjusted Instagram overlay:', error);
+        throw error;
+    }
+}
+
+// Endpoint to get adjustments for a specific photo-overlay combination
+app.get('/api/admin/photo-adjustments/:photoId/:overlayName', (req, res) => {
+    const { photoId, overlayName } = req.params;
+    const key = `${photoId}_${overlayName}`;
+
+    if (photoAdjustments[key]) {
+        return res.json({
+            success: true,
+            adjustments: photoAdjustments[key]
+        });
+    }
+
+    // Return default adjustments if none found
+    return res.json({
+        success: true,
+        adjustments: {
+            scale: 1,
+            rotation: 0,
+            positionX: 0,
+            positionY: 0
+        }
+    });
+});
 // Create HTTP server and attach WebSocket server
 const server = http.createServer(app);
 setupWebSocketServer(server);
