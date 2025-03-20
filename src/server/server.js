@@ -14,7 +14,6 @@ const multer = require('multer');
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 let photoCounter = 0;
 const MOSAIC_PHOTO_INTERVAL = 3; // Regenerate every 3rd photo
-const photoAdjustments = {};
 
 // Basic diagnostics
 console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
@@ -1836,114 +1835,169 @@ app.get('/api/mosaic/info', async (req, res) => {
         });
     }
 });
+
 // Add this code to your src/server/server.js file
 
-// Define an object to store photo adjustments
+// Object to store frame templates
+const frameTemplates = {};
 
-// Handle photo adjustments
-app.post('/api/admin/photo-adjustments', async (req, res) => {
-    const { photoId, overlayName, adjustments } = req.body;
+// Save or update a frame template
+app.post('/api/admin/frame-templates', (req, res) => {
+    const { overlayName, template } = req.body;
 
-    if (!photoId || !overlayName || !adjustments) {
+    if (!overlayName || !template) {
         return res.status(400).json({
             success: false,
-            error: 'Photo ID, overlay name, and adjustments are required'
+            error: 'Overlay name and template settings are required'
         });
     }
 
     try {
-        // Save the adjustments to our in-memory store
-        // In a production app, you might want to save this to a database
-        photoAdjustments[`${photoId}_${overlayName}`] = {
-            scale: adjustments.scale || 1,
-            rotation: adjustments.rotation || 0,
-            positionX: adjustments.positionX || 0,
-            positionY: adjustments.positionY || 0,
+        // Save the template
+        frameTemplates[overlayName] = {
+            scale: template.scale || 1,
+            rotation: template.rotation || 0,
+            positionX: template.positionX || 0,
+            positionY: template.positionY || 0,
             timestamp: Date.now()
         };
 
-        // Determine correct paths
-        let baseFilename, sourcePhotoPath, targetPhotoPath;
-
-        // Extract base filename (remove any prefixes)
-        if (photoId.startsWith('instagram_') || photoId.startsWith('frame_')) {
-            baseFilename = photoId.substring(photoId.indexOf('_') + 1);
-        } else {
-            baseFilename = photoId;
-        }
-
-        // Source is always the original photo (which has no frame)
-        const originalPath = path.join(ORIGINALS_DIR, `original_${baseFilename}`);
-        const standardPath = path.join(PHOTOS_DIR, baseFilename);
-
-        // Use original if available, otherwise use standard
-        if (fs.existsSync(originalPath)) {
-            sourcePhotoPath = originalPath;
-        } else if (fs.existsSync(standardPath)) {
-            sourcePhotoPath = standardPath;
-        } else {
-            return res.status(404).json({
-                success: false,
-                error: 'Source photo not found'
-            });
-        }
-
-        // Determine target filename based on overlay type
-        let targetFilename;
-        if (overlayName === 'instagram-frame.png') {
-            targetFilename = `instagram_${baseFilename}`;
-        } else if (overlayName !== 'wedding-frame.png') {
-            targetFilename = `frame_${baseFilename}`;
-        } else {
-            targetFilename = baseFilename; // Standard frame - just use the base filename
-        }
-
-        targetPhotoPath = path.join(PHOTOS_DIR, targetFilename);
-
-        // Check if overlay exists
-        const overlayPath = path.join(OVERLAYS_DIR, overlayName);
-        if (!fs.existsSync(overlayPath)) {
-            return res.status(404).json({
-                success: false,
-                error: 'Frame overlay not found'
-            });
-        }
-
-        // Apply the adjustments and create the composited image
-        await applyAdjustedOverlay(
-            sourcePhotoPath,
-            overlayPath,
-            targetPhotoPath,
-            {
-                scale: adjustments.scale || 1,
-                rotation: adjustments.rotation || 0,
-                positionX: adjustments.positionX || 0,
-                positionY: adjustments.positionY || 0
-            },
-            overlayName
-        );
-
-        // Regenerate thumbnail for the adjusted photo
-        const thumbnailUrl = await generateThumbnail(targetPhotoPath, targetFilename);
-
         return res.json({
             success: true,
-            message: 'Photo adjustments applied successfully',
-            photoId: targetFilename,
-            url: `/photos/${targetFilename}`,
-            thumbnailUrl: thumbnailUrl
+            message: 'Frame template saved successfully',
+            templateName: overlayName
         });
     } catch (error) {
-        console.error('Error applying photo adjustments:', error);
+        console.error('Error saving frame template:', error);
         return res.status(500).json({
             success: false,
-            error: 'Server error applying adjustments: ' + error.message
+            error: 'Server error saving frame template'
         });
     }
 });
 
-// Function to apply overlay with custom positioning adjustments
-async function applyAdjustedOverlay(sourceImagePath, overlayImagePath, outputPath, adjustments, overlayName) {
+// Get a specific frame template
+app.get('/api/admin/frame-templates/:overlayName', (req, res) => {
+    const { overlayName } = req.params;
+
+    if (frameTemplates[overlayName]) {
+        return res.json({
+            success: true,
+            template: frameTemplates[overlayName]
+        });
+    }
+
+    // Return 404 if template not found
+    return res.status(404).json({
+        success: false,
+        error: 'Template not found for this frame'
+    });
+});
+
+// Get all frame templates
+app.get('/api/admin/frame-templates', (req, res) => {
+    try {
+        const templates = Object.keys(frameTemplates).map(key => ({
+            name: key,
+            ...frameTemplates[key]
+        }));
+
+        return res.json({
+            success: true,
+            templates
+        });
+    } catch (error) {
+        console.error('Error fetching frame templates:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error fetching frame templates'
+        });
+    }
+});
+
+// Delete a frame template
+app.delete('/api/admin/frame-templates/:overlayName', (req, res) => {
+    const { overlayName } = req.params;
+
+    if (frameTemplates[overlayName]) {
+        delete frameTemplates[overlayName];
+
+        return res.json({
+            success: true,
+            message: 'Frame template deleted successfully'
+        });
+    }
+
+    return res.status(404).json({
+        success: false,
+        error: 'Template not found for this frame'
+    });
+});
+
+// Modify the existing applyOverlayToImage function to use templates
+async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath) {
+    try {
+        // Check if this is an Instagram overlay
+        const overlayFilename = path.basename(overlayImagePath);
+
+        // Check if there's a template for this overlay
+        const template = frameTemplates[overlayFilename];
+
+        if (template) {
+            // Use the template to apply adjustments
+            return await applyTemplatedOverlay(
+                sourceImagePath,
+                overlayImagePath,
+                outputPath,
+                template,
+                overlayFilename
+            );
+        }
+
+        // If no template exists, use the original function with default settings
+        if (overlayFilename.startsWith('instagram')) {
+            return processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath);
+        }
+
+        // Ensure source image exists
+        if (!fs.existsSync(sourceImagePath)) {
+            console.error(`Source image not found: ${sourceImagePath}`);
+            return false;
+        }
+
+        // Ensure overlay exists
+        if (!fs.existsSync(overlayImagePath)) {
+            console.error(`Overlay not found: ${overlayImagePath}`);
+            return false;
+        }
+
+        // Standard overlay process
+        const metadata = await sharp(sourceImagePath).metadata();
+
+        // Resize overlay to match source image dimensions
+        const resizedOverlay = await sharp(overlayImagePath)
+            .resize(metadata.width, metadata.height, {
+                fit: 'fill'
+            })
+            .toBuffer();
+
+        // Composite them together
+        await sharp(sourceImagePath)
+            .composite([
+                { input: resizedOverlay, gravity: 'center' }
+            ])
+            .jpeg({ quality: 95 })
+            .toFile(outputPath);
+
+        return true;
+    } catch (error) {
+        console.error('Error applying overlay:', error);
+        return false;
+    }
+}
+
+// New function to apply overlay with template settings
+async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPath, template, overlayName) {
     try {
         // Ensure source image exists
         if (!fs.existsSync(sourceImagePath)) {
@@ -1957,10 +2011,10 @@ async function applyAdjustedOverlay(sourceImagePath, overlayImagePath, outputPat
 
         // Special handling for Instagram format
         if (overlayName === 'instagram-frame.png') {
-            return await applyAdjustedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, adjustments);
+            return await applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template);
         }
 
-        // Get metadata from source image and overlay
+        // Get metadata from the original photo
         const imgMetadata = await sharp(sourceImagePath).metadata();
         const overlayMetadata = await sharp(overlayImagePath).metadata();
 
@@ -1985,8 +2039,8 @@ async function applyAdjustedOverlay(sourceImagePath, overlayImagePath, outputPat
         const centerY = canvasHeight / 2;
 
         // Calculate scaled dimensions
-        const scaledWidth = Math.round(imgMetadata.width * adjustments.scale);
-        const scaledHeight = Math.round(imgMetadata.height * adjustments.scale);
+        const scaledWidth = Math.round(imgMetadata.width * template.scale);
+        const scaledHeight = Math.round(imgMetadata.height * template.scale);
 
         // Create a buffer of the scaled and rotated source image
         const processedImage = await sharp(sourceImagePath)
@@ -1995,7 +2049,7 @@ async function applyAdjustedOverlay(sourceImagePath, overlayImagePath, outputPat
                 height: scaledHeight,
                 fit: 'fill'
             })
-            .rotate(adjustments.rotation, {
+            .rotate(template.rotation, {
                 background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background for rotation
             })
             .toBuffer();
@@ -2010,13 +2064,13 @@ async function applyAdjustedOverlay(sourceImagePath, overlayImagePath, outputPat
             }
         }).toBuffer();
 
-        // Position the processed image on the canvas
+        // Position the processed image on the canvas according to template
         const withPhotoComposite = await sharp(canvas)
             .composite([
                 {
                     input: processedImage,
-                    left: Math.round(centerX - (scaledWidth / 2) + adjustments.positionX),
-                    top: Math.round(centerY - (scaledHeight / 2) + adjustments.positionY)
+                    left: Math.round(centerX - (scaledWidth / 2) + template.positionX),
+                    top: Math.round(centerY - (scaledHeight / 2) + template.positionY)
                 }
             ])
             .toBuffer();
@@ -2033,13 +2087,13 @@ async function applyAdjustedOverlay(sourceImagePath, overlayImagePath, outputPat
 
         return true;
     } catch (error) {
-        console.error('Error applying adjusted overlay:', error);
+        console.error('Error applying templated overlay:', error);
         throw error;
     }
 }
 
-// Special function for Instagram format (9:16 ratio)
-async function applyAdjustedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, adjustments) {
+// Special function for applying Instagram templates
+async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template) {
     try {
         // Instagram uses 9:16 aspect ratio
         const targetWidth = 1080;  // Instagram recommended width
@@ -2053,8 +2107,8 @@ async function applyAdjustedInstagramOverlay(sourceImagePath, overlayImagePath, 
         const centerY = targetHeight / 2;
 
         // Calculate scaled dimensions
-        const scaledWidth = Math.round(imgMetadata.width * adjustments.scale);
-        const scaledHeight = Math.round(imgMetadata.height * adjustments.scale);
+        const scaledWidth = Math.round(imgMetadata.width * template.scale);
+        const scaledHeight = Math.round(imgMetadata.height * template.scale);
 
         // Create a buffer of the scaled and rotated source image
         const processedImage = await sharp(sourceImagePath)
@@ -2063,7 +2117,7 @@ async function applyAdjustedInstagramOverlay(sourceImagePath, overlayImagePath, 
                 height: scaledHeight,
                 fit: 'fill'
             })
-            .rotate(adjustments.rotation, {
+            .rotate(template.rotation, {
                 background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background for rotation
             })
             .toBuffer();
@@ -2078,13 +2132,13 @@ async function applyAdjustedInstagramOverlay(sourceImagePath, overlayImagePath, 
             }
         }).toBuffer();
 
-        // Position the processed image on the canvas
+        // Position the processed image on the canvas according to template
         const withPhotoComposite = await sharp(canvas)
             .composite([
                 {
                     input: processedImage,
-                    left: Math.round(centerX - (scaledWidth / 2) + adjustments.positionX),
-                    top: Math.round(centerY - (scaledHeight / 2) + adjustments.positionY)
+                    left: Math.round(centerX - (scaledWidth / 2) + template.positionX),
+                    top: Math.round(centerY - (scaledHeight / 2) + template.positionY)
                 }
             ])
             .toBuffer();
@@ -2101,34 +2155,11 @@ async function applyAdjustedInstagramOverlay(sourceImagePath, overlayImagePath, 
 
         return true;
     } catch (error) {
-        console.error('Error applying adjusted Instagram overlay:', error);
+        console.error('Error applying templated Instagram overlay:', error);
         throw error;
     }
 }
 
-// Endpoint to get adjustments for a specific photo-overlay combination
-app.get('/api/admin/photo-adjustments/:photoId/:overlayName', (req, res) => {
-    const { photoId, overlayName } = req.params;
-    const key = `${photoId}_${overlayName}`;
-
-    if (photoAdjustments[key]) {
-        return res.json({
-            success: true,
-            adjustments: photoAdjustments[key]
-        });
-    }
-
-    // Return default adjustments if none found
-    return res.json({
-        success: true,
-        adjustments: {
-            scale: 1,
-            rotation: 0,
-            positionX: 0,
-            positionY: 0
-        }
-    });
-});
 // Create HTTP server and attach WebSocket server
 const server = http.createServer(app);
 setupWebSocketServer(server);
