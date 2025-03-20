@@ -1839,7 +1839,6 @@ app.get('/api/mosaic/info', async (req, res) => {
 // Add this code to your src/server/server.js file
 
 // Define an object to store photo adjustments
-const photoAdjustments = {};
 
 // Handle photo adjustments
 app.post('/api/admin/photo-adjustments', async (req, res) => {
