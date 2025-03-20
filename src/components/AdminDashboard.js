@@ -5,6 +5,12 @@ import { useCamera } from '../contexts/CameraContext';
 import { motion } from 'framer-motion';
 import { API_BASE_URL } from '../App';
 import OverlayUpload from './OverlayUpload';
+import FrameTemplateEditor from './FrameTemplateEditor';
+import Icon from '@mdi/react';
+import {
+    mdiQrcode, mdiPrinter, mdiCamera, mdiHome, mdiDelete,
+    mdiPencil, mdiImageOutline, mdiContentSave, mdiPuzzleEdit
+} from '@mdi/js';
 
 const AdminDashboard = () => {
     const { photos, fetchPhotos, loading, error, deletePhoto } = useCamera();
@@ -17,6 +23,9 @@ const AdminDashboard = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [photosPerPage] = useState(20);
 
+    // Frame Template Editor state
+    const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
+
     // Calculate pagination
     const indexOfLastPhoto = currentPage * photosPerPage;
     const indexOfFirstPhoto = indexOfLastPhoto - photosPerPage;
@@ -25,6 +34,11 @@ const AdminDashboard = () => {
 
     // Function to change page
     const paginate = (pageNumber) => setCurrentPage(pageNumber);
+
+    // Toggle template editor
+    const handleToggleTemplateEditor = () => {
+        setTemplateEditorOpen(prev => !prev);
+    };
 
     // Check admin authentication
     useEffect(() => {
@@ -191,6 +205,14 @@ const AdminDashboard = () => {
                         className="btn btn-outline btn-hindu-outline"
                     >
                         Regenerate Thumbnails
+                    </button>
+
+                    <button
+                        onClick={handleToggleTemplateEditor}
+                        className="btn btn-outline btn-christian-outline flex items-center justify-center"
+                    >
+                        <Icon path={mdiPuzzleEdit} size={1} className="mr-2" />
+                        Edit Frame Templates
                     </button>
                 </div>
 
@@ -426,6 +448,13 @@ const AdminDashboard = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Frame Template Editor */}
+            {templateEditorOpen && (
+                <FrameTemplateEditor
+                    onClose={() => setTemplateEditorOpen(false)}
+                />
             )}
         </div>
     );
