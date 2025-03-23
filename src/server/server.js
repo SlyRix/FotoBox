@@ -38,6 +38,8 @@ const THUMBNAILS_DIR = path.join(__dirname, 'public', 'thumbnails');
 const OVERLAYS_DIR = path.join(__dirname, 'public', 'overlays');
 const PRINT_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'print');
 const ORIGINALS_DIR = path.join(__dirname, 'public', 'photos', 'originals');
+const INSTAGRAM_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'instagram');
+const FRAME_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'frames');
 const TEMPLATES_DIR = path.join(__dirname, 'data', 'templates');
 
 // ==========================================
@@ -115,6 +117,8 @@ function createRequiredDirectories() {
         OVERLAYS_DIR,
         PRINT_PHOTOS_DIR,
         ORIGINALS_DIR,
+        INSTAGRAM_PHOTOS_DIR,
+        FRAME_PHOTOS_DIR,
         TEMPLATES_DIR
     ];
 
@@ -578,6 +582,12 @@ async function processPhotoWithDualFormats(sourceFilePath, filename) {
  */
 async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath) {
     try {
+        // Ensure the output directory exists
+        const outputDir = path.dirname(outputPath);
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
         // Check if this is an Instagram overlay
         const overlayFilename = path.basename(overlayImagePath);
         console.log(`Applying overlay: ${overlayFilename}`);
@@ -652,6 +662,12 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
  */
 async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPath, template, overlayName) {
     try {
+        // Ensure the output directory exists
+        const outputDir = path.dirname(outputPath);
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
         // Ensure source image exists
         if (!fs.existsSync(sourceImagePath)) {
             throw new Error(`Source image not found: ${sourceImagePath}`);
@@ -755,6 +771,12 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
  */
 async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template) {
     try {
+        // Ensure the output directory exists
+        const outputDir = path.dirname(outputPath);
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
         // Instagram uses 9:16 aspect ratio
         const targetWidth = 1080;  // Instagram recommended width
         const targetHeight = 1920; // 9:16 ratio for stories
@@ -849,6 +871,12 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
  */
 async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath) {
     try {
+        // Ensure the output directory exists
+        const outputDir = path.dirname(outputPath);
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
         // Ensure source image exists
         if (!fs.existsSync(sourceImagePath)) {
             console.error(`Source image for Instagram format not found: ${sourceImagePath}`);
@@ -1250,6 +1278,10 @@ app.get('/photos/:filename', (req, res) => {
         filepath = path.join(ORIGINALS_DIR, filename);
     } else if (filename.startsWith('print_')) {
         filepath = path.join(PRINT_PHOTOS_DIR, filename);
+    } else if (filename.startsWith('instagram_')) {
+        filepath = path.join(INSTAGRAM_PHOTOS_DIR, filename);
+    } else if (filename.startsWith('frame_')) {
+        filepath = path.join(FRAME_PHOTOS_DIR, filename);
     } else {
         filepath = path.join(PHOTOS_DIR, filename);
     }
@@ -1336,7 +1368,7 @@ app.get('/api/status', (req, res) => {
 
 // Get list of all photos
 app.get('/api/photos', (req, res) => {
-    const type = req.query.type || 'framed'; // 'framed', 'original', 'print'
+    const type = req.query.type || 'all'; // 'all', 'original', 'print', 'instagram', 'frame', standard
     const limit = parseInt(req.query.limit) || 0; // Optional limit parameter
 
     // Select directory based on type
@@ -1348,13 +1380,77 @@ app.get('/api/photos', (req, res) => {
         case 'print':
             dirToScan = PRINT_PHOTOS_DIR;
             break;
-        case 'framed':
-        default:
+        case 'instagram':
+            dirToScan = INSTAGRAM_PHOTOS_DIR;
+            break;
+        case 'frame':
+            dirToScan = FRAME_PHOTOS_DIR;
+            break;
+        case 'standard':
             dirToScan = PHOTOS_DIR;
             break;
+        case 'all':
+        default:
+            // For 'all', we'll combine photos from all directories
+            const photos = [];
+
+            // Helper function to read photos from a directory
+            const readPhotosFromDir = (dir, prefix = '') => {
+                if (!fs.existsSync(dir)) return [];
+
+                const files = fs.readdirSync(dir);
+                return files.filter(file => /\.(jpg|jpeg|png)$/i.test(file))
+                    .map(file => {
+                        try {
+                            const stats = fs.statSync(path.join(dir, file));
+                            const baseFilename = file.replace(/^(original_|print_|instagram_|frame_)/, '');
+
+                            let url;
+                            if (dir === ORIGINALS_DIR) {
+                                url = `/photos/originals/${file}`;
+                            } else if (dir === PRINT_PHOTOS_DIR) {
+                                url = `/photos/print/${file}`;
+                            } else if (dir === INSTAGRAM_PHOTOS_DIR) {
+                                url = `/photos/instagram/${file}`;
+                            } else if (dir === FRAME_PHOTOS_DIR) {
+                                url = `/photos/frames/${file}`;
+                            } else {
+                                url = `/photos/${file}`;
+                            }
+
+                            return {
+                                filename: file,
+                                baseFilename: baseFilename,
+                                url: url,
+                                originalUrl: `/photos/originals/original_${baseFilename}`,
+                                printUrl: `/photos/print/print_${baseFilename}`,
+                                thumbnailUrl: `/thumbnails/thumb_${baseFilename}`,
+                                qrUrl: `/qrcodes/qr_${baseFilename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`,
+                                timestamp: stats.mtime.getTime(),
+                                type: prefix
+                            };
+                        } catch (error) {
+                            console.error(`Error processing photo ${file}:`, error);
+                            return null;
+                        }
+                    }).filter(photo => photo !== null);
+            };
+
+            // Read photos from each directory
+            photos.push(...readPhotosFromDir(PHOTOS_DIR, 'standard'));
+            photos.push(...readPhotosFromDir(ORIGINALS_DIR, 'original'));
+            photos.push(...readPhotosFromDir(PRINT_PHOTOS_DIR, 'print'));
+            photos.push(...readPhotosFromDir(INSTAGRAM_PHOTOS_DIR, 'instagram'));
+            photos.push(...readPhotosFromDir(FRAME_PHOTOS_DIR, 'frame'));
+
+            // Sort by timestamp (newest first) and apply limit
+            const sortedPhotos = photos.sort((a, b) => b.timestamp - a.timestamp);
+            const limitedPhotos = limit > 0 ? sortedPhotos.slice(0, limit) : sortedPhotos;
+
+            return res.json(limitedPhotos);
     }
 
-    // Ensure directory exists
+    // For single directory types
     if (!fs.existsSync(dirToScan)) {
         return res.json([]);
     }
@@ -1375,12 +1471,23 @@ app.get('/api/photos', (req, res) => {
                 const stats = fs.statSync(path.join(dirToScan, file));
                 const baseFilename = file.replace(/^(original_|print_|instagram_|frame_)/, '');
 
+                let url;
+                if (dirToScan === ORIGINALS_DIR) {
+                    url = `/photos/originals/${file}`;
+                } else if (dirToScan === PRINT_PHOTOS_DIR) {
+                    url = `/photos/print/${file}`;
+                } else if (dirToScan === INSTAGRAM_PHOTOS_DIR) {
+                    url = `/photos/instagram/${file}`;
+                } else if (dirToScan === FRAME_PHOTOS_DIR) {
+                    url = `/photos/frames/${file}`;
+                } else {
+                    url = `/photos/${file}`;
+                }
+
                 return {
                     filename: file,
                     baseFilename: baseFilename,
-                    url: type === 'original'
-                        ? `/photos/originals/${file}`
-                        : (type === 'print' ? `/photos/print/${file}` : `/photos/${file}`),
+                    url: url,
                     originalUrl: `/photos/originals/original_${baseFilename}`,
                     printUrl: `/photos/print/print_${baseFilename}`,
                     thumbnailUrl: `/thumbnails/thumb_${baseFilename}`,
@@ -1424,10 +1531,10 @@ app.get('/api/photos/:photoId', (req, res) => {
     } else if (photoId.startsWith('print_')) {
         filepath = path.join(PRINT_PHOTOS_DIR, photoId);
     } else if (photoId.startsWith('instagram_')) {
-        filepath = path.join(PHOTOS_DIR, photoId);
+        filepath = path.join(INSTAGRAM_PHOTOS_DIR, photoId);
         isInstagram = true;
     } else if (photoId.startsWith('frame_')) {
-        filepath = path.join(PHOTOS_DIR, photoId);
+        filepath = path.join(FRAME_PHOTOS_DIR, photoId);
         isCustomFrame = true;
     } else {
         filepath = path.join(PHOTOS_DIR, photoId);
@@ -1435,7 +1542,7 @@ app.get('/api/photos/:photoId', (req, res) => {
 
     // Check if file exists
     if (!fs.existsSync(filepath)) {
-        console.log(`Photo not found: ${photoId}`);
+        console.log(`Photo not found at ${filepath}, checking other directories...`);
 
         // Try to find in other directories if this is not a special version
         if (!photoId.startsWith('original_') && !photoId.startsWith('print_') &&
@@ -1444,19 +1551,33 @@ app.get('/api/photos/:photoId', (req, res) => {
             const baseId = photoId;
             const originalPath = path.join(ORIGINALS_DIR, `original_${baseId}`);
             const printPath = path.join(PRINT_PHOTOS_DIR, `print_${baseId}`);
+            const instagramPath = path.join(INSTAGRAM_PHOTOS_DIR, `instagram_${baseId}`);
+            const framePath = path.join(FRAME_PHOTOS_DIR, `frame_${baseId}`);
 
             if (fs.existsSync(originalPath)) {
                 filepath = originalPath;
                 isOriginal = true;
+                console.log(`Found photo in originals directory: ${filepath}`);
             } else if (fs.existsSync(printPath)) {
                 filepath = printPath;
+                console.log(`Found photo in print directory: ${filepath}`);
+            } else if (fs.existsSync(instagramPath)) {
+                filepath = instagramPath;
+                isInstagram = true;
+                console.log(`Found photo in instagram directory: ${filepath}`);
+            } else if (fs.existsSync(framePath)) {
+                filepath = framePath;
+                isCustomFrame = true;
+                console.log(`Found photo in frames directory: ${filepath}`);
             } else {
+                console.log(`Photo not found in any directory: ${photoId}`);
                 return res.status(404).json({
                     success: false,
                     error: 'Photo not found'
                 });
             }
         } else {
+            console.log(`Photo with specific prefix not found: ${photoId}`);
             return res.status(404).json({
                 success: false,
                 error: 'Photo not found'
@@ -1482,10 +1603,18 @@ app.get('/api/photos/:photoId', (req, res) => {
         const clientDomain = req.headers.host || 'fotobox.slyrix.com';
 
         // Different URLs for different versions
-        let normalUrl = `/photos/${baseFilename}`;
-        let originalUrl = `/photos/originals/original_${baseFilename}`;
-        let printUrl = `/photos/print/print_${baseFilename}`;
-        let instagramUrl = `/photos/instagram_${baseFilename}`;
+        let photoUrl;
+        if (isOriginal) {
+            photoUrl = `/photos/originals/${photoId}`;
+        } else if (photoId.startsWith('print_')) {
+            photoUrl = `/photos/print/${photoId}`;
+        } else if (isInstagram) {
+            photoUrl = `/photos/instagram/${photoId}`;
+        } else if (isCustomFrame) {
+            photoUrl = `/photos/frames/${photoId}`;
+        } else {
+            photoUrl = `/photos/${photoId}`;
+        }
 
         // Create the correct photo view URL
         let photoViewUrl;
@@ -1494,7 +1623,7 @@ app.get('/api/photos/:photoId', (req, res) => {
         } else if (isInstagram) {
             photoViewUrl = `https://${clientDomain}/photo/instagram_${baseFilename}`;
         } else if (isCustomFrame) {
-            photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
+            photoViewUrl = `https://${clientDomain}/photo/frame_${baseFilename}`;
         } else {
             photoViewUrl = `https://${clientDomain}/photo/${baseFilename}`;
         }
@@ -1503,9 +1632,9 @@ app.get('/api/photos/:photoId', (req, res) => {
         res.json({
             success: true,
             filename: photoId,
-            url: isOriginal ? originalUrl : (isInstagram ? instagramUrl : `/photos/${photoId}`),
-            originalUrl: originalUrl,
-            printUrl: printUrl,
+            url: photoUrl,
+            originalUrl: `/photos/originals/original_${baseFilename}`,
+            printUrl: `/photos/print/print_${baseFilename}`,
             thumbnailUrl: hasThumbnail ? `/thumbnails/thumb_${baseFilename}` : null,
             qrUrl: `/qrcodes/${qrFilename}`,
             photoViewUrl: photoViewUrl,
@@ -1650,11 +1779,11 @@ app.delete('/api/photos/:filename', (req, res) => {
 
     const filepaths = [
         path.join(PHOTOS_DIR, baseFilename),                        // Standard version
-        path.join(PHOTOS_DIR, `instagram_${baseFilename}`),        // Instagram version
-        path.join(PHOTOS_DIR, `frame_${baseFilename}`),            // Custom frame version
-        path.join(ORIGINALS_DIR, `original_${baseFilename}`),      // Original version
-        path.join(PRINT_PHOTOS_DIR, `print_${baseFilename}`),      // Print version
-        path.join(THUMBNAILS_DIR, `thumb_${baseFilename}`)         // Thumbnail
+        path.join(INSTAGRAM_PHOTOS_DIR, `instagram_${baseFilename}`), // Instagram version
+        path.join(FRAME_PHOTOS_DIR, `frame_${baseFilename}`),       // Custom frame version
+        path.join(ORIGINALS_DIR, `original_${baseFilename}`),       // Original version
+        path.join(PRINT_PHOTOS_DIR, `print_${baseFilename}`),       // Print version
+        path.join(THUMBNAILS_DIR, `thumb_${baseFilename}`)          // Thumbnail
     ];
 
     let success = true;
@@ -1715,15 +1844,19 @@ app.post('/api/photos/print', (req, res) => {
 // Generate thumbnails for all photos
 app.get('/api/admin/generate-thumbnails', async (req, res) => {
     try {
-        if (!fs.existsSync(PHOTOS_DIR)) {
-            return res.json({
-                success: true,
-                message: 'No photos directory found.'
-            });
-        }
+        // Check all photo directories for files to thumbnail
+        const directoriesToScan = [PHOTOS_DIR, INSTAGRAM_PHOTOS_DIR, FRAME_PHOTOS_DIR];
+        let photoFiles = [];
 
-        const files = fs.readdirSync(PHOTOS_DIR);
-        const photoFiles = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file));
+        for (const dir of directoriesToScan) {
+            if (!fs.existsSync(dir)) continue;
+
+            const files = fs.readdirSync(dir);
+            photoFiles = photoFiles.concat(
+                files.filter(file => /\.(jpg|jpeg|png)$/i.test(file))
+                    .map(file => ({ path: path.join(dir, file), filename: file }))
+            );
+        }
 
         // Send immediate response
         res.json({
@@ -1735,10 +1868,10 @@ app.get('/api/admin/generate-thumbnails', async (req, res) => {
         let processed = 0;
         let failed = 0;
 
-        for (const file of photoFiles) {
+        for (const photo of photoFiles) {
             try {
-                const filepath = path.join(PHOTOS_DIR, file);
-                await generateThumbnail(filepath, file);
+                const baseFilename = photo.filename.replace(/^(original_|print_|instagram_|frame_)/, '');
+                await generateThumbnail(photo.path, baseFilename);
                 processed++;
 
                 // Log progress every 10 photos
@@ -1747,7 +1880,7 @@ app.get('/api/admin/generate-thumbnails', async (req, res) => {
                 }
             } catch (err) {
                 failed++;
-                console.error(`Failed to create thumbnail for ${file}: ${err.message}`);
+                console.error(`Failed to create thumbnail for ${photo.filename}: ${err.message}`);
             }
         }
 
@@ -1798,17 +1931,20 @@ app.post('/api/photos/:photoId/overlay', async (req, res) => {
         });
     }
 
-    // Determine target filename based on overlay type
-    let targetFilename;
+    // Determine target path based on overlay type
+    let targetFilename, targetDir;
     if (overlayName === 'instagram-frame.png') {
         targetFilename = `instagram_${baseFilename}`;
+        targetDir = INSTAGRAM_PHOTOS_DIR; // Use Instagram directory
     } else if (overlayName !== 'wedding-frame.png') {
         targetFilename = `frame_${baseFilename}`;
+        targetDir = FRAME_PHOTOS_DIR; // Use frames directory
     } else {
         targetFilename = baseFilename; // Standard frame - just use the base filename
+        targetDir = PHOTOS_DIR; // Use main photos directory
     }
 
-    targetPhotoPath = path.join(PHOTOS_DIR, targetFilename);
+    targetPhotoPath = path.join(targetDir, targetFilename);
 
     // Check if overlay exists
     const overlayPath = path.join(OVERLAYS_DIR, overlayName);
@@ -1835,11 +1971,18 @@ app.post('/api/photos/:photoId/overlay', async (req, res) => {
             // Regenerate thumbnail for the new version
             const thumbnailUrl = await generateThumbnail(targetPhotoPath, targetFilename);
 
+            // Create the URL path based on directory
+            const photoUrl = overlayName === 'instagram-frame.png' ?
+                `/photos/instagram/${targetFilename}` :
+                (overlayName !== 'wedding-frame.png' ?
+                    `/photos/frames/${targetFilename}` :
+                    `/photos/${targetFilename}`);
+
             return res.json({
                 success: true,
                 message: 'Frame applied successfully',
                 photoId: targetFilename,
-                url: `/photos/${targetFilename}`,
+                url: photoUrl,
                 thumbnailUrl: thumbnailUrl
             });
         } else {
@@ -2288,6 +2431,8 @@ app.delete('/api/admin/frame-templates/:overlayName', (req, res) => {
         error: 'Template not found for this frame'
     });
 });
+
+// Apply filter to photo
 app.post('/api/photos/:filename/filter', async (req, res) => {
     const photoId = req.params.filename;
     const { filter } = req.body;
@@ -2314,7 +2459,13 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
             sourcePhotoPath = standardPath;
         } else {
             // Fall back to the provided photo ID path
-            sourcePhotoPath = path.join(PHOTOS_DIR, photoId);
+            if (photoId.startsWith('instagram_')) {
+                sourcePhotoPath = path.join(INSTAGRAM_PHOTOS_DIR, photoId);
+            } else if (photoId.startsWith('frame_')) {
+                sourcePhotoPath = path.join(FRAME_PHOTOS_DIR, photoId);
+            } else {
+                sourcePhotoPath = path.join(PHOTOS_DIR, photoId);
+            }
 
             if (!fs.existsSync(sourcePhotoPath)) {
                 return res.status(404).json({
@@ -2379,7 +2530,7 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
                 sharpImage = sharpImage.sharpen(filterParams.sharpen);
             }
 
-            // Apply modulate adjustments if specified
+// Apply modulate adjustments if specified
             if (filterParams.modulate) {
                 sharpImage = sharpImage.modulate(filterParams.modulate);
             }
@@ -2496,6 +2647,7 @@ function getFilterParams(filter) {
             return {};
     }
 }
+
 // ==========================================
 // SERVER INITIALIZATION
 // ==========================================
@@ -2526,6 +2678,8 @@ server.listen(PORT, async () => {
     console.log(`Photos directory: ${PHOTOS_DIR}`);
     console.log(`QR codes directory: ${QR_DIR}`);
     console.log(`Overlays directory: ${OVERLAYS_DIR}`);
+    console.log(`Instagram photos directory: ${INSTAGRAM_PHOTOS_DIR}`);
+    console.log(`Custom frame photos directory: ${FRAME_PHOTOS_DIR}`);
     console.log(`Templates directory: ${TEMPLATES_DIR}`);
     console.log(`Ready to serve requests!`);
 });
