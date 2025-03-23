@@ -52,6 +52,8 @@ app.use(cors({
 
         // List of allowed origins
         const allowedOrigins = [
+            'http://192.168.1.88:3000',
+            'https://192.168.1.88:3000',
             'http://localhost:3000',
             'https://localhost:3000',
             'http://fotobox.slyrix.com',
