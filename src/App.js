@@ -1,6 +1,7 @@
-// Updated App.js with enhanced component imports
+// Updated App.js with transition animations and sound provider
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
 
 // Import enhanced components
 import HomePage from './components/HomePage';
@@ -14,6 +15,7 @@ import AdminDashboard from './components/AdminDashboard';
 import HeartSpinner from './components/HeartSpinner';
 import KioskMode from './components/KioskMode';
 import { CameraProvider } from './contexts/CameraContext';
+import { SoundProvider } from './contexts/SoundContext';
 import './styles/tailwind.css';
 
 // Global config for API URL - accessible throughout the app
@@ -31,41 +33,54 @@ const AdminRoute = ({ children }) => {
     return children;
 };
 
+// Animated routes wrapper
+const AnimatedRoutes = () => {
+    const location = useLocation();
+
+    return (
+        <AnimatePresence mode="wait">
+            <Routes location={location} key={location.pathname}>
+                {/* Main routes */}
+                <Route path="/" element={<HomePage />} />
+                <Route path="/camera" element={<CameraView />} />
+                <Route path="/preview" element={<PhotoPreview />} />
+                <Route path="/qrcode" element={<QRCodeView />} />
+                <Route path="/gallery" element={<GalleryView />} />
+
+                {/* Photo viewing route with explicit path parameter to prevent loops */}
+                <Route path="/photo/:photoId" element={<PhotoView />} />
+
+                {/* Admin routes */}
+                <Route path="/admin-login" element={<AdminLogin />} />
+                <Route
+                    path="/admin"
+                    element={
+                        <AdminRoute>
+                            <AdminDashboard />
+                        </AdminRoute>
+                    }
+                />
+
+                {/* Catch all route - redirect to home */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+        </AnimatePresence>
+    );
+};
+
 function App() {
     return (
-        <CameraProvider apiBaseUrl={API_BASE_URL} apiEndpoint={API_ENDPOINT}>
-            <KioskMode />
+        <SoundProvider>
+            <CameraProvider apiBaseUrl={API_BASE_URL} apiEndpoint={API_ENDPOINT}>
+                <KioskMode />
 
-            <Router>
-                <div className="min-h-screen bg-wedding-background">
-                    <Routes>
-                        {/* Main routes */}
-                        <Route path="/" element={<HomePage />} />
-                        <Route path="/camera" element={<CameraView />} />
-                        <Route path="/preview" element={<PhotoPreview />} />
-                        <Route path="/qrcode" element={<QRCodeView />} />
-                        <Route path="/gallery" element={<GalleryView />} />
-
-                        {/* Photo viewing route with explicit path parameter to prevent loops */}
-                        <Route path="/photo/:photoId" element={<PhotoView />} />
-
-                        {/* Admin routes */}
-                        <Route path="/admin-login" element={<AdminLogin />} />
-                        <Route
-                            path="/admin"
-                            element={
-                                <AdminRoute>
-                                    <AdminDashboard />
-                                </AdminRoute>
-                            }
-                        />
-
-                        {/* Catch all route - redirect to home */}
-                        <Route path="*" element={<Navigate to="/" replace />} />
-                    </Routes>
-                </div>
-            </Router>
-        </CameraProvider>
+                <Router>
+                    <div className="min-h-screen bg-wedding-background">
+                        <AnimatedRoutes />
+                    </div>
+                </Router>
+            </CameraProvider>
+        </SoundProvider>
     );
 }
 
