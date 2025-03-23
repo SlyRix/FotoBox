@@ -2288,7 +2288,214 @@ app.delete('/api/admin/frame-templates/:overlayName', (req, res) => {
         error: 'Template not found for this frame'
     });
 });
+app.post('/api/photos/:filename/filter', async (req, res) => {
+    const photoId = req.params.filename;
+    const { filter } = req.body;
 
+    if (!photoId || !filter) {
+        return res.status(400).json({
+            success: false,
+            error: 'Photo ID and filter type are required'
+        });
+    }
+
+    try {
+        // Find source photo path
+        const baseFilename = photoId.replace(/^(filtered_|instagram_|frame_)/, '');
+        let sourcePhotoPath;
+
+        // Try to find the original photo first (best quality for filtering)
+        const originalPath = path.join(ORIGINALS_DIR, `original_${baseFilename}`);
+        const standardPath = path.join(PHOTOS_DIR, baseFilename);
+
+        if (fs.existsSync(originalPath)) {
+            sourcePhotoPath = originalPath;
+        } else if (fs.existsSync(standardPath)) {
+            sourcePhotoPath = standardPath;
+        } else {
+            // Fall back to the provided photo ID path
+            sourcePhotoPath = path.join(PHOTOS_DIR, photoId);
+
+            if (!fs.existsSync(sourcePhotoPath)) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Source photo not found'
+                });
+            }
+        }
+
+        console.log(`Applying ${filter} filter to ${sourcePhotoPath}`);
+
+        // Create a filtered version filename
+        const filteredFilename = `filtered_${filter}_${baseFilename}`;
+        const filteredPhotoPath = path.join(PHOTOS_DIR, filteredFilename);
+
+        // Special handling for Forever filter with vignette effect
+        if (filter === 'forever') {
+            // First apply the basic adjustments
+            await sharp(sourcePhotoPath)
+                .modulate({
+                    contrast: 1.15,
+                    brightness: 1.1,
+                    saturation: 1.05
+                })
+                .sharpen(0.5)
+                .toFormat('jpeg', { quality: 90 })
+                .toFile(filteredPhotoPath);
+
+            // Create a temporary file for the vignette effect
+            const tempFilteredPath = path.join(PHOTOS_DIR, `temp_${filteredFilename}`);
+
+            // Move the filtered file to the temp location
+            fs.renameSync(filteredPhotoPath, tempFilteredPath);
+
+            // Apply vignette effect
+            await applyVignetteEffect(tempFilteredPath, filteredPhotoPath);
+
+            // Remove the temporary file
+            fs.unlinkSync(tempFilteredPath);
+        } else {
+            // Apply other filters using Sharp
+            const filterParams = getFilterParams(filter);
+            let sharpImage = sharp(sourcePhotoPath);
+
+            // Apply greyscale if specified
+            if (filterParams.greyscale) {
+                sharpImage = sharpImage.greyscale();
+            }
+
+            // Apply sepia if specified
+            if (filterParams.sepia) {
+                sharpImage = sharpImage.tint(filterParams.sepia);
+            }
+
+            // Apply blur if specified
+            if (filterParams.blur !== undefined) {
+                sharpImage = sharpImage.blur(filterParams.blur);
+            }
+
+            // Apply sharpen if specified
+            if (filterParams.sharpen !== undefined) {
+                sharpImage = sharpImage.sharpen(filterParams.sharpen);
+            }
+
+            // Apply modulate adjustments if specified
+            if (filterParams.modulate) {
+                sharpImage = sharpImage.modulate(filterParams.modulate);
+            }
+
+            // Save the filtered image
+            await sharpImage
+                .toFormat('jpeg', { quality: 90 })
+                .toFile(filteredPhotoPath);
+        }
+
+        // Generate thumbnail for filtered version
+        const thumbnailUrl = await generateThumbnail(filteredPhotoPath, filteredFilename);
+
+        return res.json({
+            success: true,
+            message: 'Filter applied successfully',
+            photoUrl: `/photos/${filteredFilename}`,
+            thumbnailUrl: thumbnailUrl
+        });
+    } catch (error) {
+        console.error('Error applying filter:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error applying filter: ' + error.message
+        });
+    }
+});
+
+// Create a vignette effect overlay (for the Forever filter)
+async function applyVignetteEffect(inputPath, outputPath) {
+    try {
+        // Get dimensions of the input image
+        const metadata = await sharp(inputPath).metadata();
+        const { width, height } = metadata;
+
+        // Create a radial gradient for vignette effect
+        const svgVignette = `
+        <svg width="${width}" height="${height}">
+            <defs>
+                <radialGradient id="vignette" cx="50%" cy="50%" r="65%" fx="50%" fy="50%">
+                    <stop offset="0%" stop-color="white" stop-opacity="1" />
+                    <stop offset="85%" stop-color="white" stop-opacity="0.7" />
+                    <stop offset="100%" stop-color="black" stop-opacity="0.5" />
+                </radialGradient>
+            </defs>
+            <rect x="0" y="0" width="${width}" height="${height}" fill="url(#vignette)" />
+        </svg>`;
+
+        // Create a buffer from the SVG
+        const vignetteBuffer = Buffer.from(svgVignette);
+
+        // Apply the vignette overlay
+        await sharp(inputPath)
+            .composite([
+                {
+                    input: vignetteBuffer,
+                    blend: 'multiply'
+                }
+            ])
+            .toFile(outputPath);
+
+        return true;
+    } catch (error) {
+        console.error('Error applying vignette effect:', error);
+        return false;
+    }
+}
+
+// Helper function to map filter names to Sharp parameters
+function getFilterParams(filter) {
+    switch (filter) {
+        case 'grayscale':
+            return {
+                greyscale: true
+            };
+        case 'sepia':
+            return {
+                sepia: { r: 112, g: 66, b: 20 },
+                modulate: {
+                    brightness: 1.1,
+                    saturation: 0.8
+                }
+            };
+        case 'dream':
+            return {
+                modulate: {
+                    brightness: 1.1,
+                    contrast: 0.85,
+                    saturation: 1.2
+                },
+                blur: 0.5
+            };
+        case 'romance':
+            return {
+                modulate: {
+                    brightness: 1.05,
+                    contrast: 0.95,
+                    saturation: 1.15
+                },
+                sepia: { r: 255, g: 222, b: 213 }
+            };
+        case 'forever':
+            return {
+                modulate: {
+                    contrast: 1.15,
+                    brightness: 1.1,
+                    saturation: 1.05
+                },
+                sharpen: 0.5
+                // Vignette effect is applied in a separate step
+            };
+        case 'original':
+        default:
+            return {};
+    }
+}
 // ==========================================
 // SERVER INITIALIZATION
 // ==========================================
