@@ -590,7 +590,38 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
             fs.mkdirSync(outputDir, { recursive: true });
         }
 
-        // Check if this is an Instagram overlay
+        // Check if source and output are the same file
+        if (sourceImagePath === outputPath) {
+            // Create a temporary path
+            const tempOutputPath = path.join(
+                outputDir,
+                `temp_${Date.now()}_${path.basename(outputPath)}`
+            );
+
+            // Process using the temp path
+            const success = await applyOverlayToImage(sourceImagePath, overlayImagePath, tempOutputPath);
+
+            // If successful, replace the original file with the temp file
+            if (success) {
+                fs.renameSync(tempOutputPath, outputPath);
+                return true;
+            }
+            return false;
+        }
+
+        // Ensure source image exists
+        if (!fs.existsSync(sourceImagePath)) {
+            console.error(`Source image not found: ${sourceImagePath}`);
+            return false;
+        }
+
+        // Ensure overlay exists
+        if (!fs.existsSync(overlayImagePath)) {
+            console.error(`Overlay not found: ${overlayImagePath}`);
+            return false;
+        }
+
+        // The rest of the function remains the same...
         const overlayFilename = path.basename(overlayImagePath);
         console.log(`Applying overlay: ${overlayFilename}`);
 
@@ -614,18 +645,6 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
         // Special handling for Instagram format
         if (overlayFilename.startsWith('instagram')) {
             return processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath);
-        }
-
-        // Ensure source image exists
-        if (!fs.existsSync(sourceImagePath)) {
-            console.error(`Source image not found: ${sourceImagePath}`);
-            return false;
-        }
-
-        // Ensure overlay exists
-        if (!fs.existsSync(overlayImagePath)) {
-            console.error(`Overlay not found: ${overlayImagePath}`);
-            return false;
         }
 
         // Standard overlay process
@@ -888,13 +907,14 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             .toBuffer();
 
         // 7. Add the overlay to the canvas with image
+        // IMPORTANT: Use .jpeg() before .toFile() to ensure the correct format is used
         await sharp(canvasWithImage)
             .composite([{
                 input: resizedOverlay,
                 left: 0,
                 top: 0
             }])
-            .jpeg({ quality: 95 })
+            .jpeg() // Explicitly set output format to JPEG
             .toFile(outputPath);
 
         console.log(`[Instagram] Successfully created Instagram photo: ${outputPath}`);
@@ -920,7 +940,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
                     left: 0,
                     top: 0
                 }])
-                .jpeg({ quality: 90 })
+                .jpeg() // Explicitly set output format to JPEG
                 .toFile(outputPath);
 
             console.log(`[Instagram] Emergency fallback succeeded`);
