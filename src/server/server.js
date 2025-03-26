@@ -497,16 +497,27 @@ async function processPhotoWithDualFormats(sourceFilePath, filename) {
             }
         }
 
-        // 3. Create main version with standard frame
+        // 3. Apply frame to both print version and public version
         let overlayApplied = false;
         const defaultOverlayPath = path.join(OVERLAYS_DIR, 'wedding-frame.png');
 
         if (fs.existsSync(defaultOverlayPath)) {
             try {
-                // Apply frame to the print version and save as public version
+                // Apply frame to the print version
+                const printWithFramePath = path.join(PRINT_PHOTOS_DIR, `framed_${printFilename}`);
+                const printFrameSuccess = await applyOverlayToImage(printPath, defaultOverlayPath, printWithFramePath);
+
+                if (printFrameSuccess) {
+                    // Replace the print version with the framed version
+                    fs.unlinkSync(printPath);
+                    fs.renameSync(printWithFramePath, printPath);
+                    console.log(`Frame applied to print version: Success`);
+                }
+
+                // Apply frame to the public version
                 const success = await applyOverlayToImage(printPath, defaultOverlayPath, publicPath);
                 overlayApplied = success;
-                console.log(`Frame applied to photo: ${success ? 'Success' : 'Failed'}`);
+                console.log(`Frame applied to public photo: ${success ? 'Success' : 'Failed'}`);
             } catch (overlayError) {
                 console.error('Error applying default overlay:', overlayError);
                 // If frame application fails, copy print version as fallback
