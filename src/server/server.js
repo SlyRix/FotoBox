@@ -689,6 +689,9 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         const imgMetadata = await sharp(sourceImagePath).metadata();
         const overlayMetadata = await sharp(overlayImagePath).metadata();
 
+        console.log(`Processing photo with dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
+        console.log(`Overlay dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
+
         // Determine if the overlay is standard (A5 landscape) or custom
         const isStandardFormat = overlayName === 'wedding-frame.png';
 
@@ -709,9 +712,17 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         const centerX = canvasWidth / 2;
         const centerY = canvasHeight / 2;
 
-        // Calculate scaled dimensions
-        const scaledWidth = Math.round(imgMetadata.width * template.scale);
-        const scaledHeight = Math.round(imgMetadata.height * template.scale);
+        // Calculate scaled dimensions with default values if not provided
+        const scale = template.scale || 1.0;
+        const rotation = template.rotation || 0;
+        const positionX = template.positionX || 0;
+        const positionY = template.positionY || 0;
+
+        const scaledWidth = Math.round(imgMetadata.width * scale);
+        const scaledHeight = Math.round(imgMetadata.height * scale);
+
+        console.log(`Applying template with scale: ${scale}, position: ${positionX},${positionY}, rotation: ${rotation}`);
+        console.log(`Scaled dimensions: ${scaledWidth}x${scaledHeight}`);
 
         // Create a buffer of the scaled and rotated source image
         const processedImage = await sharp(sourceImagePath)
@@ -720,7 +731,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
                 height: scaledHeight,
                 fit: 'fill'
             })
-            .rotate(template.rotation, {
+            .rotate(rotation, {
                 background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background for rotation
             })
             .toBuffer();
@@ -740,17 +751,26 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             .composite([
                 {
                     input: processedImage,
-                    left: Math.round(centerX - (scaledWidth / 2) + template.positionX),
-                    top: Math.round(centerY - (scaledHeight / 2) + template.positionY)
+                    left: Math.round(centerX - (scaledWidth / 2) + positionX),
+                    top: Math.round(centerY - (scaledHeight / 2) + positionY)
                 }
             ])
+            .toBuffer();
+
+        // Resize the overlay to match the canvas dimensions exactly
+        const resizedOverlay = await sharp(overlayImagePath)
+            .resize({
+                width: canvasWidth,
+                height: canvasHeight,
+                fit: 'fill'
+            })
             .toBuffer();
 
         // Add the overlay on top
         await sharp(withPhotoComposite)
             .composite([
                 {
-                    input: overlayImagePath,
+                    input: resizedOverlay,
                     gravity: 'center'
                 }
             ])
@@ -787,16 +807,20 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
         const imgMetadata = await sharp(sourceImagePath).metadata();
         console.log(`Processing photo with dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
 
+        // Get metadata from the overlay to ensure correct dimensions
+        const overlayMetadata = await sharp(overlayImagePath).metadata();
+        console.log(`Overlay dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
+
         // Calculate the center point
         const centerX = targetWidth / 2;
         const centerY = targetHeight / 2;
 
         // Calculate scaled dimensions with a minimum scale to ensure visibility
-        const scale = Math.max(template.scale, 0.5); // Ensure minimum scale of 50%
+        const scale = Math.max(template.scale || 0.8, 0.5); // Ensure minimum scale of 50%
         const scaledWidth = Math.round(imgMetadata.width * scale);
         const scaledHeight = Math.round(imgMetadata.height * scale);
 
-        console.log(`Applying template with scale: ${scale}, position: ${template.positionX},${template.positionY}, rotation: ${template.rotation}`);
+        console.log(`Applying template with scale: ${scale}, position: ${template.positionX || 0},${template.positionY || 0}, rotation: ${template.rotation || 0}`);
         console.log(`Scaled dimensions: ${scaledWidth}x${scaledHeight}`);
 
         // Create a buffer of the scaled and rotated source image
@@ -807,12 +831,12 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
                 fit: 'contain',
                 background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
-            .rotate(template.rotation, {
+            .rotate(template.rotation || 0, {
                 background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
             .toBuffer();
 
-        // First create a white background image
+        // First create a white background canvas of the target size
         const backgroundImage = await sharp({
             create: {
                 width: targetWidth,
@@ -825,8 +849,8 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             .toBuffer();
 
         // Position the processed image on the white background
-        const positionX = Math.round(centerX - (scaledWidth / 2) + template.positionX);
-        const positionY = Math.round(centerY - (scaledHeight / 2) + template.positionY);
+        const positionX = Math.round(centerX - (scaledWidth / 2) + (template.positionX || 0));
+        const positionY = Math.round(centerY - (scaledHeight / 2) + (template.positionY || 0));
 
         console.log(`Positioning image at: ${positionX},${positionY} on ${targetWidth}x${targetHeight} canvas`);
 
@@ -846,11 +870,20 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             throw new Error('Overlay image not found');
         }
 
+        // Resize the overlay to exactly match the canvas dimensions
+        const resizedOverlay = await sharp(overlayImagePath)
+            .resize({
+                width: targetWidth,
+                height: targetHeight,
+                fit: 'fill'
+            })
+            .toBuffer();
+
         // Add the Instagram overlay on top
         await sharp(withPhotoComposite)
             .composite([
                 {
-                    input: overlayImagePath,
+                    input: resizedOverlay,
                     gravity: 'center'
                 }
             ])
