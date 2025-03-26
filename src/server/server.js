@@ -783,61 +783,60 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
     }
 }
 /**
- * Diagnostic Instagram function that ensures both photo and frame appear
+ * Instagram overlay function with horizontal fill and vertical centering
  * @param {string} sourceImagePath - Path to the source image
  * @param {string} overlayImagePath - Path to the overlay image
  * @param {string} outputPath - Path to save the resulting image
- * @param {object} template - Template data (ignored in this implementation)
  * @returns {boolean} Success state of the operation
  */
 async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template) {
     try {
-        console.log(`[DIAG] ===== STARTING INSTAGRAM OVERLAY DIAGNOSTIC =====`);
-        console.log(`[DIAG] Source: ${sourceImagePath}`);
-        console.log(`[DIAG] Overlay: ${overlayImagePath}`);
-        console.log(`[DIAG] Output: ${outputPath}`);
+        console.log(`[FILL] Starting Instagram process with horizontal fill`);
 
         // Instagram dimensions
         const targetWidth = 1080;
         const targetHeight = 1920;
 
-        // Check if files exist
-        if (!fs.existsSync(sourceImagePath)) {
-            console.error(`[DIAG] SOURCE FILE MISSING: ${sourceImagePath}`);
-            throw new Error('Source file not found');
-        }
+        // Frame margins
+        const horizontalMargin = 80; // Pixels from edge on each side
+        const topFrameHeight = 200;  // Height of top frame area
+        const bottomFrameHeight = 300; // Height of bottom frame area
 
-        if (!fs.existsSync(overlayImagePath)) {
-            console.error(`[DIAG] OVERLAY FILE MISSING: ${overlayImagePath}`);
-            throw new Error('Overlay file not found');
-        }
+        // Available area for photo after frame margins
+        const photoWidth = targetWidth - (horizontalMargin * 2);
+        const photoArea = targetHeight - topFrameHeight - bottomFrameHeight;
 
-        // Create output directory if doesn't exist
-        const outputDir = path.dirname(outputPath);
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
+        console.log(`[FILL] Photo area dimensions: ${photoWidth}x${photoArea}`);
 
-        // Create temp directory for diagnostic files
-        const tempDir = path.join(outputDir, 'temp_diag');
-        if (!fs.existsSync(tempDir)) {
-            fs.mkdirSync(tempDir, { recursive: true });
-        }
+        // Create temp files
+        const tempSourcePath = outputPath + '.temp_source.jpg';
+        const tempBasePath = outputPath + '.temp_base.jpg';
 
-        // Use fs.copyFile to create a direct copy of the source image to verify it's readable
-        const sourceCopyPath = path.join(tempDir, 'source_copy.jpg');
-        await fs.promises.copyFile(sourceImagePath, sourceCopyPath);
-        console.log(`[DIAG] Source file copied successfully to ${sourceCopyPath}`);
-
-        // Step 1: Save a copy of the source image after basic processing
-        const processedSourcePath = path.join(tempDir, 'processed_source.jpg');
+        // 1. Ensure source image is valid by converting to JPEG
         await sharp(sourceImagePath)
-            .toFormat('jpeg')
-            .toFile(processedSourcePath);
-        console.log(`[DIAG] Source processed to JPEG at ${processedSourcePath}`);
+            .jpeg()
+            .toFile(tempSourcePath);
 
-        // Step 2: Create a separate file with a white canvas
-        const canvasPath = path.join(tempDir, 'canvas.jpg');
+        // 2. Get source dimensions
+        const metadata = await sharp(tempSourcePath).metadata();
+        console.log(`[FILL] Source image dimensions: ${metadata.width}x${metadata.height}`);
+
+        // 3. Calculate dimensions to fill width while maintaining aspect ratio
+        const aspectRatio = metadata.width / metadata.height;
+
+        // Always set width to photoWidth (fill horizontally)
+        const resizeWidth = photoWidth;
+        const resizeHeight = Math.round(photoWidth / aspectRatio);
+
+        console.log(`[FILL] Resizing to: ${resizeWidth}x${resizeHeight}`);
+
+        // 4. Calculate vertical position to center the image in available area
+        // If image is taller than available area, we'll crop it
+        const verticalPosition = Math.max(0, Math.round(topFrameHeight + (photoArea - resizeHeight) / 2));
+
+        console.log(`[FILL] Vertical position: ${verticalPosition}`);
+
+        // 5. Create a white base canvas
         await sharp({
             create: {
                 width: targetWidth,
@@ -846,129 +845,126 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
                 background: { r: 255, g: 255, b: 255 }
             }
         })
-            .toFormat('jpeg')
-            .toFile(canvasPath);
-        console.log(`[DIAG] Created white canvas at ${canvasPath}`);
+            .jpeg()
+            .toFile(tempBasePath);
 
-        // Step 3: Resize the source for Instagram proportions
-        const resizedPath = path.join(tempDir, 'resized.jpg');
+        // 6. Resize the source image to fill width
+        const resizedBuffer = await sharp(tempSourcePath)
+            .resize(resizeWidth, resizeHeight, {
+                fit: 'fill',
+            })
+            .jpeg()
+            .toBuffer();
 
-        // Get source dimensions
-        const metadata = await sharp(processedSourcePath).metadata();
-        console.log(`[DIAG] Source dimensions: ${metadata.width}x${metadata.height}`);
-
-        // Decide on maximum dimensions (60% of Instagram frame)
-        const maxWidth = Math.round(targetWidth * 0.6);
-        const maxHeight = Math.round(targetHeight * 0.4);
-        console.log(`[DIAG] Max dimensions: ${maxWidth}x${maxHeight}`);
-
-        // Calculate resize dimensions
-        let width, height;
-        const aspectRatio = metadata.width / metadata.height;
-
-        if (aspectRatio > 1) {
-            // Landscape image
-            width = maxWidth;
-            height = Math.round(width / aspectRatio);
-        } else {
-            // Portrait or square image
-            height = maxHeight;
-            width = Math.round(height * aspectRatio);
-        }
-
-        console.log(`[DIAG] Resizing to: ${width}x${height}`);
-
-        await sharp(processedSourcePath)
-            .resize(width, height)
-            .toFormat('jpeg')
-            .toFile(resizedPath);
-        console.log(`[DIAG] Resized image saved to ${resizedPath}`);
-
-        // Step 4: Place the resized image on the canvas
-        // Position it in the upper third of the canvas
-        const topOffset = Math.round(targetHeight * 0.25);
-        const leftOffset = Math.round((targetWidth - width) / 2);
-        console.log(`[DIAG] Positioning at: ${leftOffset},${topOffset}`);
-
-        const withImagePath = path.join(tempDir, 'with_image.jpg');
-        await sharp(canvasPath)
+        // 7. Place resized image on canvas at calculated position
+        await sharp(tempBasePath)
             .composite([{
-                input: resizedPath,
-                top: topOffset,
-                left: leftOffset
+                input: resizedBuffer,
+                top: verticalPosition,
+                left: horizontalMargin
             }])
-            .toFormat('jpeg')
-            .toFile(withImagePath);
-        console.log(`[DIAG] Canvas with image saved to ${withImagePath}`);
-
-        // Step 5: Process overlay to ensure it's the right format and dimensions
-        const processedOverlayPath = path.join(tempDir, 'processed_overlay.png');
-        await sharp(overlayImagePath)
-            .resize(targetWidth, targetHeight)
-            .toFormat('png')
-            .toFile(processedOverlayPath);
-        console.log(`[DIAG] Processed overlay saved to ${processedOverlayPath}`);
-
-        // Step 6: Add the overlay to the image
-        await sharp(withImagePath)
-            .composite([{
-                input: processedOverlayPath,
-                gravity: 'center'
-            }])
-            .toFormat('jpeg')
-            .jpeg({ quality: 90 })
+            .jpeg()
             .toFile(outputPath);
-        console.log(`[DIAG] Final output with overlay saved to ${outputPath}`);
 
-        // Don't clean up the temp files for diagnostic purposes
-        console.log(`[DIAG] All diagnostic files preserved in ${tempDir} for troubleshooting`);
+        // 8. Create a branded frame
+        const primaryColor = "#b08968"; // Wedding theme color
+        const secondaryColor = "#d93f0b"; // Secondary wedding color
 
+        const frameBuffer = await sharp({
+            create: {
+                width: targetWidth,
+                height: targetHeight,
+                channels: 4,
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
+            }
+        })
+            .composite([
+                // Top colored bar with gradient
+                {
+                    input: Buffer.from(`<svg width="${targetWidth}" height="${topFrameHeight}">
+                    <defs>
+                        <linearGradient id="topGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:${primaryColor};stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:${secondaryColor};stop-opacity:1" />
+                        </linearGradient>
+                    </defs>
+                    <rect x="0" y="0" width="${targetWidth}" height="${topFrameHeight}" fill="url(#topGradient)" />
+                </svg>`),
+                    top: 0,
+                    left: 0
+                },
+                // Bottom colored bar with gradient
+                {
+                    input: Buffer.from(`<svg width="${targetWidth}" height="${bottomFrameHeight}">
+                    <defs>
+                        <linearGradient id="bottomGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:${secondaryColor};stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:${primaryColor};stop-opacity:1" />
+                        </linearGradient>
+                    </defs>
+                    <rect x="0" y="0" width="${targetWidth}" height="${bottomFrameHeight}" fill="url(#bottomGradient)" />
+                </svg>`),
+                    top: targetHeight - bottomFrameHeight,
+                    left: 0
+                },
+                // Add text and decorative elements
+                {
+                    input: Buffer.from(`<svg width="${targetWidth}" height="${targetHeight}">
+                    <!-- Decorative swirl at top -->
+                    <path d="M${targetWidth/2-200},${topFrameHeight-40} C${targetWidth/2-100},${topFrameHeight-80} ${targetWidth/2+100},${topFrameHeight-80} ${targetWidth/2+200},${topFrameHeight-40}" 
+                          stroke="white" stroke-width="3" fill="none" />
+                          
+                    <!-- Wedding names at top -->
+                    <text x="${targetWidth/2}" y="${topFrameHeight/2+10}" 
+                          font-family="Arial" font-size="60" font-weight="bold" 
+                          text-anchor="middle" fill="white">
+                          Rushel & Sivani
+                    </text>
+                    
+                    <!-- Date at bottom -->
+                    <text x="${targetWidth/2}" y="${targetHeight-bottomFrameHeight/2-30}" 
+                          font-family="Arial" font-size="40" font-weight="bold" 
+                          text-anchor="middle" fill="white">
+                          Wedding
+                    </text>
+                    
+                    <!-- Hashtag at bottom -->
+                    <text x="${targetWidth/2}" y="${targetHeight-bottomFrameHeight/2+30}" 
+                          font-family="Arial" font-size="30" 
+                          text-anchor="middle" fill="white">
+                          #RushelAndSivani
+                    </text>
+                </svg>`),
+                    top: 0,
+                    left: 0
+                }
+            ])
+            .png()
+            .toBuffer();
+
+        // 9. Apply the frame to the image with photo
+        await sharp(outputPath)
+            .composite([{
+                input: frameBuffer,
+                top: 0,
+                left: 0
+            }])
+            .jpeg({ quality: 90 })
+            .toFile(outputPath + '.final.jpg');
+
+        // 10. Rename to final output
+        fs.renameSync(outputPath + '.final.jpg', outputPath);
+
+        // Clean up temp files
+        fs.unlinkSync(tempSourcePath);
+        fs.unlinkSync(tempBasePath);
+        if (fs.existsSync(outputPath + '.final.jpg')) fs.unlinkSync(outputPath + '.final.jpg');
+
+        console.log(`[FILL] Successfully created Instagram photo with horizontal fill`);
         return true;
     } catch (error) {
-        console.error(`[DIAG] ERROR in diagnostic Instagram function:`, error);
-
-        // If we get here, we really need a guaranteed solution that works
-        try {
-            console.log(`[DIAG] Attempting guaranteed solution...`);
-
-            // Create our own basic version of an Instagram frame
-            const finalBackupPath = outputPath.replace('.jpg', '_backup.jpg');
-
-            // 1. Create a white canvas
-            await sharp({
-                create: {
-                    width: 1080,
-                    height: 1920,
-                    channels: 3,
-                    background: { r: 255, g: 255, b: 255 }
-                }
-            })
-                .toFile(finalBackupPath);
-
-            // 2. Directly resize and place the source image (skipping compositing)
-            await sharp(sourceImagePath)
-                .resize(600, 600, {
-                    fit: 'inside',
-                    withoutEnlargement: true
-                })
-                .toBuffer()
-                .then(data => {
-                    // Make a simple colored border rectangle for frame
-                    return sharp(finalBackupPath)
-                        .composite([{
-                            input: data,
-                            top: 500,
-                            left: 240
-                        }])
-                        .toFile(outputPath);
-                });
-
-            console.log(`[DIAG] Guaranteed solution saved to ${outputPath}`);
-            return true;
-        } catch (backupError) {
-            console.error(`[DIAG] BACKUP SOLUTION ALSO FAILED:`, backupError);
-            return false;
-        }
+        console.error(`[FILL] Error:`, error);
+        return false;
     }
 }
 /**
