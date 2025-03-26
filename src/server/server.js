@@ -11,7 +11,7 @@ const WebSocket = require('ws');
 const compression = require('compression');
 const sharp = require('sharp');
 const multer = require('multer');
-
+const config = require('./config');
 // ==========================================
 // CONFIGURATION AND INITIALIZATION
 // ==========================================
