@@ -337,7 +337,7 @@ function startWebcamPreview() {
         const previewPath = path.join(PREVIEW_DIR, `preview_${timestamp}.jpg`);
 
         // Use fswebcam with optimized settings for smoother preview
-        exec(`fswebcam -d /dev/video0 -r 320x240 --fps 30 --no-banner --skip 1 --jpeg 80 ${previewPath}`, (error, stdout, stderr) => {
+        exec(`fswebcam -d /dev/video1 -r 320x240 --fps 30 --no-banner --skip 1 --jpeg 80 ${previewPath}`, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Error capturing preview: ${error.message}`);
                 return;
@@ -1771,7 +1771,7 @@ app.post('/api/photos/capture', async (req, res) => {
             console.error(`Error taking photo: ${error ? error.message : stderr}`);
 
             // Fall back to webcam as backup
-            const fallbackCommand = `fswebcam -d /dev/video0 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
+            const fallbackCommand = `fswebcam -d /dev/video1 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
 
             exec(fallbackCommand, async (fbError, fbStdout, fbStderr) => {
                 captureInProgress.status = false;
