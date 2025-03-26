@@ -783,7 +783,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
     }
 }
 /**
- * Instagram overlay function that fills horizontally and centers vertically
+ * Instagram overlay function with fixed SVG for the frame
  * @param {string} sourceImagePath - Path to the source image
  * @param {string} overlayImagePath - Path to the overlay image
  * @param {string} outputPath - Path to save the resulting image
@@ -791,7 +791,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
  */
 async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template) {
     try {
-        console.log(`[FILL] Starting horizontal-fill Instagram process`);
+        console.log(`[FIXED] Starting Instagram process with fixed SVG`);
 
         // Instagram dimensions
         const targetWidth = 1080;
@@ -808,7 +808,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
 
         // Get source image dimensions
         const metadata = await sharp(tempSourcePath).metadata();
-        console.log(`[FILL] Source dimensions: ${metadata.width}x${metadata.height}`);
+        console.log(`[FIXED] Source dimensions: ${metadata.width}x${metadata.height}`);
 
         // 2. Create a white base canvas
         await sharp({
@@ -827,7 +827,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
         const fillWidth = Math.round(targetWidth * 0.9);
         // Calculate height based on aspect ratio
         const fillHeight = Math.round(fillWidth * (metadata.height / metadata.width));
-        console.log(`[FILL] Resize dimensions: ${fillWidth}x${fillHeight}`);
+        console.log(`[FIXED] Resize dimensions: ${fillWidth}x${fillHeight}`);
 
         // 4. Resize source image to fill width
         const resizedBuffer = await sharp(tempSourcePath)
@@ -852,7 +852,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
         // Horizontal position (centered)
         const leftOffset = Math.round((targetWidth - fillWidth) / 2);
 
-        console.log(`[FILL] Positioning at: ${leftOffset},${imageTopOffset}`);
+        console.log(`[FIXED] Positioning at: ${leftOffset},${imageTopOffset}`);
 
         // 6. Place resized image on canvas
         await sharp(tempBasePath)
@@ -864,52 +864,56 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             .jpeg()
             .toFile(outputPath);
 
-        // 7. Create a simple colored frame
-        const frameBuffer = await sharp({
+        // 7. Create top colored bar
+        const topBarBuffer = await sharp({
             create: {
                 width: targetWidth,
-                height: targetHeight,
-                channels: 4,
-                background: { r: 0, g: 0, b: 0, alpha: 0 }
+                height: 200,
+                channels: 3,
+                background: { r: 176, g: 137, b: 104 } // #b08968
             }
-        })
+        }).png().toBuffer();
+
+        // 8. Create bottom colored bar
+        const bottomBarBuffer = await sharp({
+            create: {
+                width: targetWidth,
+                height: 300,
+                channels: 3,
+                background: { r: 176, g: 137, b: 104 } // #b08968
+            }
+        }).png().toBuffer();
+
+        // 9. Create text overlay - PROPERLY ESCAPED XML!
+        const textSvg = `
+        <svg width="${targetWidth}" height="${targetHeight}">
+            <text x="540" y="120" font-family="Arial" font-size="60" text-anchor="middle" fill="white">Rushel &amp; Sivani</text>
+            <text x="540" y="${targetHeight - 120}" font-family="Arial" font-size="36" text-anchor="middle" fill="white">Wedding Photo</text>
+        </svg>`;
+
+        // 10. Apply the frame elements to the image with photo
+        await sharp(outputPath)
             .composite([
-                // Top colored bar
                 {
-                    input: Buffer.from(`<svg><rect x="0" y="0" width="${targetWidth}" height="200" fill="#b08968" /></svg>`),
+                    input: topBarBuffer,
                     top: 0,
                     left: 0
                 },
-                // Bottom colored bar
                 {
-                    input: Buffer.from(`<svg><rect x="0" y="0" width="${targetWidth}" height="300" fill="#b08968" /></svg>`),
+                    input: bottomBarBuffer,
                     top: targetHeight - 300,
                     left: 0
                 },
-                // Add text
                 {
-                    input: Buffer.from(`<svg width="${targetWidth}" height="${targetHeight}">
-                    <text x="540" y="120" font-family="Arial" font-size="60" text-anchor="middle" fill="white">Rushel & Sivani</text>
-                    <text x="540" y="${targetHeight - 120}" font-family="Arial" font-size="36" text-anchor="middle" fill="white">Wedding Photo</text>
-                </svg>`),
+                    input: Buffer.from(textSvg),
                     top: 0,
                     left: 0
                 }
             ])
-            .png()
-            .toBuffer();
-
-        // 8. Apply the frame to the image with photo
-        await sharp(outputPath)
-            .composite([{
-                input: frameBuffer,
-                top: 0,
-                left: 0
-            }])
             .jpeg({ quality: 90 })
             .toFile(outputPath + '.final.jpg');
 
-        // 9. Rename to final output
+        // 11. Rename to final output
         fs.renameSync(outputPath + '.final.jpg', outputPath);
 
         // Clean up temp files
@@ -918,14 +922,95 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             fs.unlinkSync(tempBasePath);
             if (fs.existsSync(outputPath + '.final.jpg')) fs.unlinkSync(outputPath + '.final.jpg');
         } catch (cleanupErr) {
-            console.log(`[FILL] Cleanup warning: ${cleanupErr.message}`);
+            console.log(`[FIXED] Cleanup warning: ${cleanupErr.message}`);
         }
 
-        console.log(`[FILL] Successfully created horizontal-fill Instagram photo`);
+        console.log(`[FIXED] Successfully created Instagram photo with fixed SVG`);
         return true;
     } catch (error) {
-        console.error(`[FILL] Error in horizontal-fill approach:`, error);
-        return false;
+        console.error(`[FIXED] Error in fixed SVG approach:`, error);
+
+        // Ultimate fallback that doesn't use SVG at all
+        try {
+            console.log(`[FIXED] Attempting non-SVG fallback approach...`);
+
+            // 1. Basic resize of photo to fill width
+            const nonSvgResize = await sharp(sourceImagePath)
+                .resize(900, null, {  // 900px wide (83% of frame)
+                    fit: 'inside',
+                    withoutEnlargement: true
+                })
+                .toBuffer();
+
+            // 2. Create a base image with colored top and bottom bars
+            const baseCanvas = sharp({
+                create: {
+                    width: targetWidth,
+                    height: targetHeight,
+                    channels: 3,
+                    background: { r: 255, g: 255, b: 255 }
+                }
+            });
+
+            // Get resized dimensions
+            const resizeMeta = await sharp(nonSvgResize).metadata();
+
+            // Calculate centering position
+            const resizeLeft = Math.floor((targetWidth - resizeMeta.width) / 2);
+            const resizeTop = Math.floor((targetHeight - resizeMeta.height) / 2);
+
+            // 3. Place image on canvas
+            await baseCanvas
+                .composite([
+                    {
+                        input: nonSvgResize,
+                        top: resizeTop,
+                        left: resizeLeft
+                    }
+                ])
+                .toFile(outputPath);
+
+            // 4. Create simplified frame with rectangles
+            const frameCanvas = await sharp(outputPath)
+                .composite([
+                    // Top bar (brown rectangle)
+                    {
+                        input: {
+                            create: {
+                                width: targetWidth,
+                                height: 200,
+                                channels: 3,
+                                background: { r: 176, g: 137, b: 104 }
+                            }
+                        },
+                        top: 0,
+                        left: 0
+                    },
+                    // Bottom bar (brown rectangle)
+                    {
+                        input: {
+                            create: {
+                                width: targetWidth,
+                                height: 300,
+                                channels: 3,
+                                background: { r: 176, g: 137, b: 104 }
+                            }
+                        },
+                        top: targetHeight - 300,
+                        left: 0
+                    }
+                ])
+                .jpeg()
+                .toFile(outputPath + '.final.jpg');
+
+            fs.renameSync(outputPath + '.final.jpg', outputPath);
+
+            console.log(`[FIXED] Non-SVG fallback succeeded`);
+            return true;
+        } catch (fallbackError) {
+            console.error(`[FIXED] Non-SVG fallback also failed:`, fallbackError);
+            return false;
+        }
     }
 }
 /**
