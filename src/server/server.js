@@ -2447,43 +2447,32 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
     try {
         // Find source photo path
         const baseFilename = photoId.replace(/^(filtered_|instagram_|frame_)/, '');
-        let sourcePhotoPath;
 
-        // Try to find the original photo first (best quality for filtering)
+        // First, get the original photo without any frame
         const originalPath = path.join(ORIGINALS_DIR, `original_${baseFilename}`);
-        const standardPath = path.join(PHOTOS_DIR, baseFilename);
+        let sourcePhotoPath;
 
         if (fs.existsSync(originalPath)) {
             sourcePhotoPath = originalPath;
-        } else if (fs.existsSync(standardPath)) {
-            sourcePhotoPath = standardPath;
         } else {
-            // Fall back to the provided photo ID path
-            if (photoId.startsWith('instagram_')) {
-                sourcePhotoPath = path.join(INSTAGRAM_PHOTOS_DIR, photoId);
-            } else if (photoId.startsWith('frame_')) {
-                sourcePhotoPath = path.join(FRAME_PHOTOS_DIR, photoId);
-            } else {
-                sourcePhotoPath = path.join(PHOTOS_DIR, photoId);
-            }
-
-            if (!fs.existsSync(sourcePhotoPath)) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Source photo not found'
-                });
-            }
+            return res.status(404).json({
+                success: false,
+                error: 'Original photo not found. Cannot apply filter to photo only.'
+            });
         }
 
-        console.log(`Applying ${filter} filter to ${sourcePhotoPath}`);
+        console.log(`Applying ${filter} filter to photo content only: ${sourcePhotoPath}`);
 
         // Create a filtered version filename
         const filteredFilename = `filtered_${filter}_${baseFilename}`;
+        const tempFilteredPath = path.join(PHOTOS_DIR, `temp_${filteredFilename}`);
         const filteredPhotoPath = path.join(PHOTOS_DIR, filteredFilename);
 
-        // Special handling for Forever filter with vignette effect
+        // 1. First apply the filter to the original photo only
+        let filterApplied = false;
+
         if (filter === 'forever') {
-            // First apply the basic adjustments
+            // Apply the forever filter
             await sharp(sourcePhotoPath)
                 .modulate({
                     contrast: 1.15,
@@ -2492,45 +2481,27 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
                 })
                 .sharpen(0.5)
                 .toFormat('jpeg', { quality: 90 })
-                .toFile(filteredPhotoPath);
+                .toFile(tempFilteredPath);
 
-            // Create a temporary file for the vignette effect
-            const tempFilteredPath = path.join(PHOTOS_DIR, `temp_${filteredFilename}`);
-
-            // Move the filtered file to the temp location
-            fs.renameSync(filteredPhotoPath, tempFilteredPath);
-
-            // Apply vignette effect
-            await applyVignetteEffect(tempFilteredPath, filteredPhotoPath);
-
-            // Remove the temporary file
-            fs.unlinkSync(tempFilteredPath);
+            filterApplied = await applyVignetteEffect(tempFilteredPath, tempFilteredPath);
         } else {
             // Apply other filters using Sharp
             const filterParams = getFilterParams(filter);
             let sharpImage = sharp(sourcePhotoPath);
 
-            // Apply greyscale if specified
+            // Apply filter parameters
             if (filterParams.greyscale) {
                 sharpImage = sharpImage.greyscale();
             }
-
-            // Apply sepia if specified
             if (filterParams.sepia) {
                 sharpImage = sharpImage.tint(filterParams.sepia);
             }
-
-            // Apply blur if specified
             if (filterParams.blur !== undefined) {
                 sharpImage = sharpImage.blur(filterParams.blur);
             }
-
-            // Apply sharpen if specified
             if (filterParams.sharpen !== undefined) {
                 sharpImage = sharpImage.sharpen(filterParams.sharpen);
             }
-
-// Apply modulate adjustments if specified
             if (filterParams.modulate) {
                 sharpImage = sharpImage.modulate(filterParams.modulate);
             }
@@ -2538,7 +2509,46 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
             // Save the filtered image
             await sharpImage
                 .toFormat('jpeg', { quality: 90 })
-                .toFile(filteredPhotoPath);
+                .toFile(tempFilteredPath);
+
+            filterApplied = true;
+        }
+
+        if (!filterApplied) {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to apply filter to photo'
+            });
+        }
+
+        // 2. Now apply the appropriate frame to the filtered photo
+        // Determine which frame was used in the original
+        let frameName = 'wedding-frame.png'; // Default frame
+
+        if (photoId.startsWith('instagram_')) {
+            frameName = 'instagram-frame.png';
+        } else if (photoId.startsWith('frame_')) {
+            // Extract custom frame name from a mapping or database if available
+            // This would require additional code to track which frame was used
+            frameName = 'custom-frame.png'; // Placeholder
+        }
+
+        // Get the frame overlay path
+        const overlayPath = path.join(OVERLAYS_DIR, frameName);
+
+        // Apply the frame to the filtered photo
+        let success = await applyOverlayToImage(tempFilteredPath, overlayPath, filteredPhotoPath);
+
+        // Clean up temporary file
+        if (fs.existsSync(tempFilteredPath)) {
+            fs.unlinkSync(tempFilteredPath);
+        }
+
+        if (!success) {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to apply frame to filtered photo'
+            });
         }
 
         // Generate thumbnail for filtered version
@@ -2546,7 +2556,7 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
 
         return res.json({
             success: true,
-            message: 'Filter applied successfully',
+            message: 'Filter applied successfully to photo only',
             photoUrl: `/photos/${filteredFilename}`,
             thumbnailUrl: thumbnailUrl
         });
