@@ -689,9 +689,6 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         const imgMetadata = await sharp(sourceImagePath).metadata();
         const overlayMetadata = await sharp(overlayImagePath).metadata();
 
-        console.log(`Processing photo with dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
-        console.log(`Overlay dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
-
         // Determine if the overlay is standard (A5 landscape) or custom
         const isStandardFormat = overlayName === 'wedding-frame.png';
 
@@ -712,17 +709,9 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         const centerX = canvasWidth / 2;
         const centerY = canvasHeight / 2;
 
-        // Calculate scaled dimensions with default values if not provided
-        const scale = template.scale || 1.0;
-        const rotation = template.rotation || 0;
-        const positionX = template.positionX || 0;
-        const positionY = template.positionY || 0;
-
-        const scaledWidth = Math.round(imgMetadata.width * scale);
-        const scaledHeight = Math.round(imgMetadata.height * scale);
-
-        console.log(`Applying template with scale: ${scale}, position: ${positionX},${positionY}, rotation: ${rotation}`);
-        console.log(`Scaled dimensions: ${scaledWidth}x${scaledHeight}`);
+        // Calculate scaled dimensions
+        const scaledWidth = Math.round(imgMetadata.width * template.scale);
+        const scaledHeight = Math.round(imgMetadata.height * template.scale);
 
         // Create a buffer of the scaled and rotated source image
         const processedImage = await sharp(sourceImagePath)
@@ -731,7 +720,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
                 height: scaledHeight,
                 fit: 'fill'
             })
-            .rotate(rotation, {
+            .rotate(template.rotation, {
                 background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background for rotation
             })
             .toBuffer();
@@ -751,26 +740,17 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             .composite([
                 {
                     input: processedImage,
-                    left: Math.round(centerX - (scaledWidth / 2) + positionX),
-                    top: Math.round(centerY - (scaledHeight / 2) + positionY)
+                    left: Math.round(centerX - (scaledWidth / 2) + template.positionX),
+                    top: Math.round(centerY - (scaledHeight / 2) + template.positionY)
                 }
             ])
-            .toBuffer();
-
-        // Resize the overlay to match the canvas dimensions exactly
-        const resizedOverlay = await sharp(overlayImagePath)
-            .resize({
-                width: canvasWidth,
-                height: canvasHeight,
-                fit: 'fill'
-            })
             .toBuffer();
 
         // Add the overlay on top
         await sharp(withPhotoComposite)
             .composite([
                 {
-                    input: resizedOverlay,
+                    input: overlayImagePath,
                     gravity: 'center'
                 }
             ])
@@ -782,237 +762,102 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         throw error;
     }
 }
+
 /**
- * Instagram overlay function with fixed SVG for the frame
+ * Applies an Instagram template to a photo
  * @param {string} sourceImagePath - Path to the source image
  * @param {string} overlayImagePath - Path to the overlay image
  * @param {string} outputPath - Path to save the resulting image
+ * @param {object} template - Template data with positioning info
  * @returns {boolean} Success state of the operation
  */
 async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template) {
     try {
-        console.log(`[FIXED] Starting Instagram process with fixed SVG`);
+        // Instagram uses 9:16 aspect ratio
+        const targetWidth = 1080;  // Instagram recommended width
+        const targetHeight = 1920; // 9:16 ratio for stories
 
-        // Instagram dimensions
-        const targetWidth = 1080;
-        const targetHeight = 1920;
+        // Get metadata from the original photo
+        const imgMetadata = await sharp(sourceImagePath).metadata();
+        console.log(`Processing photo with dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
 
-        // Create temp files
-        const tempSourcePath = outputPath + '.temp_source.jpg';
-        const tempBasePath = outputPath + '.temp_base.jpg';
+        // Calculate the center point
+        const centerX = targetWidth / 2;
+        const centerY = targetHeight / 2;
 
-        // 1. Ensure source image is valid by converting to JPEG
-        await sharp(sourceImagePath)
-            .jpeg()
-            .toFile(tempSourcePath);
+        // Calculate scaled dimensions with a minimum scale to ensure visibility
+        const scale = Math.max(template.scale, 0.5); // Ensure minimum scale of 50%
+        const scaledWidth = Math.round(imgMetadata.width * scale);
+        const scaledHeight = Math.round(imgMetadata.height * scale);
 
-        // Get source image dimensions
-        const metadata = await sharp(tempSourcePath).metadata();
-        console.log(`[FIXED] Source dimensions: ${metadata.width}x${metadata.height}`);
+        console.log(`Applying template with scale: ${scale}, position: ${template.positionX},${template.positionY}, rotation: ${template.rotation}`);
+        console.log(`Scaled dimensions: ${scaledWidth}x${scaledHeight}`);
 
-        // 2. Create a white base canvas
-        await sharp({
+        // Create a buffer of the scaled and rotated source image
+        const processedImage = await sharp(sourceImagePath)
+            .resize({
+                width: scaledWidth,
+                height: scaledHeight,
+                fit: 'contain',
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
+            })
+            .rotate(template.rotation, {
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
+            })
+            .toBuffer();
+
+        // First create a white background image
+        const backgroundImage = await sharp({
             create: {
                 width: targetWidth,
                 height: targetHeight,
-                channels: 3,
-                background: { r: 255, g: 255, b: 255 }
+                channels: 4,
+                background: { r: 255, g: 255, b: 255, alpha: 1 }
             }
         })
             .jpeg()
-            .toFile(tempBasePath);
-
-        // 3. Calculate dimensions to fill width and preserve aspect ratio
-        // Use 90% of available width
-        const fillWidth = Math.round(targetWidth * 0.9);
-        // Calculate height based on aspect ratio
-        const fillHeight = Math.round(fillWidth * (metadata.height / metadata.width));
-        console.log(`[FIXED] Resize dimensions: ${fillWidth}x${fillHeight}`);
-
-        // 4. Resize source image to fill width
-        const resizedBuffer = await sharp(tempSourcePath)
-            .resize(fillWidth, fillHeight, {
-                fit: 'fill',
-                withoutEnlargement: false
-            })
-            .jpeg()
             .toBuffer();
 
-        // 5. Calculate vertical position to center the image
-        // Reserve 15% space at top and bottom for the colored bars
-        const availableHeight = Math.round(targetHeight * 0.7);
-        const topOffset = Math.round((targetHeight - availableHeight) / 2);
+        // Position the processed image on the white background
+        const positionX = Math.round(centerX - (scaledWidth / 2) + template.positionX);
+        const positionY = Math.round(centerY - (scaledHeight / 2) + template.positionY);
 
-        // If image is taller than available space, center it vertically
-        const imageTopOffset = Math.max(
-            topOffset,
-            Math.round((targetHeight - fillHeight) / 2)
-        );
+        console.log(`Positioning image at: ${positionX},${positionY} on ${targetWidth}x${targetHeight} canvas`);
 
-        // Horizontal position (centered)
-        const leftOffset = Math.round((targetWidth - fillWidth) / 2);
-
-        console.log(`[FIXED] Positioning at: ${leftOffset},${imageTopOffset}`);
-
-        // 6. Place resized image on canvas
-        await sharp(tempBasePath)
-            .composite([{
-                input: resizedBuffer,
-                top: imageTopOffset,
-                left: leftOffset
-            }])
-            .jpeg()
-            .toFile(outputPath);
-
-        // 7. Create top colored bar
-        const topBarBuffer = await sharp({
-            create: {
-                width: targetWidth,
-                height: 200,
-                channels: 3,
-                background: { r: 176, g: 137, b: 104 } // #b08968
-            }
-        }).png().toBuffer();
-
-        // 8. Create bottom colored bar
-        const bottomBarBuffer = await sharp({
-            create: {
-                width: targetWidth,
-                height: 300,
-                channels: 3,
-                background: { r: 176, g: 137, b: 104 } // #b08968
-            }
-        }).png().toBuffer();
-
-        // 9. Create text overlay - PROPERLY ESCAPED XML!
-        const textSvg = `
-        <svg width="${targetWidth}" height="${targetHeight}">
-            <text x="540" y="120" font-family="Arial" font-size="60" text-anchor="middle" fill="white">Rushel &amp; Sivani</text>
-            <text x="540" y="${targetHeight - 120}" font-family="Arial" font-size="36" text-anchor="middle" fill="white">Wedding Photo</text>
-        </svg>`;
-
-        // 10. Apply the frame elements to the image with photo
-        await sharp(outputPath)
+        const withPhotoComposite = await sharp(backgroundImage)
             .composite([
                 {
-                    input: topBarBuffer,
-                    top: 0,
-                    left: 0
-                },
-                {
-                    input: bottomBarBuffer,
-                    top: targetHeight - 300,
-                    left: 0
-                },
-                {
-                    input: Buffer.from(textSvg),
-                    top: 0,
-                    left: 0
+                    input: processedImage,
+                    left: positionX,
+                    top: positionY
                 }
             ])
-            .jpeg({ quality: 90 })
-            .toFile(outputPath + '.final.jpg');
+            .toBuffer();
 
-        // 11. Rename to final output
-        fs.renameSync(outputPath + '.final.jpg', outputPath);
-
-        // Clean up temp files
-        try {
-            fs.unlinkSync(tempSourcePath);
-            fs.unlinkSync(tempBasePath);
-            if (fs.existsSync(outputPath + '.final.jpg')) fs.unlinkSync(outputPath + '.final.jpg');
-        } catch (cleanupErr) {
-            console.log(`[FIXED] Cleanup warning: ${cleanupErr.message}`);
+        // Ensure overlay image exists
+        if (!fs.existsSync(overlayImagePath)) {
+            console.error(`Overlay image not found: ${overlayImagePath}`);
+            throw new Error('Overlay image not found');
         }
 
-        console.log(`[FIXED] Successfully created Instagram photo with fixed SVG`);
+        // Add the Instagram overlay on top
+        await sharp(withPhotoComposite)
+            .composite([
+                {
+                    input: overlayImagePath,
+                    gravity: 'center'
+                }
+            ])
+            .jpeg({ quality: 95 })
+            .toFile(outputPath);
+
         return true;
     } catch (error) {
-        console.error(`[FIXED] Error in fixed SVG approach:`, error);
-
-        // Ultimate fallback that doesn't use SVG at all
-        try {
-            console.log(`[FIXED] Attempting non-SVG fallback approach...`);
-
-            // 1. Basic resize of photo to fill width
-            const nonSvgResize = await sharp(sourceImagePath)
-                .resize(900, null, {  // 900px wide (83% of frame)
-                    fit: 'inside',
-                    withoutEnlargement: true
-                })
-                .toBuffer();
-
-            // 2. Create a base image with colored top and bottom bars
-            const baseCanvas = sharp({
-                create: {
-                    width: targetWidth,
-                    height: targetHeight,
-                    channels: 3,
-                    background: { r: 255, g: 255, b: 255 }
-                }
-            });
-
-            // Get resized dimensions
-            const resizeMeta = await sharp(nonSvgResize).metadata();
-
-            // Calculate centering position
-            const resizeLeft = Math.floor((targetWidth - resizeMeta.width) / 2);
-            const resizeTop = Math.floor((targetHeight - resizeMeta.height) / 2);
-
-            // 3. Place image on canvas
-            await baseCanvas
-                .composite([
-                    {
-                        input: nonSvgResize,
-                        top: resizeTop,
-                        left: resizeLeft
-                    }
-                ])
-                .toFile(outputPath);
-
-            // 4. Create simplified frame with rectangles
-            const frameCanvas = await sharp(outputPath)
-                .composite([
-                    // Top bar (brown rectangle)
-                    {
-                        input: {
-                            create: {
-                                width: targetWidth,
-                                height: 200,
-                                channels: 3,
-                                background: { r: 176, g: 137, b: 104 }
-                            }
-                        },
-                        top: 0,
-                        left: 0
-                    },
-                    // Bottom bar (brown rectangle)
-                    {
-                        input: {
-                            create: {
-                                width: targetWidth,
-                                height: 300,
-                                channels: 3,
-                                background: { r: 176, g: 137, b: 104 }
-                            }
-                        },
-                        top: targetHeight - 300,
-                        left: 0
-                    }
-                ])
-                .jpeg()
-                .toFile(outputPath + '.final.jpg');
-
-            fs.renameSync(outputPath + '.final.jpg', outputPath);
-
-            console.log(`[FIXED] Non-SVG fallback succeeded`);
-            return true;
-        } catch (fallbackError) {
-            console.error(`[FIXED] Non-SVG fallback also failed:`, fallbackError);
-            return false;
-        }
+        console.error('Error applying templated Instagram overlay:', error);
+        throw error;
     }
 }
+
 /**
  * Processes a photo specifically for Instagram format (9:16 ratio)
  * @param {string} sourceImagePath - Path to the source image
