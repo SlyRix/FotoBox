@@ -783,7 +783,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
     }
 }
 /**
- * Instagram overlay function with horizontal fill and vertical centering
+ * Instagram overlay function that fills horizontally and centers vertically
  * @param {string} sourceImagePath - Path to the source image
  * @param {string} overlayImagePath - Path to the overlay image
  * @param {string} outputPath - Path to save the resulting image
@@ -791,22 +791,11 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
  */
 async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template) {
     try {
-        console.log(`[FILL] Starting Instagram process with horizontal fill`);
+        console.log(`[FILL] Starting horizontal-fill Instagram process`);
 
         // Instagram dimensions
         const targetWidth = 1080;
         const targetHeight = 1920;
-
-        // Frame margins
-        const horizontalMargin = 80; // Pixels from edge on each side
-        const topFrameHeight = 200;  // Height of top frame area
-        const bottomFrameHeight = 300; // Height of bottom frame area
-
-        // Available area for photo after frame margins
-        const photoWidth = targetWidth - (horizontalMargin * 2);
-        const photoArea = targetHeight - topFrameHeight - bottomFrameHeight;
-
-        console.log(`[FILL] Photo area dimensions: ${photoWidth}x${photoArea}`);
 
         // Create temp files
         const tempSourcePath = outputPath + '.temp_source.jpg';
@@ -817,26 +806,11 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             .jpeg()
             .toFile(tempSourcePath);
 
-        // 2. Get source dimensions
+        // Get source image dimensions
         const metadata = await sharp(tempSourcePath).metadata();
-        console.log(`[FILL] Source image dimensions: ${metadata.width}x${metadata.height}`);
+        console.log(`[FILL] Source dimensions: ${metadata.width}x${metadata.height}`);
 
-        // 3. Calculate dimensions to fill width while maintaining aspect ratio
-        const aspectRatio = metadata.width / metadata.height;
-
-        // Always set width to photoWidth (fill horizontally)
-        const resizeWidth = photoWidth;
-        const resizeHeight = Math.round(photoWidth / aspectRatio);
-
-        console.log(`[FILL] Resizing to: ${resizeWidth}x${resizeHeight}`);
-
-        // 4. Calculate vertical position to center the image in available area
-        // If image is taller than available area, we'll crop it
-        const verticalPosition = Math.max(0, Math.round(topFrameHeight + (photoArea - resizeHeight) / 2));
-
-        console.log(`[FILL] Vertical position: ${verticalPosition}`);
-
-        // 5. Create a white base canvas
+        // 2. Create a white base canvas
         await sharp({
             create: {
                 width: targetWidth,
@@ -848,28 +822,49 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             .jpeg()
             .toFile(tempBasePath);
 
-        // 6. Resize the source image to fill width
+        // 3. Calculate dimensions to fill width and preserve aspect ratio
+        // Use 90% of available width
+        const fillWidth = Math.round(targetWidth * 0.9);
+        // Calculate height based on aspect ratio
+        const fillHeight = Math.round(fillWidth * (metadata.height / metadata.width));
+        console.log(`[FILL] Resize dimensions: ${fillWidth}x${fillHeight}`);
+
+        // 4. Resize source image to fill width
         const resizedBuffer = await sharp(tempSourcePath)
-            .resize(resizeWidth, resizeHeight, {
+            .resize(fillWidth, fillHeight, {
                 fit: 'fill',
+                withoutEnlargement: false
             })
             .jpeg()
             .toBuffer();
 
-        // 7. Place resized image on canvas at calculated position
+        // 5. Calculate vertical position to center the image
+        // Reserve 15% space at top and bottom for the colored bars
+        const availableHeight = Math.round(targetHeight * 0.7);
+        const topOffset = Math.round((targetHeight - availableHeight) / 2);
+
+        // If image is taller than available space, center it vertically
+        const imageTopOffset = Math.max(
+            topOffset,
+            Math.round((targetHeight - fillHeight) / 2)
+        );
+
+        // Horizontal position (centered)
+        const leftOffset = Math.round((targetWidth - fillWidth) / 2);
+
+        console.log(`[FILL] Positioning at: ${leftOffset},${imageTopOffset}`);
+
+        // 6. Place resized image on canvas
         await sharp(tempBasePath)
             .composite([{
                 input: resizedBuffer,
-                top: verticalPosition,
-                left: horizontalMargin
+                top: imageTopOffset,
+                left: leftOffset
             }])
             .jpeg()
             .toFile(outputPath);
 
-        // 8. Create a branded frame
-        const primaryColor = "#b08968"; // Wedding theme color
-        const secondaryColor = "#d93f0b"; // Secondary wedding color
-
+        // 7. Create a simple colored frame
         const frameBuffer = await sharp({
             create: {
                 width: targetWidth,
@@ -879,61 +874,23 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             }
         })
             .composite([
-                // Top colored bar with gradient
+                // Top colored bar
                 {
-                    input: Buffer.from(`<svg width="${targetWidth}" height="${topFrameHeight}">
-                    <defs>
-                        <linearGradient id="topGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                            <stop offset="0%" style="stop-color:${primaryColor};stop-opacity:1" />
-                            <stop offset="100%" style="stop-color:${secondaryColor};stop-opacity:1" />
-                        </linearGradient>
-                    </defs>
-                    <rect x="0" y="0" width="${targetWidth}" height="${topFrameHeight}" fill="url(#topGradient)" />
-                </svg>`),
+                    input: Buffer.from(`<svg><rect x="0" y="0" width="${targetWidth}" height="200" fill="#b08968" /></svg>`),
                     top: 0,
                     left: 0
                 },
-                // Bottom colored bar with gradient
+                // Bottom colored bar
                 {
-                    input: Buffer.from(`<svg width="${targetWidth}" height="${bottomFrameHeight}">
-                    <defs>
-                        <linearGradient id="bottomGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                            <stop offset="0%" style="stop-color:${secondaryColor};stop-opacity:1" />
-                            <stop offset="100%" style="stop-color:${primaryColor};stop-opacity:1" />
-                        </linearGradient>
-                    </defs>
-                    <rect x="0" y="0" width="${targetWidth}" height="${bottomFrameHeight}" fill="url(#bottomGradient)" />
-                </svg>`),
-                    top: targetHeight - bottomFrameHeight,
+                    input: Buffer.from(`<svg><rect x="0" y="0" width="${targetWidth}" height="300" fill="#b08968" /></svg>`),
+                    top: targetHeight - 300,
                     left: 0
                 },
-                // Add text and decorative elements
+                // Add text
                 {
                     input: Buffer.from(`<svg width="${targetWidth}" height="${targetHeight}">
-                    <!-- Decorative swirl at top -->
-                    <path d="M${targetWidth/2-200},${topFrameHeight-40} C${targetWidth/2-100},${topFrameHeight-80} ${targetWidth/2+100},${topFrameHeight-80} ${targetWidth/2+200},${topFrameHeight-40}" 
-                          stroke="white" stroke-width="3" fill="none" />
-                          
-                    <!-- Wedding names at top -->
-                    <text x="${targetWidth/2}" y="${topFrameHeight/2+10}" 
-                          font-family="Arial" font-size="60" font-weight="bold" 
-                          text-anchor="middle" fill="white">
-                          Rushel & Sivani
-                    </text>
-                    
-                    <!-- Date at bottom -->
-                    <text x="${targetWidth/2}" y="${targetHeight-bottomFrameHeight/2-30}" 
-                          font-family="Arial" font-size="40" font-weight="bold" 
-                          text-anchor="middle" fill="white">
-                          Wedding
-                    </text>
-                    
-                    <!-- Hashtag at bottom -->
-                    <text x="${targetWidth/2}" y="${targetHeight-bottomFrameHeight/2+30}" 
-                          font-family="Arial" font-size="30" 
-                          text-anchor="middle" fill="white">
-                          #RushelAndSivani
-                    </text>
+                    <text x="540" y="120" font-family="Arial" font-size="60" text-anchor="middle" fill="white">Rushel & Sivani</text>
+                    <text x="540" y="${targetHeight - 120}" font-family="Arial" font-size="36" text-anchor="middle" fill="white">Wedding Photo</text>
                 </svg>`),
                     top: 0,
                     left: 0
@@ -942,7 +899,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             .png()
             .toBuffer();
 
-        // 9. Apply the frame to the image with photo
+        // 8. Apply the frame to the image with photo
         await sharp(outputPath)
             .composite([{
                 input: frameBuffer,
@@ -952,18 +909,22 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             .jpeg({ quality: 90 })
             .toFile(outputPath + '.final.jpg');
 
-        // 10. Rename to final output
+        // 9. Rename to final output
         fs.renameSync(outputPath + '.final.jpg', outputPath);
 
         // Clean up temp files
-        fs.unlinkSync(tempSourcePath);
-        fs.unlinkSync(tempBasePath);
-        if (fs.existsSync(outputPath + '.final.jpg')) fs.unlinkSync(outputPath + '.final.jpg');
+        try {
+            fs.unlinkSync(tempSourcePath);
+            fs.unlinkSync(tempBasePath);
+            if (fs.existsSync(outputPath + '.final.jpg')) fs.unlinkSync(outputPath + '.final.jpg');
+        } catch (cleanupErr) {
+            console.log(`[FILL] Cleanup warning: ${cleanupErr.message}`);
+        }
 
-        console.log(`[FILL] Successfully created Instagram photo with horizontal fill`);
+        console.log(`[FILL] Successfully created horizontal-fill Instagram photo`);
         return true;
     } catch (error) {
-        console.error(`[FILL] Error:`, error);
+        console.error(`[FILL] Error in horizontal-fill approach:`, error);
         return false;
     }
 }
