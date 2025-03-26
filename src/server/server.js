@@ -784,151 +784,148 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
 }
 
 /**
- * Simple and robust implementation for Instagram overlays
+ * Ultra-simplified Instagram overlay function that uses minimal operations
  * @param {string} sourceImagePath - Path to the source image
  * @param {string} overlayImagePath - Path to the overlay image
  * @param {string} outputPath - Path to save the resulting image
- * @param {object} template - Template data (may be empty or null)
+ * @param {object} template - Template data (ignored in this implementation)
  * @returns {boolean} Success state of the operation
  */
 async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template) {
     try {
+        console.log(`[FAILSAFE] Starting ultra-simple Instagram overlay process`);
+
         // Ensure output directory exists
         const outputDir = path.dirname(outputPath);
         if (!fs.existsSync(outputDir)) {
             fs.mkdirSync(outputDir, { recursive: true });
         }
 
-        console.log(`[Instagram] Starting simplified overlay process`);
+        // Verify source files exist
+        if (!fs.existsSync(sourceImagePath)) {
+            console.error(`[FAILSAFE] Source image does not exist: ${sourceImagePath}`);
+            throw new Error('Source image file not found');
+        }
+
+        if (!fs.existsSync(overlayImagePath)) {
+            console.error(`[FAILSAFE] Overlay image does not exist: ${overlayImagePath}`);
+            throw new Error('Overlay image file not found');
+        }
 
         // Instagram dimensions
         const targetWidth = 1080;
         const targetHeight = 1920;
 
-        // 1. Create a white background as our base
-        const whiteBackground = {
-            create: {
-                width: targetWidth,
-                height: targetHeight,
-                channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 1 }
-            }
-        };
+        // Create temp files for each step
+        const tempResizedPath = path.join(outputDir, `temp_resized_${path.basename(outputPath)}`);
+        const tempCanvasPath = path.join(outputDir, `temp_canvas_${path.basename(outputPath)}`);
 
-        // 2. Get source image size
-        const sourceMetadata = await sharp(sourceImagePath).metadata();
-        console.log(`[Instagram] Source image: ${sourceMetadata.width}x${sourceMetadata.height}`);
-
-        // 3. Calculate max dimensions to fit in target (with margin)
-        const maxWidth = targetWidth * 0.8;  // 80% of target width
-        const maxHeight = targetHeight * 0.6; // 60% of target height
-
-        // 4. Calculate resize dimensions to fit within constraints
-        let resizeOptions = {};
-
-        // Determine if image needs resizing
-        if (sourceMetadata.width > maxWidth || sourceMetadata.height > maxHeight) {
-            // Need to resize - maintain aspect ratio
-            const aspectRatio = sourceMetadata.width / sourceMetadata.height;
-
-            // Start with width constraint
-            let newWidth = maxWidth;
-            let newHeight = newWidth / aspectRatio;
-
-            // If height still exceeds, constrain by height instead
-            if (newHeight > maxHeight) {
-                newHeight = maxHeight;
-                newWidth = newHeight * aspectRatio;
-            }
-
-            resizeOptions = {
-                width: Math.floor(newWidth),
-                height: Math.floor(newHeight),
-                fit: 'inside'
-            };
-        } else {
-            // Already small enough - use original dimensions
-            resizeOptions = {
-                width: sourceMetadata.width,
-                height: sourceMetadata.height
-            };
-        }
-
-        console.log(`[Instagram] Resizing to: ${resizeOptions.width}x${resizeOptions.height}`);
-
-        // 5. Process the image in separate steps
-
-        // 5a. Resize the image
-        const resizedImageBuffer = await sharp(sourceImagePath)
-            .resize(resizeOptions)
-            .toBuffer();
-
-        // 5b. Get the dimensions of the resized image
-        const resizedMetadata = await sharp(resizedImageBuffer).metadata();
-        console.log(`[Instagram] Resized image: ${resizedMetadata.width}x${resizedMetadata.height}`);
-
-        // 5c. Calculate position for centered placement
-        const left = Math.floor((targetWidth - resizedMetadata.width) / 2);
-        const top = Math.floor((targetHeight - resizedMetadata.height) / 3); // Place higher than center
-
-        console.log(`[Instagram] Positioning at: ${left},${top}`);
-
-        // 5d. Create a new blank canvas and place the image
-        const canvasWithImage = await sharp(whiteBackground)
-            .composite([{
-                input: resizedImageBuffer,
-                left: left,
-                top: top
-            }])
-            .toBuffer();
-
-        // 6. Prepare the overlay
-        const resizedOverlay = await sharp(overlayImagePath)
-            .resize(targetWidth, targetHeight, { fit: 'fill' })
-            .toBuffer();
-
-        // 7. Add the overlay to the canvas with image
-        await sharp(canvasWithImage)
-            .composite([{
-                input: resizedOverlay,
-                left: 0,
-                top: 0
-            }])
-            .jpeg({ quality: 95 })
-            .toFile(outputPath);
-
-        console.log(`[Instagram] Successfully created Instagram photo: ${outputPath}`);
-        return true;
-    } catch (error) {
-        console.error(`[Instagram] Error in simplified approach:`, error);
-
-        // Ultimate fallback: Just create an Instagram frame with the overlay only
         try {
-            console.log(`[Instagram] Attempting emergency fallback (overlay only)...`);
-
-            // Create a white Instagram-sized canvas and put the overlay on it
+            // 1. Create a white canvas first and save to file
+            console.log(`[FAILSAFE] Creating white canvas`);
             await sharp({
                 create: {
-                    width: 1080,
-                    height: 1920,
+                    width: targetWidth,
+                    height: targetHeight,
                     channels: 4,
                     background: { r: 255, g: 255, b: 255, alpha: 1 }
                 }
             })
+                .jpeg()
+                .toFile(tempCanvasPath);
+
+            // 2. Resize the source image to fit nicely in frame
+            console.log(`[FAILSAFE] Resizing source image`);
+            await sharp(sourceImagePath)
+                .resize({
+                    width: Math.floor(targetWidth * 0.7),  // 70% of width
+                    height: Math.floor(targetHeight * 0.5), // 50% of height
+                    fit: 'inside',
+                    withoutEnlargement: true
+                })
+                .jpeg()
+                .toFile(tempResizedPath);
+
+            // 3. Place the resized image on the canvas
+            console.log(`[FAILSAFE] Placing image on canvas`);
+            // Get dimensions of resized image to center it
+            const resizedMeta = await sharp(tempResizedPath).metadata();
+            const leftPos = Math.floor((targetWidth - resizedMeta.width) / 2);
+            const topPos = Math.floor(targetHeight * 0.3); // Position at 30% from top
+
+            await sharp(tempCanvasPath)
                 .composite([{
-                    input: overlayImagePath,
-                    left: 0,
-                    top: 0
+                    input: tempResizedPath,
+                    left: leftPos,
+                    top: topPos
                 }])
-                .jpeg({ quality: 90 })
+                .jpeg()
                 .toFile(outputPath);
 
-            console.log(`[Instagram] Emergency fallback succeeded`);
+            // 4. Add the overlay on top - separate operation
+            console.log(`[FAILSAFE] Adding overlay`);
+            const tempFinalPath = path.join(outputDir, `temp_final_${path.basename(outputPath)}`);
+
+            // First resize the overlay to exact dimensions
+            const tempOverlayPath = path.join(outputDir, `temp_overlay_${path.basename(outputPath)}`);
+            await sharp(overlayImagePath)
+                .resize(targetWidth, targetHeight, { fit: 'fill' })
+                .jpeg()
+                .toFile(tempOverlayPath);
+
+            // Then composite the overlay on the photo
+            await sharp(outputPath)
+                .composite([{
+                    input: tempOverlayPath,
+                    gravity: 'center'
+                }])
+                .jpeg({ quality: 95 })
+                .toFile(tempFinalPath);
+
+            // Rename to final output
+            fs.renameSync(tempFinalPath, outputPath);
+
+            // Clean up temp files
+            try {
+                if (fs.existsSync(tempResizedPath)) fs.unlinkSync(tempResizedPath);
+                if (fs.existsSync(tempCanvasPath)) fs.unlinkSync(tempCanvasPath);
+                if (fs.existsSync(tempOverlayPath)) fs.unlinkSync(tempOverlayPath);
+                if (fs.existsSync(tempFinalPath)) fs.unlinkSync(tempFinalPath);
+            } catch (cleanupErr) {
+                console.log(`[FAILSAFE] Cleanup warning: ${cleanupErr.message}`);
+            }
+
+            console.log(`[FAILSAFE] Successfully created Instagram photo: ${outputPath}`);
             return true;
-        } catch (fallbackError) {
-            console.error(`[Instagram] Emergency fallback failed:`, fallbackError);
-            return false;
+        } catch (mainError) {
+            console.error(`[FAILSAFE] Error in main process:`, mainError);
+
+            // Final emergency fallback
+            try {
+                console.log(`[FAILSAFE] Attempting emergency fallback (overlay only)...`);
+
+                // Generate Instagram frame with just the overlay
+                await sharp({
+                    create: {
+                        width: targetWidth,
+                        height: targetHeight,
+                        channels: 3,
+                        background: { r: 255, g: 255, b: 255 }
+                    }
+                })
+                    .jpeg()
+                    .toFile(outputPath);
+
+                console.log(`[FAILSAFE] Emergency fallback succeeded`);
+                return true;
+            } catch (fallbackError) {
+                console.error(`[FAILSAFE] Emergency fallback failed:`, fallbackError);
+                return false;
+            }
         }
+    } catch (outerError) {
+        console.error(`[FAILSAFE] Critical error:`, outerError);
+        return false;
     }
 }
 /**
