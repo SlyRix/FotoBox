@@ -23,11 +23,14 @@ const config = {
 
     // Printing settings (for future implementation)
     printing: {
-        enabled: false,
-        printerName: 'Canon_SELPHY_CP1300',
-        printCommand: 'lp -d' // Basic print command, to be expanded later
+        enabled: true,
+        printerName: 'Canon_SELPHY_CP1500',
+        printCommand: 'lp -d',
+        paperSize: 'Postcard', // 4x6" (Postcard size)
+        printFormat: 'borderless', // Most photo booth setups want borderless
+        retryAttempts: 3,
+        jobStatusCommand: 'lpstat -o'
     },
-
     // QR code settings
     qrCode: {
         color: {

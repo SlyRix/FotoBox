@@ -1893,17 +1893,174 @@ app.post('/api/photos/print', (req, res) => {
     const { filename } = req.body;
 
     if (!filename) {
-        return res.status(400).json({ error: 'Filename is required' });
+        return res.status(400).json({
+            success: false,
+            error: 'Filename is required'
+        });
+    }
+
+    // Check if printing is enabled in config
+    if (!config.printing.enabled) {
+        console.log(`Print request received for ${filename}, but printing is disabled in config`);
+        return res.json({
+            success: false,
+            message: 'Printing is disabled in server configuration'
+        });
     }
 
     // Use print version (A5 landscape) for printing
     const printFilename = filename.startsWith('print_') ? filename : `print_${filename.replace(/^(instagram_|frame_)/, '')}`;
+    const filepath = path.join(PRINT_PHOTOS_DIR, printFilename);
+
+    // Check if the print file exists
+    if (!fs.existsSync(filepath)) {
+        console.error(`Print file not found: ${filepath}`);
+        return res.status(404).json({
+            success: false,
+            error: 'Print file not found'
+        });
+    }
 
     console.log(`Print request received for: ${printFilename}`);
 
-    res.json({
-        success: true,
-        message: 'Print request received. Printing functionality will be implemented later.'
+    // Construct the print command for the Canon SELPHY CP1500
+    // -o media=Postcard is for 4x6" paper
+    // -o fit-to-page will ensure the image is properly sized
+    // -o borderless=true for borderless printing (if supported)
+    const printCommand = `${config.printing.printCommand} ${config.printing.printerName} -o media=${config.printing.paperSize} -o fit-to-page -o borderless=${config.printing.printFormat === 'borderless' ? 'true' : 'false'} "${filepath}"`;
+
+    // Execute the print command
+    exec(printCommand, (error, stdout, stderr) => {
+        if (error) {
+            console.error(`Print error: ${error.message}`);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to print photo',
+                details: error.message
+            });
+        }
+
+        if (stderr) {
+            console.warn(`Print warning: ${stderr}`);
+        }
+
+        // Get job ID from stdout if available (usually in the format "request id is PRINTER-X")
+        let jobId = null;
+        const match = stdout.match(/request id is (\S+)/i);
+        if (match && match[1]) {
+            jobId = match[1];
+        }
+
+        console.log(`Print job submitted successfully: ${jobId || 'unknown job ID'}`);
+
+        res.json({
+            success: true,
+            message: 'Print request sent to printer',
+            jobId: jobId,
+            filename: printFilename
+        });
+    });
+});
+app.get('/api/print-status/:jobId', (req, res) => {
+    const { jobId } = req.params;
+
+    if (!jobId) {
+        return res.status(400).json({
+            success: false,
+            error: 'Job ID is required'
+        });
+    }
+    /**
+     * Checks if the printer is ready and available
+     * @returns {Promise<boolean>} True if printer is ready, false otherwise
+     */
+    async function isPrinterReady() {
+        return new Promise((resolve) => {
+            if (!config.printing.enabled) {
+                console.log('Printing is disabled in config');
+                resolve(false);
+                return;
+            }
+
+            exec(`lpstat -p ${config.printing.printerName}`, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Printer check error: ${error.message}`);
+                    resolve(false);
+                    return;
+                }
+
+                // Check if printer is ready (not disabled or in error state)
+                if (stdout.includes('disabled') || stdout.includes('error')) {
+                    console.warn(`Printer is not ready: ${stdout.trim()}`);
+                    resolve(false);
+                } else {
+                    resolve(true);
+                }
+            });
+        });
+    }
+    app.get('/api/printer-status', async (req, res) => {
+        try {
+            const printerReady = await isPrinterReady();
+
+            exec(`lpstat -p ${config.printing.printerName} -l`, (error, stdout, stderr) => {
+                let status = 'unknown';
+                let details = '';
+
+                if (error) {
+                    status = 'offline';
+                    details = 'Printer not found or CUPS system error';
+                } else {
+                    status = printerReady ? 'ready' : 'busy';
+                    details = stdout.trim();
+                }
+
+                // Check for common printer issues
+                let state = 'ok';
+                if (stdout.includes('out of paper')) state = 'out-of-paper';
+                if (stdout.includes('out of ink')) state = 'out-of-ink';
+                if (stdout.includes('jam')) state = 'paper-jam';
+                if (stdout.includes('open')) state = 'cover-open';
+
+                res.json({
+                    success: true,
+                    printerName: config.printing.printerName,
+                    status: status,
+                    state: state,
+                    enabled: config.printing.enabled,
+                    ready: printerReady,
+                    details: details
+                });
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                error: 'Error checking printer status',
+                message: error.message
+            });
+        }
+    });
+
+    // Use lpstat to check print job status
+    exec(`${config.printing.jobStatusCommand} ${jobId}`, (error, stdout, stderr) => {
+        if (error) {
+            // If command returns error, job may be completed or not found
+            return res.json({
+                success: true,
+                jobId: jobId,
+                status: 'completed',
+                message: 'Print job appears to be completed (not found in queue)'
+            });
+        }
+
+        // Job is still in the queue
+        return res.json({
+            success: true,
+            jobId: jobId,
+            status: 'pending',
+            message: 'Print job is still in queue',
+            details: stdout.trim()
+        });
     });
 });
 
