@@ -41,6 +41,7 @@ const ORIGINALS_DIR = path.join(__dirname, 'public', 'photos', 'originals');
 const INSTAGRAM_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'instagram');
 const FRAME_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'frames');
 const TEMPLATES_DIR = path.join(__dirname, 'data', 'templates');
+const FILTERED_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'filtered');
 
 // ==========================================
 // MIDDLEWARE
@@ -119,6 +120,7 @@ function createRequiredDirectories() {
         ORIGINALS_DIR,
         INSTAGRAM_PHOTOS_DIR,
         FRAME_PHOTOS_DIR,
+        FILTERED_PHOTOS_DIR,
         TEMPLATES_DIR
     ];
 
@@ -1524,6 +1526,7 @@ app.get('/api/photos/:photoId', (req, res) => {
     let isOriginal = false;
     let isInstagram = false;
     let isCustomFrame = false;
+    let isFiltered = false;
 
     if (photoId.startsWith('original_')) {
         filepath = path.join(ORIGINALS_DIR, photoId);
@@ -1536,10 +1539,12 @@ app.get('/api/photos/:photoId', (req, res) => {
     } else if (photoId.startsWith('frame_')) {
         filepath = path.join(FRAME_PHOTOS_DIR, photoId);
         isCustomFrame = true;
+    } else if (photoId.startsWith('filtered_')) {
+        filepath = path.join(FILTERED_PHOTOS_DIR, photoId);
+        isFiltered = true;
     } else {
         filepath = path.join(PHOTOS_DIR, photoId);
     }
-
     // Check if file exists
     if (!fs.existsSync(filepath)) {
         console.log(`Photo not found at ${filepath}, checking other directories...`);
@@ -1629,7 +1634,7 @@ app.get('/api/photos/:photoId', (req, res) => {
         }
 
         // Return photo data
-        res.json({
+        return res.json({
             success: true,
             filename: photoId,
             url: photoUrl,
@@ -1641,6 +1646,7 @@ app.get('/api/photos/:photoId', (req, res) => {
             isOriginal: isOriginal,
             isInstagram: isInstagram,
             isCustomFrame: isCustomFrame,
+            isFiltered: isFiltered,
             timestamp: stats.mtime.getTime()
         });
     } catch (error) {
@@ -2445,32 +2451,101 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
     }
 
     try {
-        // Find source photo path
-        const baseFilename = photoId.replace(/^(filtered_|instagram_|frame_)/, '');
+        // If filter is 'original', just return the original photo URL
+        if (filter === 'original') {
+            // Extract base filename (removing any filter prefix)
+            const baseFilename = photoId.replace(/^filtered_[^_]+_/, '');
 
-        // First, get the original photo without any frame
-        const originalPath = path.join(ORIGINALS_DIR, `original_${baseFilename}`);
-        let sourcePhotoPath;
+            // Determine which original version to return (main, Instagram, or custom frame)
+            let originalUrl;
+            let originalFilename;
 
-        if (fs.existsSync(originalPath)) {
-            sourcePhotoPath = originalPath;
-        } else {
-            return res.status(404).json({
-                success: false,
-                error: 'Original photo not found. Cannot apply filter to photo only.'
+            if (photoId.startsWith('instagram_') || baseFilename.startsWith('instagram_')) {
+                // Instagram version
+                originalFilename = baseFilename.startsWith('instagram_') ? baseFilename : `instagram_${baseFilename}`;
+                originalUrl = `/photos/instagram/${originalFilename}`;
+            } else if (photoId.startsWith('frame_') || baseFilename.startsWith('frame_')) {
+                // Custom frame version
+                originalFilename = baseFilename.startsWith('frame_') ? baseFilename : `frame_${baseFilename}`;
+                originalUrl = `/photos/frames/${originalFilename}`;
+            } else {
+                // Standard photo
+                originalFilename = baseFilename;
+                originalUrl = `/photos/${originalFilename}`;
+            }
+
+            return res.json({
+                success: true,
+                message: 'Reverted to original photo',
+                photoUrl: originalUrl,
+                photoId: originalFilename
             });
         }
 
-        console.log(`Applying ${filter} filter to photo content only: ${sourcePhotoPath}`);
+        // Extract base filename (removing any existing filter prefix)
+        const baseFilename = photoId.replace(/^filtered_[^_]+_/, '');
 
-        // Create a filtered version filename
-        const filteredFilename = `filtered_${filter}_${baseFilename}`;
-        const tempFilteredPath = path.join(PHOTOS_DIR, `temp_${filteredFilename}`);
-        const filteredPhotoPath = path.join(PHOTOS_DIR, filteredFilename);
+        // Determine which original to use based on the photo ID type
+        let sourcePhotoPath;
+        let originalType = 'standard';
+        let frameName = 'wedding-frame.png'; // Default frame
 
-        // 1. First apply the filter to the original photo only
+        if (photoId.startsWith('instagram_') || baseFilename.startsWith('instagram_')) {
+            // It's an Instagram-formatted photo
+            const instagramFilename = baseFilename.startsWith('instagram_') ? baseFilename : `instagram_${baseFilename}`;
+            sourcePhotoPath = path.join(INSTAGRAM_PHOTOS_DIR, instagramFilename);
+            originalType = 'instagram';
+            frameName = 'instagram-frame.png';
+        } else if (photoId.startsWith('frame_') || baseFilename.startsWith('frame_')) {
+            // It's a photo with a custom frame
+            const frameFilename = baseFilename.startsWith('frame_') ? baseFilename : `frame_${baseFilename}`;
+            sourcePhotoPath = path.join(FRAME_PHOTOS_DIR, frameFilename);
+            originalType = 'frame';
+
+            // Here you'd need logic to determine which custom frame was used
+            // This could be from a database lookup or filename parsing
+            frameName = 'custom-frame.png'; // Placeholder - would be dynamic
+        } else {
+            // Standard photo
+            sourcePhotoPath = path.join(PHOTOS_DIR, baseFilename);
+        }
+
+        // Check if we have access to the original unframed photo (best for filtering)
+        const originalPath = path.join(ORIGINALS_DIR, `original_${baseFilename.replace(/^(instagram_|frame_)/, '')}`);
+        if (fs.existsSync(originalPath)) {
+            // We have the original - use this as the base for filtering
+            sourcePhotoPath = originalPath;
+        }
+
+        // Check if source exists
+        if (!fs.existsSync(sourcePhotoPath)) {
+            return res.status(404).json({
+                success: false,
+                error: 'Source photo not found'
+            });
+        }
+
+        console.log(`Applying ${filter} filter to ${sourcePhotoPath}`);
+
+        // Create a filtered version filename with proper directory structure
+        const filteredBasename = `filtered_${filter}_${baseFilename.replace(/^(instagram_|frame_)/, '')}`;
+
+        // Create paths for temporary and final filtered photos
+        const tempFilteredPath = path.join(FILTERED_PHOTOS_DIR, `temp_${filteredBasename}`);
+        let finalPhotoPath;
+
+        if (originalType === 'instagram') {
+            finalPhotoPath = path.join(INSTAGRAM_PHOTOS_DIR, `instagram_${filteredBasename}`);
+        } else if (originalType === 'frame') {
+            finalPhotoPath = path.join(FRAME_PHOTOS_DIR, `frame_${filteredBasename}`);
+        } else {
+            finalPhotoPath = path.join(FILTERED_PHOTOS_DIR, filteredBasename);
+        }
+
+        // 1. First apply the filter to the original photo
         let filterApplied = false;
 
+        // Apply filter logic based on filter type
         if (filter === 'forever') {
             // Apply the forever filter
             await sharp(sourcePhotoPath)
@@ -2521,43 +2596,54 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
             });
         }
 
-        // 2. Now apply the appropriate frame to the filtered photo
-        // Determine which frame was used in the original
-        let frameName = 'wedding-frame.png'; // Default frame
+        // 2. For Instagram and frame photos, apply the appropriate frame/overlay
+        if (originalType === 'instagram' || originalType === 'frame') {
+            // Get the frame overlay path
+            const overlayPath = path.join(OVERLAYS_DIR, frameName);
 
-        if (photoId.startsWith('instagram_')) {
-            frameName = 'instagram-frame.png';
-        } else if (photoId.startsWith('frame_')) {
-            // Extract custom frame name from a mapping or database if available
-            // This would require additional code to track which frame was used
-            frameName = 'custom-frame.png'; // Placeholder
+            // Apply the frame to the filtered photo
+            let success = await applyOverlayToImage(tempFilteredPath, overlayPath, finalPhotoPath);
+
+            if (!success) {
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to apply frame to filtered photo'
+                });
+            }
+        } else {
+            // For standard photos, just copy the temp filtered file to the final location
+            fs.copyFileSync(tempFilteredPath, finalPhotoPath);
         }
-
-        // Get the frame overlay path
-        const overlayPath = path.join(OVERLAYS_DIR, frameName);
-
-        // Apply the frame to the filtered photo
-        let success = await applyOverlayToImage(tempFilteredPath, overlayPath, filteredPhotoPath);
 
         // Clean up temporary file
         if (fs.existsSync(tempFilteredPath)) {
             fs.unlinkSync(tempFilteredPath);
         }
 
-        if (!success) {
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to apply frame to filtered photo'
-            });
-        }
-
         // Generate thumbnail for filtered version
-        const thumbnailUrl = await generateThumbnail(filteredPhotoPath, filteredFilename);
+        const thumbnailFilename = `thumb_${filteredBasename}`;
+        const thumbnailUrl = await generateThumbnail(finalPhotoPath, thumbnailFilename);
+
+        // Define the public URL based on photo type
+        let publicUrl;
+        let publicPhotoId;
+
+        if (originalType === 'instagram') {
+            publicUrl = `/photos/instagram/instagram_${filteredBasename}`;
+            publicPhotoId = `instagram_${filteredBasename}`;
+        } else if (originalType === 'frame') {
+            publicUrl = `/photos/frames/frame_${filteredBasename}`;
+            publicPhotoId = `frame_${filteredBasename}`;
+        } else {
+            publicUrl = `/photos/filtered/${filteredBasename}`;
+            publicPhotoId = filteredBasename;
+        }
 
         return res.json({
             success: true,
-            message: 'Filter applied successfully to photo only',
-            photoUrl: `/photos/${filteredFilename}`,
+            message: 'Filter applied successfully',
+            photoUrl: publicUrl,
+            photoId: publicPhotoId,
             thumbnailUrl: thumbnailUrl
         });
     } catch (error) {
@@ -2567,6 +2653,21 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
             error: 'Server error applying filter: ' + error.message
         });
     }
+});
+app.get('/photos/filtered/:filename', (req, res) => {
+    const filename = req.params.filename;
+    const filepath = path.join(FILTERED_PHOTOS_DIR, filename);
+
+    if (!fs.existsSync(filepath)) {
+        return res.status(404).send('Filtered photo not found');
+    }
+
+    // Set proper headers
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'image/jpeg');
+
+    // Send the file
+    res.sendFile(filepath);
 });
 
 // Create a vignette effect overlay (for the Forever filter)
