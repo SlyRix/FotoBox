@@ -41,7 +41,6 @@ const ORIGINALS_DIR = path.join(__dirname, 'public', 'photos', 'originals');
 const INSTAGRAM_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'instagram');
 const FRAME_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'frames');
 const TEMPLATES_DIR = path.join(__dirname, 'data', 'templates');
-const FILTERED_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'filtered');
 
 // ==========================================
 // MIDDLEWARE
@@ -120,7 +119,6 @@ function createRequiredDirectories() {
         ORIGINALS_DIR,
         INSTAGRAM_PHOTOS_DIR,
         FRAME_PHOTOS_DIR,
-        FILTERED_PHOTOS_DIR,
         TEMPLATES_DIR
     ];
 
@@ -590,38 +588,7 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
             fs.mkdirSync(outputDir, { recursive: true });
         }
 
-        // Check if source and output are the same file
-        if (sourceImagePath === outputPath) {
-            // Create a temporary path
-            const tempOutputPath = path.join(
-                outputDir,
-                `temp_${Date.now()}_${path.basename(outputPath)}`
-            );
-
-            // Process using the temp path
-            const success = await applyOverlayToImage(sourceImagePath, overlayImagePath, tempOutputPath);
-
-            // If successful, replace the original file with the temp file
-            if (success) {
-                fs.renameSync(tempOutputPath, outputPath);
-                return true;
-            }
-            return false;
-        }
-
-        // Ensure source image exists
-        if (!fs.existsSync(sourceImagePath)) {
-            console.error(`Source image not found: ${sourceImagePath}`);
-            return false;
-        }
-
-        // Ensure overlay exists
-        if (!fs.existsSync(overlayImagePath)) {
-            console.error(`Overlay not found: ${overlayImagePath}`);
-            return false;
-        }
-
-        // The rest of the function remains the same...
+        // Check if this is an Instagram overlay
         const overlayFilename = path.basename(overlayImagePath);
         console.log(`Applying overlay: ${overlayFilename}`);
 
@@ -645,6 +612,18 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
         // Special handling for Instagram format
         if (overlayFilename.startsWith('instagram')) {
             return processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath);
+        }
+
+        // Ensure source image exists
+        if (!fs.existsSync(sourceImagePath)) {
+            console.error(`Source image not found: ${sourceImagePath}`);
+            return false;
+        }
+
+        // Ensure overlay exists
+        if (!fs.existsSync(overlayImagePath)) {
+            console.error(`Overlay not found: ${overlayImagePath}`);
+            return false;
         }
 
         // Standard overlay process
@@ -907,14 +886,13 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             .toBuffer();
 
         // 7. Add the overlay to the canvas with image
-        // IMPORTANT: Use .jpeg() before .toFile() to ensure the correct format is used
         await sharp(canvasWithImage)
             .composite([{
                 input: resizedOverlay,
                 left: 0,
                 top: 0
             }])
-            .jpeg() // Explicitly set output format to JPEG
+            .jpeg({ quality: 95 })
             .toFile(outputPath);
 
         console.log(`[Instagram] Successfully created Instagram photo: ${outputPath}`);
@@ -940,7 +918,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
                     left: 0,
                     top: 0
                 }])
-                .jpeg() // Explicitly set output format to JPEG
+                .jpeg({ quality: 90 })
                 .toFile(outputPath);
 
             console.log(`[Instagram] Emergency fallback succeeded`);
@@ -1613,7 +1591,6 @@ app.get('/api/photos/:photoId', (req, res) => {
     let isOriginal = false;
     let isInstagram = false;
     let isCustomFrame = false;
-    let isFiltered = false;
 
     if (photoId.startsWith('original_')) {
         filepath = path.join(ORIGINALS_DIR, photoId);
@@ -1626,9 +1603,6 @@ app.get('/api/photos/:photoId', (req, res) => {
     } else if (photoId.startsWith('frame_')) {
         filepath = path.join(FRAME_PHOTOS_DIR, photoId);
         isCustomFrame = true;
-    } else if (photoId.startsWith('filtered_')) {
-        filepath = path.join(FILTERED_PHOTOS_DIR, photoId);
-        isFiltered = true;
     } else {
         filepath = path.join(PHOTOS_DIR, photoId);
     }
@@ -1733,7 +1707,6 @@ app.get('/api/photos/:photoId', (req, res) => {
             isOriginal: isOriginal,
             isInstagram: isInstagram,
             isCustomFrame: isCustomFrame,
-            isFiltered: isFiltered,
             timestamp: stats.mtime.getTime()
         });
     } catch (error) {
@@ -2524,327 +2497,6 @@ app.delete('/api/admin/frame-templates/:overlayName', (req, res) => {
         error: 'Template not found for this frame'
     });
 });
-
-// Apply filter to photo
-app.post('/api/photos/:filename/filter', async (req, res) => {
-    const photoId = req.params.filename;
-    const { filter } = req.body;
-
-    if (!photoId || !filter) {
-        return res.status(400).json({
-            success: false,
-            error: 'Photo ID and filter type are required'
-        });
-    }
-
-    try {
-        // If filter is 'original', just return the original photo URL
-        if (filter === 'original') {
-            // Extract base filename (removing any filter prefix)
-            const baseFilename = photoId.replace(/^filtered_[^_]+_/, '');
-
-            // Determine which original version to return (main, Instagram, or custom frame)
-            let originalUrl;
-            let originalFilename;
-
-            if (photoId.startsWith('instagram_') || baseFilename.startsWith('instagram_')) {
-                // Instagram version
-                originalFilename = baseFilename.startsWith('instagram_') ? baseFilename : `instagram_${baseFilename}`;
-                originalUrl = `/photos/instagram/${originalFilename}`;
-            } else if (photoId.startsWith('frame_') || baseFilename.startsWith('frame_')) {
-                // Custom frame version
-                originalFilename = baseFilename.startsWith('frame_') ? baseFilename : `frame_${baseFilename}`;
-                originalUrl = `/photos/frames/${originalFilename}`;
-            } else {
-                // Standard photo
-                originalFilename = baseFilename;
-                originalUrl = `/photos/${originalFilename}`;
-            }
-
-            return res.json({
-                success: true,
-                message: 'Reverted to original photo',
-                photoUrl: originalUrl,
-                photoId: originalFilename
-            });
-        }
-
-        // Extract base filename (removing any existing filter prefix)
-        const baseFilename = photoId.replace(/^filtered_[^_]+_/, '');
-
-        // Determine which original to use based on the photo ID type
-        let sourcePhotoPath;
-        let originalType = 'standard';
-        let frameName = 'wedding-frame.png'; // Default frame
-
-        if (photoId.startsWith('instagram_') || baseFilename.startsWith('instagram_')) {
-            // It's an Instagram-formatted photo
-            const instagramFilename = baseFilename.startsWith('instagram_') ? baseFilename : `instagram_${baseFilename}`;
-            sourcePhotoPath = path.join(INSTAGRAM_PHOTOS_DIR, instagramFilename);
-            originalType = 'instagram';
-            frameName = 'instagram-frame.png';
-        } else if (photoId.startsWith('frame_') || baseFilename.startsWith('frame_')) {
-            // It's a photo with a custom frame
-            const frameFilename = baseFilename.startsWith('frame_') ? baseFilename : `frame_${baseFilename}`;
-            sourcePhotoPath = path.join(FRAME_PHOTOS_DIR, frameFilename);
-            originalType = 'frame';
-
-            // Here you'd need logic to determine which custom frame was used
-            // This could be from a database lookup or filename parsing
-            frameName = 'custom-frame.png'; // Placeholder - would be dynamic
-        } else {
-            // Standard photo
-            sourcePhotoPath = path.join(PHOTOS_DIR, baseFilename);
-        }
-
-        // Check if we have access to the original unframed photo (best for filtering)
-        const originalPath = path.join(ORIGINALS_DIR, `original_${baseFilename.replace(/^(instagram_|frame_)/, '')}`);
-        if (fs.existsSync(originalPath)) {
-            // We have the original - use this as the base for filtering
-            sourcePhotoPath = originalPath;
-        }
-
-        // Check if source exists
-        if (!fs.existsSync(sourcePhotoPath)) {
-            return res.status(404).json({
-                success: false,
-                error: 'Source photo not found'
-            });
-        }
-
-        console.log(`Applying ${filter} filter to ${sourcePhotoPath}`);
-
-        // Create a filtered version filename with proper directory structure
-        const filteredBasename = `filtered_${filter}_${baseFilename.replace(/^(instagram_|frame_)/, '')}`;
-
-        // Create paths for temporary and final filtered photos
-        const tempFilteredPath = path.join(FILTERED_PHOTOS_DIR, `temp_${filteredBasename}`);
-        let finalPhotoPath;
-
-        if (originalType === 'instagram') {
-            finalPhotoPath = path.join(INSTAGRAM_PHOTOS_DIR, `instagram_${filteredBasename}`);
-        } else if (originalType === 'frame') {
-            finalPhotoPath = path.join(FRAME_PHOTOS_DIR, `frame_${filteredBasename}`);
-        } else {
-            finalPhotoPath = path.join(FILTERED_PHOTOS_DIR, filteredBasename);
-        }
-
-        // 1. First apply the filter to the original photo
-        let filterApplied = false;
-
-        // Apply filter logic based on filter type
-        if (filter === 'forever') {
-            // Apply the forever filter
-            await sharp(sourcePhotoPath)
-                .modulate({
-                    contrast: 1.15,
-                    brightness: 1.1,
-                    saturation: 1.05
-                })
-                .sharpen(0.5)
-                .toFormat('jpeg', { quality: 90 })
-                .toFile(tempFilteredPath);
-
-            filterApplied = await applyVignetteEffect(tempFilteredPath, tempFilteredPath);
-        } else {
-            // Apply other filters using Sharp
-            const filterParams = getFilterParams(filter);
-            let sharpImage = sharp(sourcePhotoPath);
-
-            // Apply filter parameters
-            if (filterParams.greyscale) {
-                sharpImage = sharpImage.greyscale();
-            }
-            if (filterParams.sepia) {
-                sharpImage = sharpImage.tint(filterParams.sepia);
-            }
-            if (filterParams.blur !== undefined) {
-                sharpImage = sharpImage.blur(filterParams.blur);
-            }
-            if (filterParams.sharpen !== undefined) {
-                sharpImage = sharpImage.sharpen(filterParams.sharpen);
-            }
-            if (filterParams.modulate) {
-                sharpImage = sharpImage.modulate(filterParams.modulate);
-            }
-
-            // Save the filtered image
-            await sharpImage
-                .toFormat('jpeg', { quality: 90 })
-                .toFile(tempFilteredPath);
-
-            filterApplied = true;
-        }
-
-        if (!filterApplied) {
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to apply filter to photo'
-            });
-        }
-
-        // 2. For Instagram and frame photos, apply the appropriate frame/overlay
-        if (originalType === 'instagram' || originalType === 'frame') {
-            // Get the frame overlay path
-            const overlayPath = path.join(OVERLAYS_DIR, frameName);
-
-            // Apply the frame to the filtered photo
-            let success = await applyOverlayToImage(tempFilteredPath, overlayPath, finalPhotoPath);
-
-            if (!success) {
-                return res.status(500).json({
-                    success: false,
-                    error: 'Failed to apply frame to filtered photo'
-                });
-            }
-        } else {
-            // For standard photos, just copy the temp filtered file to the final location
-            fs.copyFileSync(tempFilteredPath, finalPhotoPath);
-        }
-
-        // Clean up temporary file
-        if (fs.existsSync(tempFilteredPath)) {
-            fs.unlinkSync(tempFilteredPath);
-        }
-
-        // Generate thumbnail for filtered version
-        const thumbnailFilename = `thumb_${filteredBasename}`;
-        const thumbnailUrl = await generateThumbnail(finalPhotoPath, thumbnailFilename);
-
-        // Define the public URL based on photo type
-        let publicUrl;
-        let publicPhotoId;
-
-        if (originalType === 'instagram') {
-            publicUrl = `/photos/instagram/instagram_${filteredBasename}`;
-            publicPhotoId = `instagram_${filteredBasename}`;
-        } else if (originalType === 'frame') {
-            publicUrl = `/photos/frames/frame_${filteredBasename}`;
-            publicPhotoId = `frame_${filteredBasename}`;
-        } else {
-            publicUrl = `/photos/filtered/${filteredBasename}`;
-            publicPhotoId = filteredBasename;
-        }
-
-        return res.json({
-            success: true,
-            message: 'Filter applied successfully',
-            photoUrl: publicUrl,
-            photoId: publicPhotoId,
-            thumbnailUrl: thumbnailUrl
-        });
-    } catch (error) {
-        console.error('Error applying filter:', error);
-        return res.status(500).json({
-            success: false,
-            error: 'Server error applying filter: ' + error.message
-        });
-    }
-});
-app.get('/photos/filtered/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const filepath = path.join(FILTERED_PHOTOS_DIR, filename);
-
-    if (!fs.existsSync(filepath)) {
-        return res.status(404).send('Filtered photo not found');
-    }
-
-    // Set proper headers
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', 'image/jpeg');
-
-    // Send the file
-    res.sendFile(filepath);
-});
-
-// Create a vignette effect overlay (for the Forever filter)
-async function applyVignetteEffect(inputPath, outputPath) {
-    try {
-        // Get dimensions of the input image
-        const metadata = await sharp(inputPath).metadata();
-        const { width, height } = metadata;
-
-        // Create a radial gradient for vignette effect
-        const svgVignette = `
-        <svg width="${width}" height="${height}">
-            <defs>
-                <radialGradient id="vignette" cx="50%" cy="50%" r="65%" fx="50%" fy="50%">
-                    <stop offset="0%" stop-color="white" stop-opacity="1" />
-                    <stop offset="85%" stop-color="white" stop-opacity="0.7" />
-                    <stop offset="100%" stop-color="black" stop-opacity="0.5" />
-                </radialGradient>
-            </defs>
-            <rect x="0" y="0" width="${width}" height="${height}" fill="url(#vignette)" />
-        </svg>`;
-
-        // Create a buffer from the SVG
-        const vignetteBuffer = Buffer.from(svgVignette);
-
-        // Apply the vignette overlay
-        await sharp(inputPath)
-            .composite([
-                {
-                    input: vignetteBuffer,
-                    blend: 'multiply'
-                }
-            ])
-            .toFile(outputPath);
-
-        return true;
-    } catch (error) {
-        console.error('Error applying vignette effect:', error);
-        return false;
-    }
-}
-
-// Helper function to map filter names to Sharp parameters
-function getFilterParams(filter) {
-    switch (filter) {
-        case 'grayscale':
-            return {
-                greyscale: true
-            };
-        case 'sepia':
-            return {
-                sepia: { r: 112, g: 66, b: 20 },
-                modulate: {
-                    brightness: 1.1,
-                    saturation: 0.8
-                }
-            };
-        case 'dream':
-            return {
-                modulate: {
-                    brightness: 1.1,
-                    contrast: 0.85,
-                    saturation: 1.2
-                },
-                blur: 0.5
-            };
-        case 'romance':
-            return {
-                modulate: {
-                    brightness: 1.05,
-                    contrast: 0.95,
-                    saturation: 1.15
-                },
-                sepia: { r: 255, g: 222, b: 213 }
-            };
-        case 'forever':
-            return {
-                modulate: {
-                    contrast: 1.15,
-                    brightness: 1.1,
-                    saturation: 1.05
-                },
-                sharpen: 0.5
-                // Vignette effect is applied in a separate step
-            };
-        case 'original':
-        default:
-            return {};
-    }
-}
 
 // ==========================================
 // SERVER INITIALIZATION
