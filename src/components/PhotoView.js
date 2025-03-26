@@ -309,6 +309,7 @@ const PhotoView = () => {
             return;
         }
 
+
         const baseFilename = photo.filename.replace(/^(instagram_|frame_)/, '');
 
         // Use the safe navigation method

@@ -27,7 +27,7 @@ const CameraView = () => {
     const [isProcessing, setIsProcessing] = useState(false);
 
     // Hard-coded stream URL that we know works
-    const STREAM_URL = "https://fotobox-sh.slyrix.com//?action=stream";
+    const STREAM_URL = "https://fotobox-sh.slyrix.com/?action=stream";
     const SNAPSHOT_URL = "https://fotobox-sh.slyrix.com/?action=snapshot";
 
     // Check if webcam stream is available on mount
@@ -251,7 +251,6 @@ const CameraView = () => {
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                                 onClick={handleTakePhoto}
-                                disabled={!isReady || loading || !streamActive || isProcessing}
                                 className={`relative group pointer-events-auto`}
                             >
                                 {/* Pulsing glow effect */}
