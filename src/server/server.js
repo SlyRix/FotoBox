@@ -38,8 +38,6 @@ const THUMBNAILS_DIR = path.join(__dirname, 'public', 'thumbnails');
 const OVERLAYS_DIR = path.join(__dirname, 'public', 'overlays');
 const PRINT_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'print');
 const ORIGINALS_DIR = path.join(__dirname, 'public', 'photos', 'originals');
-const INSTAGRAM_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'instagram');
-const FRAME_PHOTOS_DIR = path.join(__dirname, 'public', 'photos', 'frames');
 const TEMPLATES_DIR = path.join(__dirname, 'data', 'templates');
 
 // ==========================================
@@ -117,8 +115,6 @@ function createRequiredDirectories() {
         OVERLAYS_DIR,
         PRINT_PHOTOS_DIR,
         ORIGINALS_DIR,
-        INSTAGRAM_PHOTOS_DIR,
-        FRAME_PHOTOS_DIR,
         TEMPLATES_DIR
     ];
 
@@ -337,7 +333,7 @@ function startWebcamPreview() {
         const previewPath = path.join(PREVIEW_DIR, `preview_${timestamp}.jpg`);
 
         // Use fswebcam with optimized settings for smoother preview
-        exec(`fswebcam -d /dev/video1 -r 320x240 --fps 30 --no-banner --skip 1 --jpeg 80 ${previewPath}`, (error, stdout, stderr) => {
+        exec(`fswebcam -d /dev/video0 -r 320x240 --fps 30 --no-banner --skip 1 --jpeg 80 ${previewPath}`, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Error capturing preview: ${error.message}`);
                 return;
@@ -582,12 +578,6 @@ async function processPhotoWithDualFormats(sourceFilePath, filename) {
  */
 async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath) {
     try {
-        // Ensure the output directory exists
-        const outputDir = path.dirname(outputPath);
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
-
         // Check if this is an Instagram overlay
         const overlayFilename = path.basename(overlayImagePath);
         console.log(`Applying overlay: ${overlayFilename}`);
@@ -662,12 +652,6 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
  */
 async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPath, template, overlayName) {
     try {
-        // Ensure the output directory exists
-        const outputDir = path.dirname(outputPath);
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
-
         // Ensure source image exists
         if (!fs.existsSync(sourceImagePath)) {
             throw new Error(`Source image not found: ${sourceImagePath}`);
@@ -686,9 +670,6 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         // Get metadata from the original photo
         const imgMetadata = await sharp(sourceImagePath).metadata();
         const overlayMetadata = await sharp(overlayImagePath).metadata();
-
-        console.log(`Processing photo with dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
-        console.log(`Overlay dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
 
         // Determine if the overlay is standard (A5 landscape) or custom
         const isStandardFormat = overlayName === 'wedding-frame.png';
@@ -710,17 +691,9 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         const centerX = canvasWidth / 2;
         const centerY = canvasHeight / 2;
 
-        // Calculate scaled dimensions with default values if not provided
-        const scale = template.scale || 1.0;
-        const rotation = template.rotation || 0;
-        const positionX = template.positionX || 0;
-        const positionY = template.positionY || 0;
-
-        const scaledWidth = Math.round(imgMetadata.width * scale);
-        const scaledHeight = Math.round(imgMetadata.height * scale);
-
-        console.log(`Applying template with scale: ${scale}, position: ${positionX},${positionY}, rotation: ${rotation}`);
-        console.log(`Scaled dimensions: ${scaledWidth}x${scaledHeight}`);
+        // Calculate scaled dimensions
+        const scaledWidth = Math.round(imgMetadata.width * template.scale);
+        const scaledHeight = Math.round(imgMetadata.height * template.scale);
 
         // Create a buffer of the scaled and rotated source image
         const processedImage = await sharp(sourceImagePath)
@@ -729,7 +702,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
                 height: scaledHeight,
                 fit: 'fill'
             })
-            .rotate(rotation, {
+            .rotate(template.rotation, {
                 background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background for rotation
             })
             .toBuffer();
@@ -749,26 +722,17 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             .composite([
                 {
                     input: processedImage,
-                    left: Math.round(centerX - (scaledWidth / 2) + positionX),
-                    top: Math.round(centerY - (scaledHeight / 2) + positionY)
+                    left: Math.round(centerX - (scaledWidth / 2) + template.positionX),
+                    top: Math.round(centerY - (scaledHeight / 2) + template.positionY)
                 }
             ])
-            .toBuffer();
-
-        // Resize the overlay to match the canvas dimensions exactly
-        const resizedOverlay = await sharp(overlayImagePath)
-            .resize({
-                width: canvasWidth,
-                height: canvasHeight,
-                fit: 'fill'
-            })
             .toBuffer();
 
         // Add the overlay on top
         await sharp(withPhotoComposite)
             .composite([
                 {
-                    input: resizedOverlay,
+                    input: overlayImagePath,
                     gravity: 'center'
                 }
             ])
@@ -782,153 +746,100 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
 }
 
 /**
- * Simple and robust implementation for Instagram overlays
+ * Applies an Instagram template to a photo
  * @param {string} sourceImagePath - Path to the source image
  * @param {string} overlayImagePath - Path to the overlay image
  * @param {string} outputPath - Path to save the resulting image
- * @param {object} template - Template data (may be empty or null)
+ * @param {object} template - Template data with positioning info
  * @returns {boolean} Success state of the operation
  */
 async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template) {
     try {
-        // Ensure output directory exists
-        const outputDir = path.dirname(outputPath);
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
+        // Instagram uses 9:16 aspect ratio
+        const targetWidth = 1080;  // Instagram recommended width
+        const targetHeight = 1920; // 9:16 ratio for stories
 
-        console.log(`[Instagram] Starting simplified overlay process`);
+        // Get metadata from the original photo
+        const imgMetadata = await sharp(sourceImagePath).metadata();
+        console.log(`Processing photo with dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
 
-        // Instagram dimensions
-        const targetWidth = 1080;
-        const targetHeight = 1920;
+        // Calculate the center point
+        const centerX = targetWidth / 2;
+        const centerY = targetHeight / 2;
 
-        // 1. Create a white background as our base
-        const whiteBackground = {
+        // Calculate scaled dimensions with a minimum scale to ensure visibility
+        const scale = Math.max(template.scale, 0.5); // Ensure minimum scale of 50%
+        const scaledWidth = Math.round(imgMetadata.width * scale);
+        const scaledHeight = Math.round(imgMetadata.height * scale);
+
+        console.log(`Applying template with scale: ${scale}, position: ${template.positionX},${template.positionY}, rotation: ${template.rotation}`);
+        console.log(`Scaled dimensions: ${scaledWidth}x${scaledHeight}`);
+
+        // Create a buffer of the scaled and rotated source image
+        const processedImage = await sharp(sourceImagePath)
+            .resize({
+                width: scaledWidth,
+                height: scaledHeight,
+                fit: 'contain',
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
+            })
+            .rotate(template.rotation, {
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
+            })
+            .toBuffer();
+
+        // First create a white background image
+        const backgroundImage = await sharp({
             create: {
                 width: targetWidth,
                 height: targetHeight,
                 channels: 4,
                 background: { r: 255, g: 255, b: 255, alpha: 1 }
             }
-        };
+        })
+            .jpeg()
+            .toBuffer();
 
-        // 2. Get source image size
-        const sourceMetadata = await sharp(sourceImagePath).metadata();
-        console.log(`[Instagram] Source image: ${sourceMetadata.width}x${sourceMetadata.height}`);
+        // Position the processed image on the white background
+        const positionX = Math.round(centerX - (scaledWidth / 2) + template.positionX);
+        const positionY = Math.round(centerY - (scaledHeight / 2) + template.positionY);
 
-        // 3. Calculate max dimensions to fit in target (with margin)
-        const maxWidth = targetWidth * 0.8;  // 80% of target width
-        const maxHeight = targetHeight * 0.6; // 60% of target height
+        console.log(`Positioning image at: ${positionX},${positionY} on ${targetWidth}x${targetHeight} canvas`);
 
-        // 4. Calculate resize dimensions to fit within constraints
-        let resizeOptions = {};
+        const withPhotoComposite = await sharp(backgroundImage)
+            .composite([
+                {
+                    input: processedImage,
+                    left: positionX,
+                    top: positionY
+                }
+            ])
+            .toBuffer();
 
-        // Determine if image needs resizing
-        if (sourceMetadata.width > maxWidth || sourceMetadata.height > maxHeight) {
-            // Need to resize - maintain aspect ratio
-            const aspectRatio = sourceMetadata.width / sourceMetadata.height;
-
-            // Start with width constraint
-            let newWidth = maxWidth;
-            let newHeight = newWidth / aspectRatio;
-
-            // If height still exceeds, constrain by height instead
-            if (newHeight > maxHeight) {
-                newHeight = maxHeight;
-                newWidth = newHeight * aspectRatio;
-            }
-
-            resizeOptions = {
-                width: Math.floor(newWidth),
-                height: Math.floor(newHeight),
-                fit: 'inside'
-            };
-        } else {
-            // Already small enough - use original dimensions
-            resizeOptions = {
-                width: sourceMetadata.width,
-                height: sourceMetadata.height
-            };
+        // Ensure overlay image exists
+        if (!fs.existsSync(overlayImagePath)) {
+            console.error(`Overlay image not found: ${overlayImagePath}`);
+            throw new Error('Overlay image not found');
         }
 
-        console.log(`[Instagram] Resizing to: ${resizeOptions.width}x${resizeOptions.height}`);
-
-        // 5. Process the image in separate steps
-
-        // 5a. Resize the image
-        const resizedImageBuffer = await sharp(sourceImagePath)
-            .resize(resizeOptions)
-            .toBuffer();
-
-        // 5b. Get the dimensions of the resized image
-        const resizedMetadata = await sharp(resizedImageBuffer).metadata();
-        console.log(`[Instagram] Resized image: ${resizedMetadata.width}x${resizedMetadata.height}`);
-
-        // 5c. Calculate position for centered placement
-        const left = Math.floor((targetWidth - resizedMetadata.width) / 2);
-        const top = Math.floor((targetHeight - resizedMetadata.height) / 3); // Place higher than center
-
-        console.log(`[Instagram] Positioning at: ${left},${top}`);
-
-        // 5d. Create a new blank canvas and place the image
-        const canvasWithImage = await sharp(whiteBackground)
-            .composite([{
-                input: resizedImageBuffer,
-                left: left,
-                top: top
-            }])
-            .toBuffer();
-
-        // 6. Prepare the overlay
-        const resizedOverlay = await sharp(overlayImagePath)
-            .resize(targetWidth, targetHeight, { fit: 'fill' })
-            .toBuffer();
-
-        // 7. Add the overlay to the canvas with image
-        await sharp(canvasWithImage)
-            .composite([{
-                input: resizedOverlay,
-                left: 0,
-                top: 0
-            }])
+        // Add the Instagram overlay on top
+        await sharp(withPhotoComposite)
+            .composite([
+                {
+                    input: overlayImagePath,
+                    gravity: 'center'
+                }
+            ])
             .jpeg({ quality: 95 })
             .toFile(outputPath);
 
-        console.log(`[Instagram] Successfully created Instagram photo: ${outputPath}`);
         return true;
     } catch (error) {
-        console.error(`[Instagram] Error in simplified approach:`, error);
-
-        // Ultimate fallback: Just create an Instagram frame with the overlay only
-        try {
-            console.log(`[Instagram] Attempting emergency fallback (overlay only)...`);
-
-            // Create a white Instagram-sized canvas and put the overlay on it
-            await sharp({
-                create: {
-                    width: 1080,
-                    height: 1920,
-                    channels: 4,
-                    background: { r: 255, g: 255, b: 255, alpha: 1 }
-                }
-            })
-                .composite([{
-                    input: overlayImagePath,
-                    left: 0,
-                    top: 0
-                }])
-                .jpeg({ quality: 90 })
-                .toFile(outputPath);
-
-            console.log(`[Instagram] Emergency fallback succeeded`);
-            return true;
-        } catch (fallbackError) {
-            console.error(`[Instagram] Emergency fallback failed:`, fallbackError);
-            return false;
-        }
+        console.error('Error applying templated Instagram overlay:', error);
+        throw error;
     }
 }
+
 /**
  * Processes a photo specifically for Instagram format (9:16 ratio)
  * @param {string} sourceImagePath - Path to the source image
@@ -938,12 +849,6 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
  */
 async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPath) {
     try {
-        // Ensure the output directory exists
-        const outputDir = path.dirname(outputPath);
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
-
         // Ensure source image exists
         if (!fs.existsSync(sourceImagePath)) {
             console.error(`Source image for Instagram format not found: ${sourceImagePath}`);
@@ -1345,10 +1250,6 @@ app.get('/photos/:filename', (req, res) => {
         filepath = path.join(ORIGINALS_DIR, filename);
     } else if (filename.startsWith('print_')) {
         filepath = path.join(PRINT_PHOTOS_DIR, filename);
-    } else if (filename.startsWith('instagram_')) {
-        filepath = path.join(INSTAGRAM_PHOTOS_DIR, filename);
-    } else if (filename.startsWith('frame_')) {
-        filepath = path.join(FRAME_PHOTOS_DIR, filename);
     } else {
         filepath = path.join(PHOTOS_DIR, filename);
     }
@@ -1435,7 +1336,7 @@ app.get('/api/status', (req, res) => {
 
 // Get list of all photos
 app.get('/api/photos', (req, res) => {
-    const type = req.query.type || 'all'; // 'all', 'original', 'print', 'instagram', 'frame', standard
+    const type = req.query.type || 'framed'; // 'framed', 'original', 'print'
     const limit = parseInt(req.query.limit) || 0; // Optional limit parameter
 
     // Select directory based on type
@@ -1447,77 +1348,13 @@ app.get('/api/photos', (req, res) => {
         case 'print':
             dirToScan = PRINT_PHOTOS_DIR;
             break;
-        case 'instagram':
-            dirToScan = INSTAGRAM_PHOTOS_DIR;
-            break;
-        case 'frame':
-            dirToScan = FRAME_PHOTOS_DIR;
-            break;
-        case 'standard':
+        case 'framed':
+        default:
             dirToScan = PHOTOS_DIR;
             break;
-        case 'all':
-        default:
-            // For 'all', we'll combine photos from all directories
-            const photos = [];
-
-            // Helper function to read photos from a directory
-            const readPhotosFromDir = (dir, prefix = '') => {
-                if (!fs.existsSync(dir)) return [];
-
-                const files = fs.readdirSync(dir);
-                return files.filter(file => /\.(jpg|jpeg|png)$/i.test(file))
-                    .map(file => {
-                        try {
-                            const stats = fs.statSync(path.join(dir, file));
-                            const baseFilename = file.replace(/^(original_|print_|instagram_|frame_)/, '');
-
-                            let url;
-                            if (dir === ORIGINALS_DIR) {
-                                url = `/photos/originals/${file}`;
-                            } else if (dir === PRINT_PHOTOS_DIR) {
-                                url = `/photos/print/${file}`;
-                            } else if (dir === INSTAGRAM_PHOTOS_DIR) {
-                                url = `/photos/instagram/${file}`;
-                            } else if (dir === FRAME_PHOTOS_DIR) {
-                                url = `/photos/frames/${file}`;
-                            } else {
-                                url = `/photos/${file}`;
-                            }
-
-                            return {
-                                filename: file,
-                                baseFilename: baseFilename,
-                                url: url,
-                                originalUrl: `/photos/originals/original_${baseFilename}`,
-                                printUrl: `/photos/print/print_${baseFilename}`,
-                                thumbnailUrl: `/thumbnails/thumb_${baseFilename}`,
-                                qrUrl: `/qrcodes/qr_${baseFilename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '.png')}`,
-                                timestamp: stats.mtime.getTime(),
-                                type: prefix
-                            };
-                        } catch (error) {
-                            console.error(`Error processing photo ${file}:`, error);
-                            return null;
-                        }
-                    }).filter(photo => photo !== null);
-            };
-
-            // Read photos from each directory
-            photos.push(...readPhotosFromDir(PHOTOS_DIR, 'standard'));
-            photos.push(...readPhotosFromDir(ORIGINALS_DIR, 'original'));
-            photos.push(...readPhotosFromDir(PRINT_PHOTOS_DIR, 'print'));
-            photos.push(...readPhotosFromDir(INSTAGRAM_PHOTOS_DIR, 'instagram'));
-            photos.push(...readPhotosFromDir(FRAME_PHOTOS_DIR, 'frame'));
-
-            // Sort by timestamp (newest first) and apply limit
-            const sortedPhotos = photos.sort((a, b) => b.timestamp - a.timestamp);
-            const limitedPhotos = limit > 0 ? sortedPhotos.slice(0, limit) : sortedPhotos;
-
-            return res.json(limitedPhotos);
     }
 
-    // For single directory types
+    // Ensure directory exists
     if (!fs.existsSync(dirToScan)) {
         return res.json([]);
     }
@@ -1538,23 +1375,12 @@ app.get('/api/photos', (req, res) => {
                 const stats = fs.statSync(path.join(dirToScan, file));
                 const baseFilename = file.replace(/^(original_|print_|instagram_|frame_)/, '');
 
-                let url;
-                if (dirToScan === ORIGINALS_DIR) {
-                    url = `/photos/originals/${file}`;
-                } else if (dirToScan === PRINT_PHOTOS_DIR) {
-                    url = `/photos/print/${file}`;
-                } else if (dirToScan === INSTAGRAM_PHOTOS_DIR) {
-                    url = `/photos/instagram/${file}`;
-                } else if (dirToScan === FRAME_PHOTOS_DIR) {
-                    url = `/photos/frames/${file}`;
-                } else {
-                    url = `/photos/${file}`;
-                }
-
                 return {
                     filename: file,
                     baseFilename: baseFilename,
-                    url: url,
+                    url: type === 'original'
+                        ? `/photos/originals/${file}`
+                        : (type === 'print' ? `/photos/print/${file}` : `/photos/${file}`),
                     originalUrl: `/photos/originals/original_${baseFilename}`,
                     printUrl: `/photos/print/print_${baseFilename}`,
                     thumbnailUrl: `/thumbnails/thumb_${baseFilename}`,
@@ -1598,17 +1424,18 @@ app.get('/api/photos/:photoId', (req, res) => {
     } else if (photoId.startsWith('print_')) {
         filepath = path.join(PRINT_PHOTOS_DIR, photoId);
     } else if (photoId.startsWith('instagram_')) {
-        filepath = path.join(INSTAGRAM_PHOTOS_DIR, photoId);
+        filepath = path.join(PHOTOS_DIR, photoId);
         isInstagram = true;
     } else if (photoId.startsWith('frame_')) {
-        filepath = path.join(FRAME_PHOTOS_DIR, photoId);
+        filepath = path.join(PHOTOS_DIR, photoId);
         isCustomFrame = true;
     } else {
         filepath = path.join(PHOTOS_DIR, photoId);
     }
+
     // Check if file exists
     if (!fs.existsSync(filepath)) {
-        console.log(`Photo not found at ${filepath}, checking other directories...`);
+        console.log(`Photo not found: ${photoId}`);
 
         // Try to find in other directories if this is not a special version
         if (!photoId.startsWith('original_') && !photoId.startsWith('print_') &&
@@ -1617,33 +1444,19 @@ app.get('/api/photos/:photoId', (req, res) => {
             const baseId = photoId;
             const originalPath = path.join(ORIGINALS_DIR, `original_${baseId}`);
             const printPath = path.join(PRINT_PHOTOS_DIR, `print_${baseId}`);
-            const instagramPath = path.join(INSTAGRAM_PHOTOS_DIR, `instagram_${baseId}`);
-            const framePath = path.join(FRAME_PHOTOS_DIR, `frame_${baseId}`);
 
             if (fs.existsSync(originalPath)) {
                 filepath = originalPath;
                 isOriginal = true;
-                console.log(`Found photo in originals directory: ${filepath}`);
             } else if (fs.existsSync(printPath)) {
                 filepath = printPath;
-                console.log(`Found photo in print directory: ${filepath}`);
-            } else if (fs.existsSync(instagramPath)) {
-                filepath = instagramPath;
-                isInstagram = true;
-                console.log(`Found photo in instagram directory: ${filepath}`);
-            } else if (fs.existsSync(framePath)) {
-                filepath = framePath;
-                isCustomFrame = true;
-                console.log(`Found photo in frames directory: ${filepath}`);
             } else {
-                console.log(`Photo not found in any directory: ${photoId}`);
                 return res.status(404).json({
                     success: false,
                     error: 'Photo not found'
                 });
             }
         } else {
-            console.log(`Photo with specific prefix not found: ${photoId}`);
             return res.status(404).json({
                 success: false,
                 error: 'Photo not found'
@@ -1669,18 +1482,10 @@ app.get('/api/photos/:photoId', (req, res) => {
         const clientDomain = req.headers.host || 'fotobox.slyrix.com';
 
         // Different URLs for different versions
-        let photoUrl;
-        if (isOriginal) {
-            photoUrl = `/photos/originals/${photoId}`;
-        } else if (photoId.startsWith('print_')) {
-            photoUrl = `/photos/print/${photoId}`;
-        } else if (isInstagram) {
-            photoUrl = `/photos/instagram/${photoId}`;
-        } else if (isCustomFrame) {
-            photoUrl = `/photos/frames/${photoId}`;
-        } else {
-            photoUrl = `/photos/${photoId}`;
-        }
+        let normalUrl = `/photos/${baseFilename}`;
+        let originalUrl = `/photos/originals/original_${baseFilename}`;
+        let printUrl = `/photos/print/print_${baseFilename}`;
+        let instagramUrl = `/photos/instagram_${baseFilename}`;
 
         // Create the correct photo view URL
         let photoViewUrl;
@@ -1689,18 +1494,18 @@ app.get('/api/photos/:photoId', (req, res) => {
         } else if (isInstagram) {
             photoViewUrl = `https://${clientDomain}/photo/instagram_${baseFilename}`;
         } else if (isCustomFrame) {
-            photoViewUrl = `https://${clientDomain}/photo/frame_${baseFilename}`;
+            photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
         } else {
             photoViewUrl = `https://${clientDomain}/photo/${baseFilename}`;
         }
 
         // Return photo data
-        return res.json({
+        res.json({
             success: true,
             filename: photoId,
-            url: photoUrl,
-            originalUrl: `/photos/originals/original_${baseFilename}`,
-            printUrl: `/photos/print/print_${baseFilename}`,
+            url: isOriginal ? originalUrl : (isInstagram ? instagramUrl : `/photos/${photoId}`),
+            originalUrl: originalUrl,
+            printUrl: printUrl,
             thumbnailUrl: hasThumbnail ? `/thumbnails/thumb_${baseFilename}` : null,
             qrUrl: `/qrcodes/${qrFilename}`,
             photoViewUrl: photoViewUrl,
@@ -1771,7 +1576,7 @@ app.post('/api/photos/capture', async (req, res) => {
             console.error(`Error taking photo: ${error ? error.message : stderr}`);
 
             // Fall back to webcam as backup
-            const fallbackCommand = `fswebcam -d /dev/video1 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
+            const fallbackCommand = `fswebcam -d /dev/video0 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
 
             exec(fallbackCommand, async (fbError, fbStdout, fbStderr) => {
                 captureInProgress.status = false;
@@ -1845,11 +1650,11 @@ app.delete('/api/photos/:filename', (req, res) => {
 
     const filepaths = [
         path.join(PHOTOS_DIR, baseFilename),                        // Standard version
-        path.join(INSTAGRAM_PHOTOS_DIR, `instagram_${baseFilename}`), // Instagram version
-        path.join(FRAME_PHOTOS_DIR, `frame_${baseFilename}`),       // Custom frame version
-        path.join(ORIGINALS_DIR, `original_${baseFilename}`),       // Original version
-        path.join(PRINT_PHOTOS_DIR, `print_${baseFilename}`),       // Print version
-        path.join(THUMBNAILS_DIR, `thumb_${baseFilename}`)          // Thumbnail
+        path.join(PHOTOS_DIR, `instagram_${baseFilename}`),        // Instagram version
+        path.join(PHOTOS_DIR, `frame_${baseFilename}`),            // Custom frame version
+        path.join(ORIGINALS_DIR, `original_${baseFilename}`),      // Original version
+        path.join(PRINT_PHOTOS_DIR, `print_${baseFilename}`),      // Print version
+        path.join(THUMBNAILS_DIR, `thumb_${baseFilename}`)         // Thumbnail
     ];
 
     let success = true;
@@ -1893,193 +1698,32 @@ app.post('/api/photos/print', (req, res) => {
     const { filename } = req.body;
 
     if (!filename) {
-        return res.status(400).json({
-            success: false,
-            error: 'Filename is required'
-        });
-    }
-
-    // Check if printing is enabled in config
-    if (!config.printing.enabled) {
-        console.log(`Print request received for ${filename}, but printing is disabled in config`);
-        return res.json({
-            success: false,
-            message: 'Printing is disabled in server configuration'
-        });
+        return res.status(400).json({ error: 'Filename is required' });
     }
 
     // Use print version (A5 landscape) for printing
     const printFilename = filename.startsWith('print_') ? filename : `print_${filename.replace(/^(instagram_|frame_)/, '')}`;
-    const filepath = path.join(PRINT_PHOTOS_DIR, printFilename);
-
-    // Check if the print file exists
-    if (!fs.existsSync(filepath)) {
-        console.error(`Print file not found: ${filepath}`);
-        return res.status(404).json({
-            success: false,
-            error: 'Print file not found'
-        });
-    }
 
     console.log(`Print request received for: ${printFilename}`);
 
-    // Construct the print command for the Canon SELPHY CP1500
-    // -o media=Postcard is for 4x6" paper
-    // -o fit-to-page will ensure the image is properly sized
-    // -o borderless=true for borderless printing (if supported)
-    const printCommand = `${config.printing.printCommand} ${config.printing.printerName} -o media=${config.printing.paperSize} -o fit-to-page -o borderless=${config.printing.printFormat === 'borderless' ? 'true' : 'false'} "${filepath}"`;
-
-    // Execute the print command
-    exec(printCommand, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Print error: ${error.message}`);
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to print photo',
-                details: error.message
-            });
-        }
-
-        if (stderr) {
-            console.warn(`Print warning: ${stderr}`);
-        }
-
-        // Get job ID from stdout if available (usually in the format "request id is PRINTER-X")
-        let jobId = null;
-        const match = stdout.match(/request id is (\S+)/i);
-        if (match && match[1]) {
-            jobId = match[1];
-        }
-
-        console.log(`Print job submitted successfully: ${jobId || 'unknown job ID'}`);
-
-        res.json({
-            success: true,
-            message: 'Print request sent to printer',
-            jobId: jobId,
-            filename: printFilename
-        });
-    });
-});
-app.get('/api/print-status/:jobId', (req, res) => {
-    const { jobId } = req.params;
-
-    if (!jobId) {
-        return res.status(400).json({
-            success: false,
-            error: 'Job ID is required'
-        });
-    }
-    /**
-     * Checks if the printer is ready and available
-     * @returns {Promise<boolean>} True if printer is ready, false otherwise
-     */
-    async function isPrinterReady() {
-        return new Promise((resolve) => {
-            if (!config.printing.enabled) {
-                console.log('Printing is disabled in config');
-                resolve(false);
-                return;
-            }
-
-            exec(`lpstat -p ${config.printing.printerName}`, (error, stdout, stderr) => {
-                if (error) {
-                    console.error(`Printer check error: ${error.message}`);
-                    resolve(false);
-                    return;
-                }
-
-                // Check if printer is ready (not disabled or in error state)
-                if (stdout.includes('disabled') || stdout.includes('error')) {
-                    console.warn(`Printer is not ready: ${stdout.trim()}`);
-                    resolve(false);
-                } else {
-                    resolve(true);
-                }
-            });
-        });
-    }
-    app.get('/api/printer-status', async (req, res) => {
-        try {
-            const printerReady = await isPrinterReady();
-
-            exec(`lpstat -p ${config.printing.printerName} -l`, (error, stdout, stderr) => {
-                let status = 'unknown';
-                let details = '';
-
-                if (error) {
-                    status = 'offline';
-                    details = 'Printer not found or CUPS system error';
-                } else {
-                    status = printerReady ? 'ready' : 'busy';
-                    details = stdout.trim();
-                }
-
-                // Check for common printer issues
-                let state = 'ok';
-                if (stdout.includes('out of paper')) state = 'out-of-paper';
-                if (stdout.includes('out of ink')) state = 'out-of-ink';
-                if (stdout.includes('jam')) state = 'paper-jam';
-                if (stdout.includes('open')) state = 'cover-open';
-
-                res.json({
-                    success: true,
-                    printerName: config.printing.printerName,
-                    status: status,
-                    state: state,
-                    enabled: config.printing.enabled,
-                    ready: printerReady,
-                    details: details
-                });
-            });
-        } catch (error) {
-            res.status(500).json({
-                success: false,
-                error: 'Error checking printer status',
-                message: error.message
-            });
-        }
-    });
-
-    // Use lpstat to check print job status
-    exec(`${config.printing.jobStatusCommand} ${jobId}`, (error, stdout, stderr) => {
-        if (error) {
-            // If command returns error, job may be completed or not found
-            return res.json({
-                success: true,
-                jobId: jobId,
-                status: 'completed',
-                message: 'Print job appears to be completed (not found in queue)'
-            });
-        }
-
-        // Job is still in the queue
-        return res.json({
-            success: true,
-            jobId: jobId,
-            status: 'pending',
-            message: 'Print job is still in queue',
-            details: stdout.trim()
-        });
+    res.json({
+        success: true,
+        message: 'Print request received. Printing functionality will be implemented later.'
     });
 });
 
 // Generate thumbnails for all photos
 app.get('/api/admin/generate-thumbnails', async (req, res) => {
     try {
-        // Check all photo directories for files to thumbnail
-        const directoriesToScan = [PHOTOS_DIR, INSTAGRAM_PHOTOS_DIR, FRAME_PHOTOS_DIR];
-        let photoFiles = [];
-
-        for (const dir of directoriesToScan) {
-            if (!fs.existsSync(dir)) continue;
-
-            const files = fs.readdirSync(dir);
-            photoFiles = photoFiles.concat(
-                files.filter(file => /\.(jpg|jpeg|png)$/i.test(file))
-                    .map(file => ({ path: path.join(dir, file), filename: file }))
-            );
+        if (!fs.existsSync(PHOTOS_DIR)) {
+            return res.json({
+                success: true,
+                message: 'No photos directory found.'
+            });
         }
+
+        const files = fs.readdirSync(PHOTOS_DIR);
+        const photoFiles = files.filter(file => /\.(jpg|jpeg|png)$/i.test(file));
 
         // Send immediate response
         res.json({
@@ -2091,10 +1735,10 @@ app.get('/api/admin/generate-thumbnails', async (req, res) => {
         let processed = 0;
         let failed = 0;
 
-        for (const photo of photoFiles) {
+        for (const file of photoFiles) {
             try {
-                const baseFilename = photo.filename.replace(/^(original_|print_|instagram_|frame_)/, '');
-                await generateThumbnail(photo.path, baseFilename);
+                const filepath = path.join(PHOTOS_DIR, file);
+                await generateThumbnail(filepath, file);
                 processed++;
 
                 // Log progress every 10 photos
@@ -2103,7 +1747,7 @@ app.get('/api/admin/generate-thumbnails', async (req, res) => {
                 }
             } catch (err) {
                 failed++;
-                console.error(`Failed to create thumbnail for ${photo.filename}: ${err.message}`);
+                console.error(`Failed to create thumbnail for ${file}: ${err.message}`);
             }
         }
 
@@ -2154,20 +1798,17 @@ app.post('/api/photos/:photoId/overlay', async (req, res) => {
         });
     }
 
-    // Determine target path based on overlay type
-    let targetFilename, targetDir;
+    // Determine target filename based on overlay type
+    let targetFilename;
     if (overlayName === 'instagram-frame.png') {
         targetFilename = `instagram_${baseFilename}`;
-        targetDir = INSTAGRAM_PHOTOS_DIR; // Use Instagram directory
     } else if (overlayName !== 'wedding-frame.png') {
         targetFilename = `frame_${baseFilename}`;
-        targetDir = FRAME_PHOTOS_DIR; // Use frames directory
     } else {
         targetFilename = baseFilename; // Standard frame - just use the base filename
-        targetDir = PHOTOS_DIR; // Use main photos directory
     }
 
-    targetPhotoPath = path.join(targetDir, targetFilename);
+    targetPhotoPath = path.join(PHOTOS_DIR, targetFilename);
 
     // Check if overlay exists
     const overlayPath = path.join(OVERLAYS_DIR, overlayName);
@@ -2194,18 +1835,11 @@ app.post('/api/photos/:photoId/overlay', async (req, res) => {
             // Regenerate thumbnail for the new version
             const thumbnailUrl = await generateThumbnail(targetPhotoPath, targetFilename);
 
-            // Create the URL path based on directory
-            const photoUrl = overlayName === 'instagram-frame.png' ?
-                `/photos/instagram/${targetFilename}` :
-                (overlayName !== 'wedding-frame.png' ?
-                    `/photos/frames/${targetFilename}` :
-                    `/photos/${targetFilename}`);
-
             return res.json({
                 success: true,
                 message: 'Frame applied successfully',
                 photoId: targetFilename,
-                url: photoUrl,
+                url: `/photos/${targetFilename}`,
                 thumbnailUrl: thumbnailUrl
             });
         } else {
@@ -2654,7 +2288,214 @@ app.delete('/api/admin/frame-templates/:overlayName', (req, res) => {
         error: 'Template not found for this frame'
     });
 });
+app.post('/api/photos/:filename/filter', async (req, res) => {
+    const photoId = req.params.filename;
+    const { filter } = req.body;
 
+    if (!photoId || !filter) {
+        return res.status(400).json({
+            success: false,
+            error: 'Photo ID and filter type are required'
+        });
+    }
+
+    try {
+        // Find source photo path
+        const baseFilename = photoId.replace(/^(filtered_|instagram_|frame_)/, '');
+        let sourcePhotoPath;
+
+        // Try to find the original photo first (best quality for filtering)
+        const originalPath = path.join(ORIGINALS_DIR, `original_${baseFilename}`);
+        const standardPath = path.join(PHOTOS_DIR, baseFilename);
+
+        if (fs.existsSync(originalPath)) {
+            sourcePhotoPath = originalPath;
+        } else if (fs.existsSync(standardPath)) {
+            sourcePhotoPath = standardPath;
+        } else {
+            // Fall back to the provided photo ID path
+            sourcePhotoPath = path.join(PHOTOS_DIR, photoId);
+
+            if (!fs.existsSync(sourcePhotoPath)) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Source photo not found'
+                });
+            }
+        }
+
+        console.log(`Applying ${filter} filter to ${sourcePhotoPath}`);
+
+        // Create a filtered version filename
+        const filteredFilename = `filtered_${filter}_${baseFilename}`;
+        const filteredPhotoPath = path.join(PHOTOS_DIR, filteredFilename);
+
+        // Special handling for Forever filter with vignette effect
+        if (filter === 'forever') {
+            // First apply the basic adjustments
+            await sharp(sourcePhotoPath)
+                .modulate({
+                    contrast: 1.15,
+                    brightness: 1.1,
+                    saturation: 1.05
+                })
+                .sharpen(0.5)
+                .toFormat('jpeg', { quality: 90 })
+                .toFile(filteredPhotoPath);
+
+            // Create a temporary file for the vignette effect
+            const tempFilteredPath = path.join(PHOTOS_DIR, `temp_${filteredFilename}`);
+
+            // Move the filtered file to the temp location
+            fs.renameSync(filteredPhotoPath, tempFilteredPath);
+
+            // Apply vignette effect
+            await applyVignetteEffect(tempFilteredPath, filteredPhotoPath);
+
+            // Remove the temporary file
+            fs.unlinkSync(tempFilteredPath);
+        } else {
+            // Apply other filters using Sharp
+            const filterParams = getFilterParams(filter);
+            let sharpImage = sharp(sourcePhotoPath);
+
+            // Apply greyscale if specified
+            if (filterParams.greyscale) {
+                sharpImage = sharpImage.greyscale();
+            }
+
+            // Apply sepia if specified
+            if (filterParams.sepia) {
+                sharpImage = sharpImage.tint(filterParams.sepia);
+            }
+
+            // Apply blur if specified
+            if (filterParams.blur !== undefined) {
+                sharpImage = sharpImage.blur(filterParams.blur);
+            }
+
+            // Apply sharpen if specified
+            if (filterParams.sharpen !== undefined) {
+                sharpImage = sharpImage.sharpen(filterParams.sharpen);
+            }
+
+            // Apply modulate adjustments if specified
+            if (filterParams.modulate) {
+                sharpImage = sharpImage.modulate(filterParams.modulate);
+            }
+
+            // Save the filtered image
+            await sharpImage
+                .toFormat('jpeg', { quality: 90 })
+                .toFile(filteredPhotoPath);
+        }
+
+        // Generate thumbnail for filtered version
+        const thumbnailUrl = await generateThumbnail(filteredPhotoPath, filteredFilename);
+
+        return res.json({
+            success: true,
+            message: 'Filter applied successfully',
+            photoUrl: `/photos/${filteredFilename}`,
+            thumbnailUrl: thumbnailUrl
+        });
+    } catch (error) {
+        console.error('Error applying filter:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error applying filter: ' + error.message
+        });
+    }
+});
+
+// Create a vignette effect overlay (for the Forever filter)
+async function applyVignetteEffect(inputPath, outputPath) {
+    try {
+        // Get dimensions of the input image
+        const metadata = await sharp(inputPath).metadata();
+        const { width, height } = metadata;
+
+        // Create a radial gradient for vignette effect
+        const svgVignette = `
+        <svg width="${width}" height="${height}">
+            <defs>
+                <radialGradient id="vignette" cx="50%" cy="50%" r="65%" fx="50%" fy="50%">
+                    <stop offset="0%" stop-color="white" stop-opacity="1" />
+                    <stop offset="85%" stop-color="white" stop-opacity="0.7" />
+                    <stop offset="100%" stop-color="black" stop-opacity="0.5" />
+                </radialGradient>
+            </defs>
+            <rect x="0" y="0" width="${width}" height="${height}" fill="url(#vignette)" />
+        </svg>`;
+
+        // Create a buffer from the SVG
+        const vignetteBuffer = Buffer.from(svgVignette);
+
+        // Apply the vignette overlay
+        await sharp(inputPath)
+            .composite([
+                {
+                    input: vignetteBuffer,
+                    blend: 'multiply'
+                }
+            ])
+            .toFile(outputPath);
+
+        return true;
+    } catch (error) {
+        console.error('Error applying vignette effect:', error);
+        return false;
+    }
+}
+
+// Helper function to map filter names to Sharp parameters
+function getFilterParams(filter) {
+    switch (filter) {
+        case 'grayscale':
+            return {
+                greyscale: true
+            };
+        case 'sepia':
+            return {
+                sepia: { r: 112, g: 66, b: 20 },
+                modulate: {
+                    brightness: 1.1,
+                    saturation: 0.8
+                }
+            };
+        case 'dream':
+            return {
+                modulate: {
+                    brightness: 1.1,
+                    contrast: 0.85,
+                    saturation: 1.2
+                },
+                blur: 0.5
+            };
+        case 'romance':
+            return {
+                modulate: {
+                    brightness: 1.05,
+                    contrast: 0.95,
+                    saturation: 1.15
+                },
+                sepia: { r: 255, g: 222, b: 213 }
+            };
+        case 'forever':
+            return {
+                modulate: {
+                    contrast: 1.15,
+                    brightness: 1.1,
+                    saturation: 1.05
+                },
+                sharpen: 0.5
+                // Vignette effect is applied in a separate step
+            };
+        case 'original':
+        default:
+            return {};
+    }
+}
 // ==========================================
 // SERVER INITIALIZATION
 // ==========================================
@@ -2685,8 +2526,6 @@ server.listen(PORT, async () => {
     console.log(`Photos directory: ${PHOTOS_DIR}`);
     console.log(`QR codes directory: ${QR_DIR}`);
     console.log(`Overlays directory: ${OVERLAYS_DIR}`);
-    console.log(`Instagram photos directory: ${INSTAGRAM_PHOTOS_DIR}`);
-    console.log(`Custom frame photos directory: ${FRAME_PHOTOS_DIR}`);
     console.log(`Templates directory: ${TEMPLATES_DIR}`);
     console.log(`Ready to serve requests!`);
 });
