@@ -736,31 +736,41 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         const top = Math.round(centerY - (scaledHeight / 2) + posY);
         console.log(`Positioning photo at: left=${left}, top=${top} (center: ${centerX},${centerY}, offset: ${posX},${posY})`);
 
-        // Add the photo to the white canvas
-        const canvasWithPhoto = await sharp(baseCanvas)
-            .composite([{
-                input: processedPhoto,
-                left: left,
-                top: top
-            }])
-            .toBuffer();
-
-        // Resize the overlay to fill the entire canvas
-        const resizedOverlay = await sharp(overlayImagePath)
-            .resize({
+// 1. Canvas anlegen
+        const baseCanvas = await sharp({
+            create: {
                 width: CANVAS_WIDTH,
                 height: CANVAS_HEIGHT,
-                fit: 'fill'
+                channels: 4,
+                background: { r: 255, g: 255, b: 255, alpha: 1 }
+            }
+        }).png().toBuffer();
+
+// 2. Bild vorbereiten (Skalierung, Rotation)
+        const processedPhoto = await sharp(sourceImagePath)
+            .resize({
+                width: scaledWidth,
+                height: scaledHeight,
+                fit: 'contain',
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
+            })
+            .rotate(template.rotation || 0, {
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
             .toBuffer();
 
-        // Apply the overlay on top of the photo
+// 3. Position auf dem Canvas berechnen
+        const left1 = Math.round(CANVAS_WIDTH / 2 - scaledWidth / 2 + template.positionX);
+        const top1 = Math.round(CANVAS_HEIGHT / 2 - scaledHeight / 2 + template.positionY);
+
+// 4. Foto auf Canvas platzieren
+        const canvasWithPhoto = await sharp(baseCanvas)
+            .composite([{ input: processedPhoto, left1, top1 }])
+            .toBuffer();
+
+// 5. Overlay drüberlegen (immer vollflächig)
         await sharp(canvasWithPhoto)
-            .composite([{
-                input: resizedOverlay,
-                left: 0,
-                top: 0
-            }])
+            .composite([{ input: resizedOverlay, left: 0, top: 0 }])
             .jpeg({ quality: 95 })
             .toFile(outputPath);
 
