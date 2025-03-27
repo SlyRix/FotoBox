@@ -758,7 +758,8 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         await sharp(canvasWithPhoto)
             .composite([{
                 input: resizedOverlay,
-                gravity: 'center'
+                left: 0,
+                top: 0
             }])
             .jpeg({ quality: 95 })
             .toFile(outputPath);
