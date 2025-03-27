@@ -682,47 +682,52 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             return await applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template);
         }
 
-        // Get metadata from the original photo and overlay
-        const imgMetadata = await sharp(sourceImagePath).metadata();
+        // Get metadata from the overlay (frame)
         const overlayMetadata = await sharp(overlayImagePath).metadata();
+        console.log(`Frame dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
 
-        console.log(`Source image dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
-        console.log(`Overlay dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
+        // Get metadata from the source image
+        const sourceMetadata = await sharp(sourceImagePath).metadata();
+        console.log(`Source image dimensions: ${sourceMetadata.width}x${sourceMetadata.height}`);
 
         // SCALE CORRECTION:
-        // The admin UI has scale values between 0.01-0.2 (1%-20%)
-        // We need to scale up these values to make the image reasonably sized
         const scaleFactor = 5;
-
-        // Get scale or use a reasonable default if missing
-        let scale = template.scale || 0.1; // Default to 0.1 (10%) if missing
-
-        // Scale up by the factor to get a reasonable image size
+        let scale = template.scale || 0.1;
         scale = scale * scaleFactor;
-
-        // Cap maximum scale to prevent images from being too large
-        scale = Math.min(scale, 2.0); // Maximum 200% of original
-
-        console.log(`Original template scale: ${template.scale}, Adjusted scale: ${scale}`);
+        scale = Math.min(scale, 2.0);
 
         // Calculate scaled dimensions
-        const scaledWidth = Math.round(imgMetadata.width * scale);
-        const scaledHeight = Math.round(imgMetadata.height * scale);
-        console.log(`Scaled photo dimensions: ${scaledWidth}x${scaledHeight}`);
+        const scaledWidth = Math.round(sourceMetadata.width * scale);
+        const scaledHeight = Math.round(sourceMetadata.height * scale);
 
-        // Determine position on the overlay
+        // Calculate position
         const centerX = overlayMetadata.width / 2;
         const centerY = overlayMetadata.height / 2;
         const posX = template.positionX || 0;
         const posY = template.positionY || 0;
 
-        // Calculate actual position
+        // Calculate final position
         const left = Math.round(centerX - (scaledWidth / 2) + posX);
         const top = Math.round(centerY - (scaledHeight / 2) + posY);
 
-        console.log(`Positioning photo at: left=${left}, top=${top}`);
+        console.log(`Positioning photo at: left=${left}, top=${top} with scale=${scale}`);
 
-        // Process input photo (resize and rotate)
+        // STEP 1: Create a temporary white canvas and place the photo on it
+        const tempPath = `${outputPath}.temp.png`;
+
+        // Create white canvas matching overlay dimensions
+        await sharp({
+            create: {
+                width: overlayMetadata.width,
+                height: overlayMetadata.height,
+                channels: 4,
+                background: { r: 255, g: 255, b: 255, alpha: 1 }
+            }
+        })
+            .png()
+            .toFile(tempPath);
+
+        // Process the source image (resize and rotate)
         const processedPhoto = await sharp(sourceImagePath)
             .resize({
                 width: scaledWidth,
@@ -735,16 +740,29 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             })
             .toBuffer();
 
-        // COMPLETELY DIFFERENT APPROACH:
-        // 1. Start with the overlay as our base
-        // 2. Composite the photo onto it
-        await sharp(overlayImagePath)
+        // Place the processed photo onto the white canvas
+        await sharp(tempPath)
             .composite([{
                 input: processedPhoto,
                 left: left,
                 top: top
             }])
+            .toFile(`${tempPath}.photo.png`);
+
+        // STEP 2: Place the overlay on top of the photo+canvas
+        await sharp(`${tempPath}.photo.png`)
+            .composite([{
+                input: overlayImagePath
+            }])
             .toFile(outputPath);
+
+        // Clean up temporary files
+        try {
+            fs.unlinkSync(tempPath);
+            fs.unlinkSync(`${tempPath}.photo.png`);
+        } catch (err) {
+            console.log("Couldn't clean up temp files:", err.message);
+        }
 
         console.log(`Successfully applied template and saved to: ${outputPath}`);
         return true;
