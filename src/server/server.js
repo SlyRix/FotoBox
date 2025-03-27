@@ -663,7 +663,6 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
  * @param {string} overlayName - Name of the overlay
  * @returns {boolean} Success state of the operation
  */
-// Fixed applyTemplatedOverlay function
 async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPath, template, overlayName) {
     try {
         console.log(`Applying template for ${overlayName} to ${sourceImagePath}`);
@@ -683,35 +682,12 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             return await applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template);
         }
 
-        // Get metadata from the original photo
+        // Get metadata from the original photo and overlay
         const imgMetadata = await sharp(sourceImagePath).metadata();
-        console.log(`Source image dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
-
-        // Get metadata from the overlay (frame)
         const overlayMetadata = await sharp(overlayImagePath).metadata();
+
+        console.log(`Source image dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
         console.log(`Overlay dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
-
-        // Determine if the overlay is standard (A5 landscape) or custom
-        const isStandardFormat = overlayName === 'wedding-frame.png';
-
-        // Standard format dimensions are fixed at A5 landscape (1.414:1)
-        let canvasWidth, canvasHeight;
-
-        if (isStandardFormat) {
-            // A5 landscape ratio
-            canvasWidth = 2480;  // ~A5 at 300dpi
-            canvasHeight = 1748; // A5-landscape (1.414:1)
-        } else {
-            // Custom frame - use the overlay's dimensions
-            canvasWidth = overlayMetadata.width;
-            canvasHeight = overlayMetadata.height;
-        }
-
-        console.log(`Using canvas dimensions: ${canvasWidth}x${canvasHeight}`);
-
-        // Calculate the center point for positioning
-        const centerX = canvasWidth / 2;
-        const centerY = canvasHeight / 2;
 
         // SCALE CORRECTION:
         // The admin UI has scale values between 0.01-0.2 (1%-20%)
@@ -734,8 +710,20 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         const scaledHeight = Math.round(imgMetadata.height * scale);
         console.log(`Scaled photo dimensions: ${scaledWidth}x${scaledHeight}`);
 
-        // Create a version of the source image that's scaled and rotated
-        const processedImage = await sharp(sourceImagePath)
+        // Determine position on the overlay
+        const centerX = overlayMetadata.width / 2;
+        const centerY = overlayMetadata.height / 2;
+        const posX = template.positionX || 0;
+        const posY = template.positionY || 0;
+
+        // Calculate actual position
+        const left = Math.round(centerX - (scaledWidth / 2) + posX);
+        const top = Math.round(centerY - (scaledHeight / 2) + posY);
+
+        console.log(`Positioning photo at: left=${left}, top=${top}`);
+
+        // Process input photo (resize and rotate)
+        const processedPhoto = await sharp(sourceImagePath)
             .resize({
                 width: scaledWidth,
                 height: scaledHeight,
@@ -747,57 +735,18 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             })
             .toBuffer();
 
-        // Create a white background canvas
-        const canvas = await sharp({
-            create: {
-                width: canvasWidth,
-                height: canvasHeight,
-                channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 1 }
-            }
-        })
-            .png()
-            .toBuffer();
-
-        // Position X and Y - default to 0 if undefined
-        const posX = template.positionX || 0;
-        const posY = template.positionY || 0;
-        console.log(`Position offsets: X=${posX}, Y=${posY}`);
-
-        // Position the processed image on the canvas according to template
-        const withPhotoComposite = await sharp(canvas)
-            .composite([
-                {
-                    input: processedImage,
-                    left: Math.round(centerX - (scaledWidth / 2) + posX),
-                    top: Math.round(centerY - (scaledHeight / 2) + posY)
-                }
-            ])
-            .toBuffer();
-
-        // First resize the overlay to match the canvas dimensions exactly
-        const resizedOverlay = await sharp(overlayImagePath)
-            .resize({
-                width: canvasWidth,
-                height: canvasHeight,
-                fit: 'fill' // Important: use 'fill' to ensure exact dimensions
-            })
-            .toBuffer();
-
-        console.log(`Resized overlay to match canvas: ${canvasWidth}x${canvasHeight}`);
-
-        // Add the resized overlay on top
-        await sharp(withPhotoComposite)
-            .composite([
-                {
-                    input: resizedOverlay,
-                    gravity: 'center'
-                }
-            ])
-            .png()
+        // COMPLETELY DIFFERENT APPROACH:
+        // 1. Start with the overlay as our base
+        // 2. Composite the photo onto it
+        await sharp(overlayImagePath)
+            .composite([{
+                input: processedPhoto,
+                left: left,
+                top: top
+            }])
             .toFile(outputPath);
 
-        console.log(`Successfully generated framed image at: ${outputPath}`);
+        console.log(`Successfully applied template and saved to: ${outputPath}`);
         return true;
     } catch (error) {
         console.error('Error applying templated overlay:', error);
