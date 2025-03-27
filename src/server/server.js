@@ -680,83 +680,35 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             return await applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath, outputPath, template);
         }
 
-        // Get metadata
-        const overlayMetadata = await sharp(overlayImagePath).metadata();
+        // Fixed canvas size - standard 3:2 DSLR resolution
+        const CANVAS_WIDTH = 5184;
+        const CANVAS_HEIGHT = 3456;
+
+        // Get metadata from source photo
         const sourceMetadata = await sharp(sourceImagePath).metadata();
-        console.log(`Frame dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
         console.log(`Source image dimensions: ${sourceMetadata.width}x${sourceMetadata.height}`);
 
-        // REALISTIC SCALING:
-        // The scale in admin UI looks much bigger than it actually is
-        // We need to make adjustments to make the final output look like what you see in the preview
+        // Get metadata from overlay (frame)
+        const overlayMetadata = await sharp(overlayImagePath).metadata();
+        console.log(`Frame dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
 
-        // Scale direct from template (typically 0.01-0.2)
-        const userScale = template.scale || 0.1;
-
-        // IMPORTANT: This scale factor will make the image fill more of the frame
-        // For example: at 12x, a scale of 0.08 becomes 0.96 (96% of frame width)
-        const scaleFactor = 12;
-        const adjustedScale = userScale * scaleFactor;
-
-        // Calculate percentage of frame that the photo should fill
-        // This helps visualize what the output will look like
-        const frameWidthFill = Math.min(100, userScale * scaleFactor * 100);
-        console.log(`User scale: ${userScale}, Adjusted scale: ${adjustedScale}, Will fill ~${frameWidthFill.toFixed(0)}% of frame width`);
-
-        // Calculate dimensions that would fill the frame width
-        const frameWidthScale = overlayMetadata.width / sourceMetadata.width;
-        const frameHeightScale = overlayMetadata.height / sourceMetadata.height;
-
-        // Use an appropriate scale that makes the image a good size within the frame
-        // This ensures the image isn't too small or too large
-        let finalScale;
-
-        if (adjustedScale > 0.9) {
-            // If adjusted scale would make image nearly as large as frame,
-            // use a scale that makes the image fill about 85% of the frame's width
-            finalScale = frameWidthScale * 0.85;
-            console.log(`Scale would be too large, using frame-relative scale: ${finalScale.toFixed(4)}`);
-        } else {
-            // Otherwise use the adjusted scale
-            finalScale = adjustedScale;
-        }
-
-        // Calculate scaled dimensions
-        const scaledWidth = Math.round(sourceMetadata.width * finalScale);
-        const scaledHeight = Math.round(sourceMetadata.height * finalScale);
-        console.log(`Scaled image dimensions: ${scaledWidth}x${scaledHeight} (${(scaledWidth/overlayMetadata.width*100).toFixed(1)}% of frame width)`);
-
-        // Position calculations
-        const centerX = overlayMetadata.width / 2;
-        const centerY = overlayMetadata.height / 2;
-
-        // Apply the exact position offsets from the template
-        const posX = template.positionX || 0;
-        const posY = template.positionY || 0;
-
-        // Final position
-        const left = Math.round(centerX - (scaledWidth / 2) + posX);
-        const top = Math.round(centerY - (scaledHeight / 2) + posY);
-        console.log(`Positioning photo at: left=${left}, top=${top}`);
-
-        // Create a working area the size of both images to avoid any clipping
-        const workingWidth = Math.max(overlayMetadata.width, scaledWidth) + Math.abs(posX) + 100;
-        const workingHeight = Math.max(overlayMetadata.height, scaledHeight) + Math.abs(posY) + 100;
-
-        console.log(`Creating working canvas: ${workingWidth}x${workingHeight}`);
-
-        // Create a white canvas as our working area
-        const tempPath = `${outputPath}.temp.png`;
-        await sharp({
+        // Create a white canvas as our base
+        const baseCanvas = await sharp({
             create: {
-                width: workingWidth,
-                height: workingHeight,
+                width: CANVAS_WIDTH,
+                height: CANVAS_HEIGHT,
                 channels: 4,
                 background: { r: 255, g: 255, b: 255, alpha: 1 }
             }
-        })
-            .png()
-            .toFile(tempPath);
+        }).png().toBuffer();
+
+        // Scale direct from template (typically 0.1-1.0)
+        const userScale = template.scale || 0.5;
+
+        // Calculate scaled dimensions for the photo
+        const scaledWidth = Math.round(sourceMetadata.width * userScale);
+        const scaledHeight = Math.round(sourceMetadata.height * userScale);
+        console.log(`Scaled photo dimensions: ${scaledWidth}x${scaledHeight}`);
 
         // Process the source image (resize and rotate)
         const processedPhoto = await sharp(sourceImagePath)
@@ -771,52 +723,45 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             })
             .toBuffer();
 
-        // Calculate offset to center the overlay in our working area
-        const overlayOffsetX = Math.round((workingWidth - overlayMetadata.width) / 2);
-        const overlayOffsetY = Math.round((workingHeight - overlayMetadata.height) / 2);
+        // Calculate center position
+        const centerX = CANVAS_WIDTH / 2;
+        const centerY = CANVAS_HEIGHT / 2;
 
-        // Calculate photo position relative to working area
-        const photoLeft = overlayOffsetX + left;
-        const photoTop = overlayOffsetY + top;
+        // Apply the exact position offsets from the template
+        const posX = template.positionX || 0;
+        const posY = template.positionY || 0;
 
-        console.log(`Positioning in working area - overlay: (${overlayOffsetX},${overlayOffsetY}), photo: (${photoLeft},${photoTop})`);
+        // Calculate final position (centered with offset)
+        const left = Math.round(centerX - (scaledWidth / 2) + posX);
+        const top = Math.round(centerY - (scaledHeight / 2) + posY);
+        console.log(`Positioning photo at: left=${left}, top=${top}`);
 
-        // Place the photo on the working canvas
-        await sharp(tempPath)
+        // Add the photo to the white canvas
+        const canvasWithPhoto = await sharp(baseCanvas)
             .composite([{
                 input: processedPhoto,
-                left: photoLeft,
-                top: photoTop
+                left: left,
+                top: top
             }])
-            .toFile(`${tempPath}.photo.png`);
+            .toBuffer();
 
-        // Add the overlay on top
-        await sharp(`${tempPath}.photo.png`)
-            .composite([{
-                input: overlayImagePath,
-                left: overlayOffsetX,
-                top: overlayOffsetY
-            }])
-            .toFile(`${tempPath}.combined.png`);
-
-        // Extract the properly framed portion
-        await sharp(`${tempPath}.combined.png`)
-            .extract({
-                left: overlayOffsetX,
-                top: overlayOffsetY,
-                width: overlayMetadata.width,
-                height: overlayMetadata.height
+        // Resize the overlay to fill the entire canvas
+        const resizedOverlay = await sharp(overlayImagePath)
+            .resize({
+                width: CANVAS_WIDTH,
+                height: CANVAS_HEIGHT,
+                fit: 'fill'
             })
-            .toFile(outputPath);
+            .toBuffer();
 
-        // Clean up temporary files
-        try {
-            fs.unlinkSync(tempPath);
-            fs.unlinkSync(`${tempPath}.photo.png`);
-            fs.unlinkSync(`${tempPath}.combined.png`);
-        } catch (err) {
-            console.log("Couldn't clean up some temp files:", err.message);
-        }
+        // Apply the overlay on top of the photo
+        await sharp(canvasWithPhoto)
+            .composite([{
+                input: resizedOverlay,
+                gravity: 'center'
+            }])
+            .jpeg({ quality: 95 })
+            .toFile(outputPath);
 
         console.log(`Successfully applied template and saved to: ${outputPath}`);
         return true;
@@ -825,6 +770,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         throw error;
     }
 }
+
 /**
  * Applies an Instagram template to a photo
  * @param {string} sourceImagePath - Path to the source image
