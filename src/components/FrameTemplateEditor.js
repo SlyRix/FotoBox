@@ -436,7 +436,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                 onClick={resetAdjustments}
                                 className="text-sm flex items-center text-gray-600 hover:text-christian-accent px-2 py-1"
                             >
-                                <Icon path={mdiRefresh} size={0.8} className="mr-1" />
+                                <Icon path={mdiRefresh} size={0.8} className="mr-1"/>
                                 Reset
                             </button>
                         </div>
@@ -445,22 +445,36 @@ const FrameTemplateEditor = ({ onClose }) => {
                         {/* Custom styles for range slider */}
                         <style>{rangeSliderStyles}</style>
 
-                        <div className="flex-grow flex items-center justify-center overflow-hidden bg-gray-100 rounded-lg relative" ref={editorRef}>
+                        <div
+                            className="flex-grow flex items-center justify-center overflow-hidden bg-gray-100 rounded-lg relative"
+                            ref={editorRef}>
                             {currentPreviewPhoto && selectedOverlay ? (
                                 <>
-                                    {/* Frame container with correct aspect ratio based on overlay type */}
-                                    <div className={`relative ${
+                                    {/* Frame container with DSLR aspect ratio - this represents our fixed canvas */}
+                                    <div className={`relative bg-white ${
                                         selectedOverlay.name === 'instagram-frame.png'
                                             ? 'w-auto h-5/6 aspect-[9/16]' // Fixed 9:16 ratio for Instagram
                                             : 'w-5/6 aspect-[1.5/1]'       // DSLR landscape ratio (5184/3456 = 1.5)
                                     }`}>
+                                        {/* Grid lines to help visualize the canvas */}
+                                        <div className="absolute inset-0 pointer-events-none">
+                                            <div className="w-full h-full" style={{
+                                                backgroundImage: 'linear-gradient(to right, rgba(0,0,0,0.03) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.03) 1px, transparent 1px)',
+                                                backgroundSize: '50px 50px'
+                                            }}></div>
+                                        </div>
+
+                                        {/* Center marker */}
+                                        <div
+                                            className="absolute top-1/2 left-1/2 w-1 h-1 bg-gray-400 rounded-full transform -translate-x-1/2 -translate-y-1/2"></div>
+
                                         {/* Photo layer - this is what will change based on template settings */}
                                         <div
                                             className="absolute inset-0 flex items-center justify-center overflow-hidden">
                                             <motion.img
                                                 src={`${API_BASE_URL}${currentPreviewPhoto.url}`}
                                                 alt="Preview photo"
-                                                className="max-w-none object-cover"
+                                                className="object-cover"
                                                 initial={initialTransform}
                                                 animate={{
                                                     scale,
@@ -472,44 +486,52 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             />
                                         </div>
 
-                                        {/* Overlay frame layer - this stays fixed */}
+                                        {/* Overlay frame layer - this stays fixed and covers the entire canvas */}
                                         <div className="absolute inset-0 pointer-events-none z-10">
                                             <img
                                                 src={`${API_BASE_URL}${selectedOverlay.url}`}
                                                 alt={selectedOverlay.name}
-                                                className="w-full h-full object-contain"
+                                                className="w-full h-full object-fill"
+                                                /* Changed from object-contain to object-fill to match server behavior */
                                             />
+                                        </div>
+
+                                        {/* Canvas dimensions indicator */}
+                                        <div
+                                            className="absolute bottom-2 right-2 bg-black/30 text-white text-xs px-2 py-1 rounded">
+                                            5184×3456 px
                                         </div>
                                     </div>
 
-                                    {/* Preview photo navigation controls */}
+                                    {/* Preview photo navigation controls remain unchanged */}
                                     {previewPhotos.length > 1 && (
-                                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center space-x-4 bg-black/40 backdrop-blur-sm rounded-full px-4 py-2 text-white">
+                                        <div
+                                            className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center space-x-4 bg-black/40 backdrop-blur-sm rounded-full px-4 py-2 text-white">
                                             <button
                                                 onClick={goToPrevPhoto}
                                                 className="p-1 hover:bg-white/20 rounded-full"
                                                 title="Previous Photo"
                                             >
-                                                <Icon path={mdiChevronLeft} size={1} />
+                                                <Icon path={mdiChevronLeft} size={1}/>
                                             </button>
 
                                             <span className="text-sm">
-                                                Photo {currentPhotoIndex + 1} of {previewPhotos.length}
-                                            </span>
+                        Photo {currentPhotoIndex + 1} of {previewPhotos.length}
+                    </span>
 
                                             <button
                                                 onClick={goToNextPhoto}
                                                 className="p-1 hover:bg-white/20 rounded-full"
                                                 title="Next Photo"
                                             >
-                                                <Icon path={mdiChevronRight} size={1} />
+                                                <Icon path={mdiChevronRight} size={1}/>
                                             </button>
                                         </div>
                                     )}
                                 </>
                             ) : (
                                 <div className="text-center text-gray-400 flex flex-col items-center">
-                                    <Icon path={mdiImageOutline} size={4} className="mb-2" />
+                                    <Icon path={mdiImageOutline} size={4} className="mb-2"/>
                                     <p>
                                         {!selectedOverlay ? "Select a frame" : "Loading preview photo..."}
                                     </p>
@@ -519,7 +541,8 @@ const FrameTemplateEditor = ({ onClose }) => {
 
                         {/* Guide text */}
                         <div className="mt-2 bg-blue-50 p-2 rounded text-sm text-blue-700">
-                            <p>Position the <strong>sample photo</strong> to create a template for this frame. These settings will apply to <strong>all photos</strong> using this frame.</p>
+                            <p>Position the <strong>sample photo</strong> to create a template for this frame. These
+                                settings will apply to <strong>all photos</strong> using this frame.</p>
                         </div>
 
                         {/* Adjustment controls */}
@@ -591,7 +614,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             className="flex items-center justify-center p-2 rounded-lg hover:bg-gray-200"
                                             title="Move Up"
                                         >
-                                            <Icon path={mdiArrowUp} size={1.2} />
+                                            <Icon path={mdiArrowUp} size={1.2}/>
                                         </button>
                                         <div></div>
 
@@ -600,7 +623,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             className="flex items-center justify-center p-2 rounded-lg hover:bg-gray-200"
                                             title="Move Left"
                                         >
-                                            <Icon path={mdiArrowLeft} size={1.2} />
+                                            <Icon path={mdiArrowLeft} size={1.2}/>
                                         </button>
 
                                         <div className="flex items-center justify-center text-2xl text-gray-300">⊕</div>
@@ -610,7 +633,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             className="flex items-center justify-center p-2 rounded-lg hover:bg-gray-200"
                                             title="Move Right"
                                         >
-                                            <Icon path={mdiArrowRight} size={1.2} />
+                                            <Icon path={mdiArrowRight} size={1.2}/>
                                         </button>
 
                                         <div></div>
@@ -619,7 +642,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             className="flex items-center justify-center p-2 rounded-lg hover:bg-gray-200"
                                             title="Move Down"
                                         >
-                                            <Icon path={mdiArrowDown} size={1.2} />
+                                            <Icon path={mdiArrowDown} size={1.2}/>
                                         </button>
                                         <div></div>
                                     </div>
@@ -638,7 +661,8 @@ const FrameTemplateEditor = ({ onClose }) => {
 
                                 <div className="mt-2 text-sm text-gray-600">
                                     <p><strong>Type:</strong> {getOverlayTypeInfo(selectedOverlay.name).type}</p>
-                                    <p><strong>Format:</strong> {selectedOverlay.name === 'instagram-frame.png' ? '9:16 portrait' :
+                                    <p>
+                                        <strong>Format:</strong> {selectedOverlay.name === 'instagram-frame.png' ? '9:16 portrait' :
                                         selectedOverlay.name === 'wedding-frame.png' ? 'DSLR landscape (1.5:1)' :
                                             'Custom'}</p>
                                 </div>
@@ -662,8 +686,10 @@ const FrameTemplateEditor = ({ onClose }) => {
                         <div className="mb-6">
                             <h4 className="font-medium mb-2">How Templates Work</h4>
                             <div className="text-sm text-gray-600 space-y-2">
-                                <p>Templates define how photos will be positioned within each frame. The settings you create here will be applied to <strong>all photos</strong> that use this frame.</p>
-                                <p>The canvas size for the final photo will be 5184×3456 pixels (standard DSLR resolution with 1.5:1 aspect ratio).</p>
+                                <p>Templates define how photos will be positioned within each frame. The settings you
+                                    create here will be applied to <strong>all photos</strong> that use this frame.</p>
+                                <p>The canvas size for the final photo will be 5184×3456 pixels (standard DSLR
+                                    resolution with 1.5:1 aspect ratio).</p>
                                 <p>Scale values range from 10% to 200% of the original photo size.</p>
                             </div>
                         </div>
@@ -693,7 +719,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                             >
                                 {saving ? (
                                     <>
-                                        <Icon path={mdiLoading} size={1} className="mr-2 animate-spin" />
+                                        <Icon path={mdiLoading} size={1} className="mr-2 animate-spin"/>
                                         Saving...
                                     </>
                                 ) : (
