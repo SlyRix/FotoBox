@@ -665,7 +665,7 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
  */
 async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPath, template, overlayName) {
     try {
-        console.log(`Applying template for ${overlayName} to ${sourceImagePath}`);
+        console.log(`Applying template for ${overlayName} with values:`, template);
 
         // Ensure files exist
         if (!fs.existsSync(sourceImagePath)) {
@@ -686,24 +686,22 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         console.log(`Frame dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
         console.log(`Source image dimensions: ${sourceMetadata.width}x${sourceMetadata.height}`);
 
-        // Scale from admin UI (0.01-0.2 range)
+        // For DSLR photos, the scale needs to be very small to fit in an A5 frame
+        // The admin UI has scale values between 0.01-0.2 (1%-20%)
+        // These are correct for the original image sizes - don't adjust them
         const userScale = template.scale || 0.1;
-
-        // IMPORTANT: Less aggressive scale adjustment
-        // We'll use a factor of 3 instead of 5 to keep images reasonably sized
-        // This means 0.2 in UI becomes 0.6 (60% of original)
-        const adjustedScale = userScale * 3;
-
-        console.log(`Original UI scale: ${userScale}, Adjusted scale: ${adjustedScale}`);
+        console.log(`Using scale directly from template: ${userScale}`);
 
         // Calculate scaled dimensions
-        const scaledWidth = Math.round(sourceMetadata.width * adjustedScale);
-        const scaledHeight = Math.round(sourceMetadata.height * adjustedScale);
-        console.log(`Scaled image dimensions: ${scaledWidth}x${scaledHeight}`);
+        const scaledWidth = Math.round(sourceMetadata.width * userScale);
+        const scaledHeight = Math.round(sourceMetadata.height * userScale);
+        console.log(`Scaled image dimensions: ${scaledWidth}x${scaledHeight} (${(scaledWidth/overlayMetadata.width*100).toFixed(1)}% of frame width)`);
 
         // Position calculations
         const centerX = overlayMetadata.width / 2;
         const centerY = overlayMetadata.height / 2;
+
+        // Apply the exact position offsets from the template
         const posX = template.positionX || 0;
         const posY = template.positionY || 0;
 
@@ -713,7 +711,6 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         console.log(`Positioning photo at: left=${left}, top=${top}`);
 
         // Create a working area the size of both images to avoid any clipping
-        // This is the key - we create a canvas large enough for both images
         const workingWidth = Math.max(overlayMetadata.width, scaledWidth) + Math.abs(posX) + 100;
         const workingHeight = Math.max(overlayMetadata.height, scaledHeight) + Math.abs(posY) + 100;
 
