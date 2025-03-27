@@ -1150,8 +1150,8 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
                 success: true,
                 photo: {
                     filename: filename,
-                    url: processedPhotos ? processedPhotos.publicUrl : `/photos/${filename}`,
-                    thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
+                    url: processedPhotos ? processedPhotos.publicUrl : `/photo/${filename}`,
+                    thumbnailUrl: thumbnailUrl || `/photo/${filename}`, // Fallback to original if thumbnail fails
                     qrUrl: `/qrcodes/${qrFilename}`,
                     photoViewUrl: photoViewUrl,  // Include the actual URL the QR code points to
                     timestamp: Date.now()
