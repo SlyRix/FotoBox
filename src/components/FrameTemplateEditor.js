@@ -334,10 +334,7 @@ const FrameTemplateEditor = ({ onClose }) => {
         }
     };
 
-    // Calculate CSS transform string from current adjustments
-    const getTransformStyle = () => {
-        return `translate(${position.x}px, ${position.y}px) rotate(${rotation}deg) scale(${scale})`;
-    };
+    // We're using Framer Motion's animate prop instead of CSS transform string
 
     // Get overlay type info for display
     const getOverlayTypeInfo = (name) => {
@@ -455,7 +452,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                     <div className={`relative ${
                                         selectedOverlay.name === 'instagram-frame.png'
                                             ? 'w-auto h-5/6 aspect-[9/16]' // Fixed 9:16 ratio for Instagram
-                                            : 'w-5/6 aspect-[1.414/1]'     // A5 landscape ratio for others
+                                            : 'w-5/6 aspect-[1.5/1]'       // DSLR landscape ratio (5184/3456 = 1.5)
                                     }`}>
                                         {/* Photo layer - this is what will change based on template settings */}
                                         <div
@@ -464,9 +461,6 @@ const FrameTemplateEditor = ({ onClose }) => {
                                                 src={`${API_BASE_URL}${currentPreviewPhoto.url}`}
                                                 alt="Preview photo"
                                                 className="max-w-none object-cover"
-                                                style={{
-                                                    transform: getTransformStyle()
-                                                }}
                                                 initial={initialTransform}
                                                 animate={{
                                                     scale,
@@ -645,7 +639,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                 <div className="mt-2 text-sm text-gray-600">
                                     <p><strong>Type:</strong> {getOverlayTypeInfo(selectedOverlay.name).type}</p>
                                     <p><strong>Format:</strong> {selectedOverlay.name === 'instagram-frame.png' ? '9:16 portrait' :
-                                        selectedOverlay.name === 'wedding-frame.png' ? 'A5 landscape (1.414:1)' :
+                                        selectedOverlay.name === 'wedding-frame.png' ? 'DSLR landscape (1.5:1)' :
                                             'Custom'}</p>
                                 </div>
 
@@ -669,7 +663,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                             <h4 className="font-medium mb-2">How Templates Work</h4>
                             <div className="text-sm text-gray-600 space-y-2">
                                 <p>Templates define how photos will be positioned within each frame. The settings you create here will be applied to <strong>all photos</strong> that use this frame.</p>
-                                <p>The canvas size for the final photo will be 5184×3456 pixels (standard DSLR resolution).</p>
+                                <p>The canvas size for the final photo will be 5184×3456 pixels (standard DSLR resolution with 1.5:1 aspect ratio).</p>
                                 <p>Scale values range from 10% to 200% of the original photo size.</p>
                             </div>
                         </div>

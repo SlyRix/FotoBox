@@ -702,13 +702,13 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             }
         }).png().toBuffer();
 
-        // Scale direct from template (typically 0.1-1.0)
-        const userScale = template.scale || 0.5;
+        // Get the scale from template (default to 0.5 or 50% if not provided)
+        const scale = template.scale || 0.5;
 
         // Calculate scaled dimensions for the photo
-        const scaledWidth = Math.round(sourceMetadata.width * userScale);
-        const scaledHeight = Math.round(sourceMetadata.height * userScale);
-        console.log(`Scaled photo dimensions: ${scaledWidth}x${scaledHeight}`);
+        const scaledWidth = Math.round(sourceMetadata.width * scale);
+        const scaledHeight = Math.round(sourceMetadata.height * scale);
+        console.log(`Scaling photo by factor ${scale} to: ${scaledWidth}x${scaledHeight}`);
 
         // Process the source image (resize and rotate)
         const processedPhoto = await sharp(sourceImagePath)
@@ -723,18 +723,18 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             })
             .toBuffer();
 
-        // Calculate center position
+        // Calculate center position of the canvas
         const centerX = CANVAS_WIDTH / 2;
         const centerY = CANVAS_HEIGHT / 2;
 
-        // Apply the exact position offsets from the template
+        // Apply the position offsets from the template
         const posX = template.positionX || 0;
         const posY = template.positionY || 0;
 
         // Calculate final position (centered with offset)
         const left = Math.round(centerX - (scaledWidth / 2) + posX);
         const top = Math.round(centerY - (scaledHeight / 2) + posY);
-        console.log(`Positioning photo at: left=${left}, top=${top}`);
+        console.log(`Positioning photo at: left=${left}, top=${top} (center: ${centerX},${centerY}, offset: ${posX},${posY})`);
 
         // Add the photo to the white canvas
         const canvasWithPhoto = await sharp(baseCanvas)
