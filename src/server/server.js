@@ -666,6 +666,8 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
 // Fixed applyTemplatedOverlay function
 async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPath, template, overlayName) {
     try {
+        console.log(`Applying template for ${overlayName} to ${sourceImagePath}`);
+
         // Ensure source image exists
         if (!fs.existsSync(sourceImagePath)) {
             throw new Error(`Source image not found: ${sourceImagePath}`);
@@ -683,7 +685,11 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
 
         // Get metadata from the original photo
         const imgMetadata = await sharp(sourceImagePath).metadata();
+        console.log(`Source image dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
+
+        // Get metadata from the overlay (frame)
         const overlayMetadata = await sharp(overlayImagePath).metadata();
+        console.log(`Overlay dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
 
         // Determine if the overlay is standard (A5 landscape) or custom
         const isStandardFormat = overlayName === 'wedding-frame.png';
@@ -701,6 +707,8 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             canvasHeight = overlayMetadata.height;
         }
 
+        console.log(`Using canvas dimensions: ${canvasWidth}x${canvasHeight}`);
+
         // Calculate the center point for positioning
         const centerX = canvasWidth / 2;
         const centerY = canvasHeight / 2;
@@ -708,7 +716,6 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         // SCALE CORRECTION:
         // The admin UI has scale values between 0.01-0.2 (1%-20%)
         // We need to scale up these values to make the image reasonably sized
-        // A scale factor of 5 means 0.2 (20%) becomes 1.0 (100%)
         const scaleFactor = 5;
 
         // Get scale or use a reasonable default if missing
@@ -725,6 +732,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         // Calculate scaled dimensions
         const scaledWidth = Math.round(imgMetadata.width * scale);
         const scaledHeight = Math.round(imgMetadata.height * scale);
+        console.log(`Scaled photo dimensions: ${scaledWidth}x${scaledHeight}`);
 
         // Create a version of the source image that's scaled and rotated
         const processedImage = await sharp(sourceImagePath)
@@ -754,6 +762,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         // Position X and Y - default to 0 if undefined
         const posX = template.positionX || 0;
         const posY = template.positionY || 0;
+        console.log(`Position offsets: X=${posX}, Y=${posY}`);
 
         // Position the processed image on the canvas according to template
         const withPhotoComposite = await sharp(canvas)
@@ -766,17 +775,29 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             ])
             .toBuffer();
 
-        // Add the overlay on top
+        // First resize the overlay to match the canvas dimensions exactly
+        const resizedOverlay = await sharp(overlayImagePath)
+            .resize({
+                width: canvasWidth,
+                height: canvasHeight,
+                fit: 'fill' // Important: use 'fill' to ensure exact dimensions
+            })
+            .toBuffer();
+
+        console.log(`Resized overlay to match canvas: ${canvasWidth}x${canvasHeight}`);
+
+        // Add the resized overlay on top
         await sharp(withPhotoComposite)
             .composite([
                 {
-                    input: overlayImagePath,
+                    input: resizedOverlay,
                     gravity: 'center'
                 }
             ])
             .png()
             .toFile(outputPath);
 
+        console.log(`Successfully generated framed image at: ${outputPath}`);
         return true;
     } catch (error) {
         console.error('Error applying templated overlay:', error);
