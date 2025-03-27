@@ -598,8 +598,19 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
         // Check if there's a template for this overlay
         const template = frameTemplates[overlayFilename];
 
+        if (template) {
+            console.log(`Found template for ${overlayFilename}:`, template);
+            // Use the template to apply adjustments
+            return await applyTemplatedOverlay(
+                sourceImagePath,
+                overlayImagePath,
+                outputPath,
+                template,
+                overlayFilename
+            );
+        } else {
             console.log(`No template found for ${overlayFilename}, using default positioning`);
-
+        }
 
         // Special handling for Instagram format
         if (overlayFilename.startsWith('instagram')) {
