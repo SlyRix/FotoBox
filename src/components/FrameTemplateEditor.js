@@ -252,7 +252,7 @@ const FrameTemplateEditor = ({ onClose }) => {
 
     // Format scale for display
     const formatScalePercent = (scale) => {
-        return `${Math.round(scale * 100)}%`;
+        return `${Math.round(scale)}%`;
     };
 
     // Adjustment handlers
@@ -459,7 +459,8 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             : 'w-5/6 aspect-[1.414/1]'     // A5 landscape ratio for others
                                     }`}>
                                         {/* Photo layer - this is what will change based on template settings */}
-                                        <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+                                        <div
+                                            className="absolute inset-0 flex items-center justify-center overflow-hidden">
                                             <motion.img
                                                 src={`${API_BASE_URL}${currentPreviewPhoto.url}`}
                                                 alt="Preview photo"
@@ -474,7 +475,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                                     x: position.x,
                                                     y: position.y
                                                 }}
-                                                transition={{ type: 'spring', damping: 15 }}
+                                                transition={{type: 'spring', damping: 15}}
                                             />
                                         </div>
 
@@ -536,21 +537,21 @@ const FrameTemplateEditor = ({ onClose }) => {
                                     <div className="flex items-center justify-between mb-2">
                                         <span className="text-sm text-gray-600">Zoom:</span>
                                         <span className="text-sm font-medium">
-                                            {formatScalePercent(scale)}
-                                        </span>
+            {formatScalePercent(scale * 100)}
+        </span>
                                     </div>
                                     <div className="flex items-center">
-                                        <span className="text-xs text-gray-500 mr-2">0%</span>
+                                        <span className="text-xs text-gray-500 mr-2">10%</span>
                                         <input
                                             type="range"
-                                            min="0.01"
-                                            max="0.2"
-                                            step="0.01"
+                                            min="0.1"
+                                            max="1.0"
+                                            step="0.05"
                                             value={scale}
                                             onChange={handleZoomChange}
                                             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                                         />
-                                        <span className="text-xs text-gray-500 ml-2">20%</span>
+                                        <span className="text-xs text-gray-500 ml-2">100%</span>
                                     </div>
                                 </div>
 
@@ -563,7 +564,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             className="p-2 rounded hover:bg-gray-200 mr-1"
                                             title="Rotate Left"
                                         >
-                                            <Icon path={mdiRotateLeft} size={1} />
+                                            <Icon path={mdiRotateLeft} size={1}/>
                                         </button>
                                         <span className="px-3 min-w-16 text-center text-sm font-medium">
                                             {rotation}°
@@ -573,7 +574,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             className="p-2 rounded hover:bg-gray-200 ml-1"
                                             title="Rotate Right"
                                         >
-                                            <Icon path={mdiRotateRight} size={1} />
+                                            <Icon path={mdiRotateRight} size={1}/>
                                         </button>
                                     </div>
                                 </div>
@@ -590,7 +591,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                     </span>
                                 </div>
                                 <div className="flex justify-center">
-                                    <div className="grid grid-cols-3 gap-1 w-36 h-36">
+                                <div className="grid grid-cols-3 gap-1 w-36 h-36">
                                         <div></div>
                                         <button
                                             onClick={() => handleMove('up')}

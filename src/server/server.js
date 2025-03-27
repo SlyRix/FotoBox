@@ -686,15 +686,44 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         console.log(`Frame dimensions: ${overlayMetadata.width}x${overlayMetadata.height}`);
         console.log(`Source image dimensions: ${sourceMetadata.width}x${sourceMetadata.height}`);
 
-        // For DSLR photos, the scale needs to be very small to fit in an A5 frame
-        // The admin UI has scale values between 0.01-0.2 (1%-20%)
-        // These are correct for the original image sizes - don't adjust them
+        // REALISTIC SCALING:
+        // The scale in admin UI looks much bigger than it actually is
+        // We need to make adjustments to make the final output look like what you see in the preview
+
+        // Scale direct from template (typically 0.01-0.2)
         const userScale = template.scale || 0.1;
-        console.log(`Using scale directly from template: ${userScale}`);
+
+        // IMPORTANT: This scale factor will make the image fill more of the frame
+        // For example: at 12x, a scale of 0.08 becomes 0.96 (96% of frame width)
+        const scaleFactor = 12;
+        const adjustedScale = userScale * scaleFactor;
+
+        // Calculate percentage of frame that the photo should fill
+        // This helps visualize what the output will look like
+        const frameWidthFill = Math.min(100, userScale * scaleFactor * 100);
+        console.log(`User scale: ${userScale}, Adjusted scale: ${adjustedScale}, Will fill ~${frameWidthFill.toFixed(0)}% of frame width`);
+
+        // Calculate dimensions that would fill the frame width
+        const frameWidthScale = overlayMetadata.width / sourceMetadata.width;
+        const frameHeightScale = overlayMetadata.height / sourceMetadata.height;
+
+        // Use an appropriate scale that makes the image a good size within the frame
+        // This ensures the image isn't too small or too large
+        let finalScale;
+
+        if (adjustedScale > 0.9) {
+            // If adjusted scale would make image nearly as large as frame,
+            // use a scale that makes the image fill about 85% of the frame's width
+            finalScale = frameWidthScale * 0.85;
+            console.log(`Scale would be too large, using frame-relative scale: ${finalScale.toFixed(4)}`);
+        } else {
+            // Otherwise use the adjusted scale
+            finalScale = adjustedScale;
+        }
 
         // Calculate scaled dimensions
-        const scaledWidth = Math.round(sourceMetadata.width * userScale);
-        const scaledHeight = Math.round(sourceMetadata.height * userScale);
+        const scaledWidth = Math.round(sourceMetadata.width * finalScale);
+        const scaledHeight = Math.round(sourceMetadata.height * finalScale);
         console.log(`Scaled image dimensions: ${scaledWidth}x${scaledHeight} (${(scaledWidth/overlayMetadata.width*100).toFixed(1)}% of frame width)`);
 
         // Position calculations
