@@ -1,4 +1,3 @@
-// FrameTemplateEditor.js - Component for setting default photo positions within frames
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import Icon from '@mdi/react';
@@ -18,12 +17,12 @@ const FrameTemplateEditor = ({ onClose }) => {
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(null);
 
-    // State for template adjustments
-    const [scale, setScale] = useState(0.01);
+    // State for template adjustments - FIXED INITIAL VALUES
+    const [scale, setScale] = useState(0.5);  // Default 50% scale instead of 0.01
     const [rotation, setRotation] = useState(0);
     const [position, setPosition] = useState({ x: 0, y: 0 });
     const [initialTransform, setInitialTransform] = useState({
-        scale: 0.01,
+        scale: 0.5,  // Default 50% scale
         rotation: 0,
         position: { x: 0, y: 0 }
     });
@@ -204,14 +203,14 @@ const FrameTemplateEditor = ({ onClose }) => {
 
             if (data.success && data.template) {
                 // Apply the saved template settings
-                setScale(data.template.scale || 1);
+                setScale(data.template.scale || 0.5);
                 setRotation(data.template.rotation || 0);
                 setPosition({
                     x: data.template.positionX || 0,
                     y: data.template.positionY || 0
                 });
                 setInitialTransform({
-                    scale: data.template.scale || 1,
+                    scale: data.template.scale || 0.5,
                     rotation: data.template.rotation || 0,
                     position: {
                         x: data.template.positionX || 0,
@@ -240,19 +239,19 @@ const FrameTemplateEditor = ({ onClose }) => {
 
     // Reset all adjustments to default
     const resetAdjustments = () => {
-        setScale(0.01);
+        setScale(0.5);  // Default 50% scale
         setRotation(0);
         setPosition({ x: 0, y: 0 });
         setInitialTransform({
-            scale: 0.01,
+            scale: 0.5,  // Default 50% scale
             rotation: 0,
             position: { x: 0, y: 0 }
         });
     };
 
-    // Format scale for display
+    // Format scale for display - FIXED to show correct percentage
     const formatScalePercent = (scale) => {
-        return `${Math.round(scale)}%`;
+        return `${Math.round(scale * 100)}%`;
     };
 
     // Adjustment handlers
@@ -532,26 +531,26 @@ const FrameTemplateEditor = ({ onClose }) => {
                         {/* Adjustment controls */}
                         {currentPreviewPhoto && selectedOverlay && (
                             <div className="mt-4 grid grid-cols-2 gap-4">
-                                {/* Scale controls - with slider */}
+                                {/* Scale controls - with slider - UPDATED RANGE */}
                                 <div className="bg-gray-50 rounded-lg p-3">
                                     <div className="flex items-center justify-between mb-2">
                                         <span className="text-sm text-gray-600">Zoom:</span>
                                         <span className="text-sm font-medium">
-            {formatScalePercent(scale * 100)}
-        </span>
+                                            {formatScalePercent(scale)}
+                                        </span>
                                     </div>
                                     <div className="flex items-center">
                                         <span className="text-xs text-gray-500 mr-2">10%</span>
                                         <input
                                             type="range"
                                             min="0.1"
-                                            max="1.0"
+                                            max="2.0"  // Increased max to 200%
                                             step="0.05"
                                             value={scale}
                                             onChange={handleZoomChange}
                                             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                                         />
-                                        <span className="text-xs text-gray-500 ml-2">100%</span>
+                                        <span className="text-xs text-gray-500 ml-2">200%</span>
                                     </div>
                                 </div>
 
@@ -591,7 +590,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                                     </span>
                                 </div>
                                 <div className="flex justify-center">
-                                <div className="grid grid-cols-3 gap-1 w-36 h-36">
+                                    <div className="grid grid-cols-3 gap-1 w-36 h-36">
                                         <div></div>
                                         <button
                                             onClick={() => handleMove('up')}
@@ -670,7 +669,8 @@ const FrameTemplateEditor = ({ onClose }) => {
                             <h4 className="font-medium mb-2">How Templates Work</h4>
                             <div className="text-sm text-gray-600 space-y-2">
                                 <p>Templates define how photos will be positioned within each frame. The settings you create here will be applied to <strong>all photos</strong> that use this frame.</p>
-                                <p>Guests will see their photos automatically positioned according to these template settings when they select this frame.</p>
+                                <p>The canvas size for the final photo will be 5184×3456 pixels (standard DSLR resolution).</p>
+                                <p>Scale values range from 10% to 200% of the original photo size.</p>
                             </div>
                         </div>
 
