@@ -1105,6 +1105,7 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
     try {
         // Get the base filename WITHOUT removing file extension (keep the .jpg)
         const baseFilename = filename;
+        const photoViewDomain = 'photo-view.slyrix.com';
 
         // Get the client domain
         // Create the correct photo URL - exactly matching the format shown in admin dashboard
@@ -1491,7 +1492,6 @@ app.get('/api/photos/:photoId', (req, res) => {
 
         // Get client domain for photo view URL
         const clientDomain = req.headers.host || 'fotobox.slyrix.com';
-        const photoViewDomain = 'photo-view.slyrix.com';
 
         // Different URLs for different versions
         let normalUrl = `/photos/${baseFilename}`;
