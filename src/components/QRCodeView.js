@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCamera } from '../contexts/CameraContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { API_BASE_URL } from '../App';
+import { API_BASE_URL, PHOTO_VIEW_URL  } from '../App';
 import Icon from '@mdi/react';
 import { mdiQrcode, mdiPrinter, mdiCamera, mdiHome } from '@mdi/js';
 
@@ -13,7 +13,6 @@ const QRCodeView = () => {
     const [printMessage, setPrintMessage] = useState('');
     const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
     const [isTablet, setIsTablet] = useState(window.innerWidth >= 768 && window.innerWidth <= 1024);
-
     // Monitor orientation changes
     useEffect(() => {
         const handleResize = () => {
@@ -42,10 +41,10 @@ const QRCodeView = () => {
     // Construct the image URLs - use print version for the display (A5 ratio)
     // but set the QR code to link to the original high-resolution version
     const imageUrl = currentPhoto.url
-        ? `${API_BASE_URL}${currentPhoto.url}`
+        ? `${PHOTO_VIEW_URL}${currentPhoto.url}`
         : (currentPhoto.fullUrl || '');
 
-    const qrCodeUrl = `${API_BASE_URL}${currentPhoto.qrUrl}`;
+    const qrCodeUrl = `${PHOTO_VIEW_URL}${currentPhoto.qrUrl}`;
 
     // Handle the print request - should use the print version
     const handlePrint = async () => {

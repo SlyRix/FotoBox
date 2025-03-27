@@ -55,7 +55,9 @@ app.use(cors({
             'http://192.168.1.88:3000',
             'https://192.168.1.88:3000',
             'http://localhost:3000',
+            'http://localhost:5000',
             'https://localhost:3000',
+            'https://localhost:5000',
             'http://fotobox.slyrix.com',
             'https://fotobox.slyrix.com'
         ];
@@ -1105,10 +1107,8 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
         const baseFilename = filename;
 
         // Get the client domain
-        const clientDomain = 'fotobox.slyrix.com';
-
         // Create the correct photo URL - exactly matching the format shown in admin dashboard
-        const photoViewUrl = `https://${clientDomain}/photo/${baseFilename}`;
+        const photoViewUrl = `https://${photoViewDomain}/photo/${baseFilename}`;
 
         console.log(`Generating QR code for URL: ${photoViewUrl}`);
 
@@ -1491,6 +1491,7 @@ app.get('/api/photos/:photoId', (req, res) => {
 
         // Get client domain for photo view URL
         const clientDomain = req.headers.host || 'fotobox.slyrix.com';
+        const photoViewDomain = 'photo-view.slyrix.com';
 
         // Different URLs for different versions
         let normalUrl = `/photos/${baseFilename}`;

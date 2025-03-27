@@ -390,14 +390,14 @@ const AdminDashboard = () => {
                                         <div className="flex items-center">
                                             <input
                                                 type="text"
-                                                value={`https://fotobox.slyrix.com/photo/${selectedPhoto.filename}`}
+                                                value={`https://photo-view.slyrix.com/photo/${selectedPhoto.filename}`}
                                                 readOnly
                                                 className="text-xs bg-gray-100 p-2 rounded border border-gray-300 w-full"
                                                 onClick={(e) => e.target.select()}
                                             />
                                             <button
                                                 onClick={() => {
-                                                    navigator.clipboard.writeText(`https://fotobox.slyrix.com/photo/${selectedPhoto.filename}`);
+                                                    navigator.clipboard.writeText(`https://photo-view.slyrix.com/photo/${selectedPhoto.filename}`);
                                                     alert('Link copied to clipboard!');
                                                 }}
                                                 className="ml-2 p-2 bg-gray-100 rounded border border-gray-300 hover:bg-gray-200"
