@@ -663,6 +663,7 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
  * @param {string} overlayName - Name of the overlay
  * @returns {boolean} Success state of the operation
  */
+// Fixed applyTemplatedOverlay function
 async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPath, template, overlayName) {
     try {
         // Ensure source image exists
@@ -704,18 +705,19 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         const centerX = canvasWidth / 2;
         const centerY = canvasHeight / 2;
 
-        // Calculate scaled dimensions
-        const scaledWidth = Math.round(imgMetadata.width * template.scale);
-        const scaledHeight = Math.round(imgMetadata.height * template.scale);
+        // Calculate scaled dimensions - ensure template.scale is valid
+        const scale = template.scale || 0.8; // Default to 80% if scale is invalid
+        const scaledWidth = Math.round(imgMetadata.width * scale);
+        const scaledHeight = Math.round(imgMetadata.height * scale);
 
-        // Create a buffer of the scaled and rotated source image
+        // Create a version of the source image that's scaled and rotated
         const processedImage = await sharp(sourceImagePath)
             .resize({
                 width: scaledWidth,
                 height: scaledHeight,
                 fit: 'fill'
             })
-            .rotate(template.rotation, {
+            .rotate(template.rotation || 0, {
                 background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background for rotation
             })
             .toBuffer();
@@ -728,15 +730,21 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
                 channels: 4,
                 background: { r: 255, g: 255, b: 255, alpha: 1 } // White background
             }
-        }).toBuffer();
+        })
+            .jpeg() // Convert to JPEG format first
+            .toBuffer();
+
+        // Position X and Y - default to 0 if undefined
+        const posX = template.positionX || 0;
+        const posY = template.positionY || 0;
 
         // Position the processed image on the canvas according to template
         const withPhotoComposite = await sharp(canvas)
             .composite([
                 {
                     input: processedImage,
-                    left: Math.round(centerX - (scaledWidth / 2) + template.positionX),
-                    top: Math.round(centerY - (scaledHeight / 2) + template.positionY)
+                    left: Math.round(centerX - (scaledWidth / 2) + posX),
+                    top: Math.round(centerY - (scaledHeight / 2) + posY)
                 }
             ])
             .toBuffer();
@@ -749,6 +757,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
                     gravity: 'center'
                 }
             ])
+            .png() // Use PNG to preserve transparency
             .toFile(outputPath);
 
         return true;
@@ -757,7 +766,6 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         throw error;
     }
 }
-
 /**
  * Applies an Instagram template to a photo
  * @param {string} sourceImagePath - Path to the source image
@@ -1150,8 +1158,8 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
                 success: true,
                 photo: {
                     filename: filename,
-                    url: processedPhotos ? processedPhotos.publicUrl : `/photo/${filename}`,
-                    thumbnailUrl: thumbnailUrl || `/photo/${filename}`, // Fallback to original if thumbnail fails
+                    url: processedPhotos ? processedPhotos.publicUrl : `/photos/${filename}`,
+                    thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
                     qrUrl: `/qrcodes/${qrFilename}`,
                     photoViewUrl: photoViewUrl,  // Include the actual URL the QR code points to
                     timestamp: Date.now()
