@@ -705,8 +705,24 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         const centerX = canvasWidth / 2;
         const centerY = canvasHeight / 2;
 
-        // Calculate scaled dimensions - ensure template.scale is valid
-        const scale = template.scale || 0.8; // Default to 80% if scale is invalid
+        // SCALE CORRECTION:
+        // The admin UI has scale values between 0.01-0.2 (1%-20%)
+        // We need to scale up these values to make the image reasonably sized
+        // A scale factor of 5 means 0.2 (20%) becomes 1.0 (100%)
+        const scaleFactor = 5;
+
+        // Get scale or use a reasonable default if missing
+        let scale = template.scale || 0.1; // Default to 0.1 (10%) if missing
+
+        // Scale up by the factor to get a reasonable image size
+        scale = scale * scaleFactor;
+
+        // Cap maximum scale to prevent images from being too large
+        scale = Math.min(scale, 2.0); // Maximum 200% of original
+
+        console.log(`Original template scale: ${template.scale}, Adjusted scale: ${scale}`);
+
+        // Calculate scaled dimensions
         const scaledWidth = Math.round(imgMetadata.width * scale);
         const scaledHeight = Math.round(imgMetadata.height * scale);
 
@@ -715,10 +731,11 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
             .resize({
                 width: scaledWidth,
                 height: scaledHeight,
-                fit: 'fill'
+                fit: 'contain',
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
             .rotate(template.rotation || 0, {
-                background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background for rotation
+                background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
             .toBuffer();
 
@@ -728,10 +745,10 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
                 width: canvasWidth,
                 height: canvasHeight,
                 channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 1 } // White background
+                background: { r: 255, g: 255, b: 255, alpha: 1 }
             }
         })
-            .jpeg() // Convert to JPEG format first
+            .png()
             .toBuffer();
 
         // Position X and Y - default to 0 if undefined
@@ -757,7 +774,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
                     gravity: 'center'
                 }
             ])
-            .png() // Use PNG to preserve transparency
+            .png()
             .toFile(outputPath);
 
         return true;
