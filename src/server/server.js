@@ -794,8 +794,8 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
         console.log(`dimensions: ${maxScaleWidth}x${maxScaleHeight} maxScale ${maxScale}`);
 
 // Use provided scale but constrain it
-        const scale = Math.min(Math.max(template.scale || 1, 0.1), maxScale);
-        const scaledWidth = Math.round(imgMetadata.width * scale);
+        const relativeScale = Math.min(Math.max(template.scale || 1, 0.1), 1); // clamp between 10% and 100%
+        const scale = maxScale * relativeScale;        const scaledWidth = Math.round(imgMetadata.width * scale);
         const scaledHeight = Math.round(imgMetadata.height * scale);
         console.log(`targetscale ${template.scale}`);
 
