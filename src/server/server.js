@@ -786,9 +786,13 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
         // Calculate the center point
         const centerX = targetWidth / 2;
         const centerY = targetHeight / 2;
+// Calculate maximum scale to fit within Instagram dimensions
+        const maxScaleWidth = (targetWidth * 0.9) / imgMetadata.width;
+        const maxScaleHeight = (targetHeight * 0.9) / imgMetadata.height;
+        const maxScale = Math.min(maxScaleWidth, maxScaleHeight);
 
-        // Calculate scaled dimensions with a minimum scale to ensure visibility
-        const scale = Math.max(template.scale, 0.5); // Ensure minimum scale of 50%
+// Use provided scale but constrain it
+        const scale = Math.min(Math.max(template.scale || 0.5, 0.1), maxScale);
         const scaledWidth = Math.round(imgMetadata.width * scale);
         const scaledHeight = Math.round(imgMetadata.height * scale);
 
