@@ -702,7 +702,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         }).png().toBuffer();
 
         // Get the scale from template (default to 0.5 or 50% if not provided)
-        const scale = template.scale || 0.5;
+        const scale = template.scale || 1;
 
         // Calculate scaled dimensions for the photo
         const scaledWidth = Math.round(sourceMetadata.width * scale);
@@ -727,12 +727,15 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         const centerY = CANVAS_HEIGHT / 2;
 
         // Apply the position offsets from the template
+        // FIX: Define variables and then use them
         const posX = template.positionX || 0;
         const posY = template.positionY || 0;
 
         // Calculate final position (centered with offset)
-        const left = Math.round(CANVAS_WIDTH / 2 - scaledWidth / 2 + template.positionX);
-        const top = Math.round(CANVAS_HEIGHT / 2 - scaledHeight / 2 + template.positionY);
+        // FIX: Use the defined posX and posY variables
+        const left = Math.round(centerX - (scaledWidth / 2) + posX);
+        const top = Math.round(centerY - (scaledHeight / 2) + posY);
+
         console.log(`Positioning photo at: left=${left}, top=${top} (center: ${centerX},${centerY}, offset: ${posX},${posY})`);
 
         // Add the photo to the white canvas
@@ -762,7 +765,6 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         throw error;
     }
 }
-
 /**
  * Applies an Instagram template to a photo
  * @param {string} sourceImagePath - Path to the source image

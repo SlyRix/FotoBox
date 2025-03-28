@@ -3,8 +3,12 @@ import { motion } from 'framer-motion';
 import Icon from '@mdi/react';
 import { mdiMagnifyPlus, mdiMagnifyMinus, mdiRotateRight, mdiRotateLeft, mdiArrowUp,
     mdiArrowDown, mdiArrowLeft, mdiArrowRight, mdiContentSave, mdiClose,
-    mdiImageOutline, mdiRefresh, mdiLoading, mdiChevronLeft, mdiChevronRight } from '@mdi/js';
+    mdiImageOutline, mdiRefresh, mdiLoading, mdiChevronLeft, mdiChevronRight, mdiInformationOutline } from '@mdi/js';
 import { API_BASE_URL, API_ENDPOINT } from '../App';
+
+// Actual output dimensions for the final composite
+const ACTUAL_WIDTH = 5184;  // Standard DSLR width
+const ACTUAL_HEIGHT = 3456; // Standard DSLR height
 
 const FrameTemplateEditor = ({ onClose }) => {
     // State for overlays and preview photos
@@ -16,9 +20,10 @@ const FrameTemplateEditor = ({ onClose }) => {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(null);
+    const [showDebugInfo, setShowDebugInfo] = useState(false);
 
-    // State for template adjustments - FIXED INITIAL VALUES
-    const [scale, setScale] = useState(0.5);  // Default 50% scale instead of 0.01
+    // State for template adjustments
+    const [scale, setScale] = useState(0.5);  // Default 50% scale
     const [rotation, setRotation] = useState(0);
     const [position, setPosition] = useState({ x: 0, y: 0 });
     const [initialTransform, setInitialTransform] = useState({
@@ -29,12 +34,40 @@ const FrameTemplateEditor = ({ onClose }) => {
 
     // Reference to the editor container for positioning calculations
     const editorRef = useRef(null);
+    // Track the preview container dimensions for scaling calculations
+    const [previewDimensions, setPreviewDimensions] = useState({ width: 400, height: 300 });
 
     // Fetch overlays and sample photos when component mounts
     useEffect(() => {
         fetchOverlays();
         fetchSamplePhotos();
     }, []);
+
+    // Measure the preview container dimensions after the component mounts and when window resizes
+    useEffect(() => {
+        const updatePreviewDimensions = () => {
+            if (editorRef.current) {
+                const previewContainer = editorRef.current.querySelector('.preview-container');
+                if (previewContainer) {
+                    setPreviewDimensions({
+                        width: previewContainer.clientWidth,
+                        height: previewContainer.clientHeight
+                    });
+                    console.log(`Preview dimensions: ${previewContainer.clientWidth}x${previewContainer.clientHeight}`);
+                }
+            }
+        };
+
+        // Initial measurement
+        updatePreviewDimensions();
+
+        // Update on window resize
+        window.addEventListener('resize', updatePreviewDimensions);
+
+        return () => {
+            window.removeEventListener('resize', updatePreviewDimensions);
+        };
+    }, [selectedOverlay]);
 
     // Fetch all frame overlays
     const fetchOverlays = async () => {
@@ -205,18 +238,28 @@ const FrameTemplateEditor = ({ onClose }) => {
                 // Apply the saved template settings
                 setScale(data.template.scale || 0.5);
                 setRotation(data.template.rotation || 0);
+
+                // Convert server-side absolute positionX/Y to UI-scaled positions
+                // We need to scale down from actual image dimensions to preview dimensions
+                const positionXScaled = calculatePreviewPositionX(data.template.positionX || 0);
+                const positionYScaled = calculatePreviewPositionY(data.template.positionY || 0);
+
                 setPosition({
-                    x: data.template.positionX || 0,
-                    y: data.template.positionY || 0
+                    x: positionXScaled,
+                    y: positionYScaled
                 });
+
                 setInitialTransform({
                     scale: data.template.scale || 0.5,
                     rotation: data.template.rotation || 0,
                     position: {
-                        x: data.template.positionX || 0,
-                        y: data.template.positionY || 0
+                        x: positionXScaled,
+                        y: positionYScaled
                     }
                 });
+
+                console.log(`Loaded template with server position: ${data.template.positionX || 0}, ${data.template.positionY || 0}`);
+                console.log(`Scaled to UI position: ${positionXScaled}, ${positionYScaled}`);
             } else {
                 // No template found, use defaults
                 resetAdjustments();
@@ -228,6 +271,28 @@ const FrameTemplateEditor = ({ onClose }) => {
         } finally {
             setLoading(false);
         }
+    };
+
+    // Calculate UI preview position from server position
+    const calculatePreviewPositionX = (serverPositionX) => {
+        if (!previewDimensions.width) return 0;
+        return Math.round(serverPositionX * previewDimensions.width / ACTUAL_WIDTH);
+    };
+
+    const calculatePreviewPositionY = (serverPositionY) => {
+        if (!previewDimensions.height) return 0;
+        return Math.round(serverPositionY * previewDimensions.height / ACTUAL_HEIGHT);
+    };
+
+    // Calculate server position from UI preview position
+    const calculateServerPositionX = (previewPositionX) => {
+        if (!previewDimensions.width) return 0;
+        return Math.round(previewPositionX * ACTUAL_WIDTH / previewDimensions.width);
+    };
+
+    const calculateServerPositionY = (previewPositionY) => {
+        if (!previewDimensions.height) return 0;
+        return Math.round(previewPositionY * ACTUAL_HEIGHT / previewDimensions.height);
     };
 
     // Handle overlay selection
@@ -249,7 +314,7 @@ const FrameTemplateEditor = ({ onClose }) => {
         });
     };
 
-    // Format scale for display - FIXED to show correct percentage
+    // Format scale for display
     const formatScalePercent = (scale) => {
         return `${Math.round(scale * 100)}%`;
     };
@@ -264,7 +329,7 @@ const FrameTemplateEditor = ({ onClose }) => {
     const handleRotateRight = () => setRotation(prev => prev + 5);
 
     const handleMove = (direction) => {
-        const step = 10; // pixels to move
+        const step = 10; // pixels to move in UI
         switch(direction) {
             case 'up':
                 setPosition(prev => ({ ...prev, y: prev.y - step }));
@@ -295,14 +360,21 @@ const FrameTemplateEditor = ({ onClose }) => {
             setError(null);
             setSuccess(null);
 
+            // Scale UI positions to server positions
+            const serverPositionX = calculateServerPositionX(position.x);
+            const serverPositionY = calculateServerPositionY(position.y);
+
+            console.log(`Saving UI position: ${position.x}, ${position.y}`);
+            console.log(`Scaled to server position: ${serverPositionX}, ${serverPositionY}`);
+
             // Prepare template data
             const templateData = {
                 overlayName: selectedOverlay.name,
                 template: {
                     scale,
                     rotation,
-                    positionX: position.x,
-                    positionY: position.y
+                    positionX: serverPositionX,
+                    positionY: serverPositionY
                 }
             };
 
@@ -334,8 +406,6 @@ const FrameTemplateEditor = ({ onClose }) => {
         }
     };
 
-    // We're using Framer Motion's animate prop instead of CSS transform string
-
     // Get overlay type info for display
     const getOverlayTypeInfo = (name) => {
         if (name === 'wedding-frame.png') {
@@ -356,18 +426,32 @@ const FrameTemplateEditor = ({ onClose }) => {
         }
     };
 
+    // Toggle debug info
+    const toggleDebugInfo = () => {
+        setShowDebugInfo(prev => !prev);
+    };
+
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
                 {/* Header */}
                 <div className="p-4 bg-gradient-to-r from-christian-accent to-christian-accent/90 text-white flex justify-between items-center">
                     <h2 className="text-xl font-bold">Frame Template Editor</h2>
-                    <button
-                        onClick={onClose}
-                        className="p-1 hover:bg-white/20 rounded-full"
-                    >
-                        <Icon path={mdiClose} size={1.2} />
-                    </button>
+                    <div className="flex items-center">
+                        <button
+                            onClick={toggleDebugInfo}
+                            className="p-1 hover:bg-white/20 rounded-full mr-2"
+                            title="Toggle Debug Info"
+                        >
+                            <Icon path={mdiInformationOutline} size={1} />
+                        </button>
+                        <button
+                            onClick={onClose}
+                            className="p-1 hover:bg-white/20 rounded-full"
+                        >
+                            <Icon path={mdiClose} size={1.2} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Main content */}
@@ -446,7 +530,7 @@ const FrameTemplateEditor = ({ onClose }) => {
                         <style>{rangeSliderStyles}</style>
 
                         <div
-                            className="flex-grow flex items-center justify-center overflow-hidden bg-gray-100 rounded-lg relative"
+                            className="flex-grow flex items-center justify-center overflow-hidden bg-gray-100 rounded-lg relative preview-container"
                             ref={editorRef}>
                             {currentPreviewPhoto && selectedOverlay ? (
                                 <>
@@ -496,6 +580,21 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             />
                                         </div>
 
+                                        {/* Debug crosshair at UI position */}
+                                        {showDebugInfo && (
+                                            <div
+                                                className="absolute w-8 h-8 pointer-events-none z-20 border-2 border-red-500"
+                                                style={{
+                                                    left: `calc(50% + ${position.x}px)`,
+                                                    top: `calc(50% + ${position.y}px)`,
+                                                    transform: 'translate(-50%, -50%)'
+                                                }}
+                                            >
+                                                <div className="absolute top-0 bottom-0 left-1/2 w-px bg-red-500"></div>
+                                                <div className="absolute left-0 right-0 top-1/2 h-px bg-red-500"></div>
+                                            </div>
+                                        )}
+
                                         {/* Canvas dimensions indicator */}
                                         <div
                                             className="absolute bottom-2 right-2 bg-black/30 text-white text-xs px-2 py-1 rounded">
@@ -516,8 +615,8 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             </button>
 
                                             <span className="text-sm">
-                        Photo {currentPhotoIndex + 1} of {previewPhotos.length}
-                    </span>
+                                                Photo {currentPhotoIndex + 1} of {previewPhotos.length}
+                                            </span>
 
                                             <button
                                                 onClick={goToNextPhoto}
@@ -526,6 +625,19 @@ const FrameTemplateEditor = ({ onClose }) => {
                                             >
                                                 <Icon path={mdiChevronRight} size={1}/>
                                             </button>
+                                        </div>
+                                    )}
+
+                                    {/* Debug info overlay */}
+                                    {showDebugInfo && (
+                                        <div className="absolute top-4 right-4 bg-black/80 text-white text-xs p-3 rounded">
+                                            <h4 className="font-bold mb-1">Debug Information</h4>
+                                            <p><strong>Preview Dimensions:</strong> {previewDimensions.width}×{previewDimensions.height}px</p>
+                                            <p><strong>Actual Dimensions:</strong> {ACTUAL_WIDTH}×{ACTUAL_HEIGHT}px</p>
+                                            <p><strong>Scale Factor:</strong> {(ACTUAL_WIDTH / previewDimensions.width).toFixed(2)}x</p>
+                                            <p><strong>UI Position:</strong> {position.x}, {position.y}</p>
+                                            <p><strong>Server Position:</strong> {calculateServerPositionX(position.x)}, {calculateServerPositionY(position.y)}</p>
+                                            <p className="mt-2 font-bold text-yellow-300">Movement Ratio: 1px in UI = {Math.round(ACTUAL_WIDTH / previewDimensions.width)}px in server</p>
                                         </div>
                                     )}
                                 </>
@@ -543,6 +655,11 @@ const FrameTemplateEditor = ({ onClose }) => {
                         <div className="mt-2 bg-blue-50 p-2 rounded text-sm text-blue-700">
                             <p>Position the <strong>sample photo</strong> to create a template for this frame. These
                                 settings will apply to <strong>all photos</strong> using this frame.</p>
+                            {showDebugInfo && (
+                                <p className="mt-1 text-xs font-bold">
+                                    Note: Small movements in this UI will result in larger movements in the final image due to scaling.
+                                </p>
+                            )}
                         </div>
 
                         {/* Adjustment controls */}
@@ -603,7 +720,10 @@ const FrameTemplateEditor = ({ onClose }) => {
                                 <div className="flex justify-between items-center mb-2">
                                     <span className="text-sm text-gray-600">Position:</span>
                                     <span className="text-xs text-gray-500">
-                                        X: {position.x.toFixed(0)}px, Y: {position.y.toFixed(0)}px
+                                        UI: X: {position.x.toFixed(0)}px, Y: {position.y.toFixed(0)}px
+                                        {showDebugInfo && (
+                                            <> | Server: X: {calculateServerPositionX(position.x)}px, Y: {calculateServerPositionY(position.y)}px</>
+                                        )}
                                     </span>
                                 </div>
                                 <div className="flex justify-center">
@@ -672,8 +792,17 @@ const FrameTemplateEditor = ({ onClose }) => {
                                     <ul className="text-sm text-gray-600">
                                         <li><strong>Scale:</strong> {formatScalePercent(scale)}</li>
                                         <li><strong>Rotation:</strong> {rotation}°</li>
-                                        <li><strong>Position X:</strong> {position.x.toFixed(0)}px</li>
-                                        <li><strong>Position Y:</strong> {position.y.toFixed(0)}px</li>
+                                        <li>
+                                            <strong>Position:</strong>
+                                            <span className="ml-1">
+                                                UI: {position.x.toFixed(0)}, {position.y.toFixed(0)}
+                                            </span>
+                                            {showDebugInfo && (
+                                                <span className="block ml-[70px] text-blue-600">
+                                                    Server: {calculateServerPositionX(position.x)}, {calculateServerPositionY(position.y)}
+                                                </span>
+                                            )}
+                                        </li>
                                     </ul>
                                 </div>
                             </div>
@@ -691,6 +820,13 @@ const FrameTemplateEditor = ({ onClose }) => {
                                 <p>The canvas size for the final photo will be 5184×3456 pixels (standard DSLR
                                     resolution with 1.5:1 aspect ratio).</p>
                                 <p>Scale values range from 10% to 200% of the original photo size.</p>
+                                {showDebugInfo && (
+                                    <p className="text-xs p-2 bg-yellow-50 rounded border border-yellow-200 mt-2">
+                                        <strong>Advanced:</strong> Due to the difference between preview size and actual output size,
+                                        a small movement in this UI corresponds to a much larger shift in the final image.
+                                        Position values are automatically scaled when saving templates.
+                                    </p>
+                                )}
                             </div>
                         </div>
 
