@@ -280,20 +280,39 @@ const FrameTemplateEditor = ({ onClose }) => {
 
         // Use Instagram dimensions for Instagram frames
         if (selectedOverlay?.name === 'instagram-frame.png') {
-            return Math.round(serverPositionX * previewDimensions.width / INSTAGRAM_WIDTH);
+            // Get the actual dimensions of the preview container
+            const previewContainerWidth = document.querySelector('.preview-container')?.clientWidth || previewDimensions.width;
+            const previewDisplayWidth = selectedOverlay.name === 'instagram-frame.png'
+                ? document.querySelector('.preview-container')?.querySelector('[class*="aspect-[9/16]"]')?.clientWidth
+                : previewContainerWidth;
+
+            // Calculate scale factor between server dimensions and preview dimensions
+            const scaleFactor = (previewDisplayWidth || 1) / INSTAGRAM_WIDTH;
+
+            // Apply this scale factor to convert server position to UI position
+            return Math.round(serverPositionX * scaleFactor);
         }
 
         // Use standard dimensions for other frames
         return Math.round(serverPositionX * previewDimensions.width / ACTUAL_WIDTH);
     };
 
-
     const calculatePreviewPositionY = (serverPositionY) => {
         if (!previewDimensions.height) return 0;
 
         // Use Instagram dimensions for Instagram frames
         if (selectedOverlay?.name === 'instagram-frame.png') {
-            return Math.round(serverPositionY * previewDimensions.height / INSTAGRAM_HEIGHT);
+            // Get the actual dimensions of the preview container
+            const previewContainerHeight = document.querySelector('.preview-container')?.clientHeight || previewDimensions.height;
+            const previewDisplayHeight = selectedOverlay.name === 'instagram-frame.png'
+                ? document.querySelector('.preview-container')?.querySelector('[class*="aspect-[9/16]"]')?.clientHeight
+                : previewContainerHeight;
+
+            // Calculate scale factor between server dimensions and preview dimensions
+            const scaleFactor = (previewDisplayHeight || 1) / INSTAGRAM_HEIGHT;
+
+            // Apply this scale factor to convert server position to UI position
+            return Math.round(serverPositionY * scaleFactor);
         }
 
         // Use standard dimensions for other frames
@@ -306,22 +325,48 @@ const FrameTemplateEditor = ({ onClose }) => {
 
         // Use Instagram dimensions for Instagram frames
         if (selectedOverlay?.name === 'instagram-frame.png') {
-            return Math.round(previewPositionX * INSTAGRAM_WIDTH / previewDimensions.width);
+            // For Instagram format, we want to map UI movements to actual Instagram dimensions (1080×1920)
+            // First get preview container dimensions with appropriate aspect ratio
+            const previewContainerWidth = document.querySelector('.preview-container')?.clientWidth || previewDimensions.width;
+            const previewDisplayWidth = selectedOverlay.name === 'instagram-frame.png'
+                ? document.querySelector('.preview-container')?.querySelector('[class*="aspect-[9/16]"]')?.clientWidth
+                : previewContainerWidth;
+
+            // Calculate how much the preview display is scaled compared to actual Instagram dimensions
+            const scaleFactor = INSTAGRAM_WIDTH / (previewDisplayWidth || 1);
+
+            // Apply this scale factor to the UI position
+            return Math.round(previewPositionX * scaleFactor);
         }
+
         // Use standard dimensions for other frames
         return Math.round(previewPositionX * ACTUAL_WIDTH / previewDimensions.width);
     };
+
     const calculateServerPositionY = (previewPositionY) => {
         if (!previewDimensions.height) return 0;
 
         // Use Instagram dimensions for Instagram frames
         if (selectedOverlay?.name === 'instagram-frame.png') {
-            return Math.round(previewPositionY * INSTAGRAM_HEIGHT / previewDimensions.height);
+            // For Instagram format, we want to map UI movements to actual Instagram dimensions (1080×1920)
+            // First get preview container dimensions with appropriate aspect ratio
+            const previewContainerHeight = document.querySelector('.preview-container')?.clientHeight || previewDimensions.height;
+            const previewDisplayHeight = selectedOverlay.name === 'instagram-frame.png'
+                ? document.querySelector('.preview-container')?.querySelector('[class*="aspect-[9/16]"]')?.clientHeight
+                : previewContainerHeight;
+
+            // Calculate how much the preview display is scaled compared to actual Instagram dimensions
+            const scaleFactor = INSTAGRAM_HEIGHT / (previewDisplayHeight || 1);
+
+            // Apply this scale factor to the UI position
+            return Math.round(previewPositionY * scaleFactor);
         }
 
         // Use standard dimensions for other frames
         return Math.round(previewPositionY * ACTUAL_HEIGHT / previewDimensions.height);
     };
+
+
 
     // Handle overlay selection
     const handleSelectOverlay = (overlay) => {
