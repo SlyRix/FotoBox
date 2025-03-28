@@ -833,8 +833,10 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
 
         // Position the processed image on the white background
         // IMPORTANT: Use the extracted values, not directly from template
-        const positionX = Math.round(centerX - (scaledWidth / 2) + posX);
-        const positionY = Math.round(centerY - (scaledHeight / 2) + posY);
+        const offsetX = template.positionX || 0;
+        const offsetY = template.positionY || 0;
+        const positionX = Math.round((targetWidth - scaledWidth) / 2 + offsetX);
+        const positionY = Math.round((targetHeight - scaledHeight) / 2 + offsetY);
 
         console.log(`Positioning Instagram image at: ${positionX},${positionY} on ${targetWidth}x${targetHeight} canvas (center: ${centerX},${centerY}, offset: ${posX},${posY})`);
 
