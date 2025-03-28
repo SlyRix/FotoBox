@@ -9,7 +9,8 @@ import { API_BASE_URL, API_ENDPOINT } from '../App';
 // Actual output dimensions for the final composite
 const ACTUAL_WIDTH = 5184;  // Standard DSLR width
 const ACTUAL_HEIGHT = 3456; // Standard DSLR height
-
+const INSTAGRAM_WIDTH = 1080;  // Instagram recommended width
+const INSTAGRAM_HEIGHT = 1920; // Instagram recommended height (9:16 ratio)
 const FrameTemplateEditor = ({ onClose }) => {
     // State for overlays and preview photos
     const [overlays, setOverlays] = useState([]);
@@ -276,22 +277,49 @@ const FrameTemplateEditor = ({ onClose }) => {
     // Calculate UI preview position from server position
     const calculatePreviewPositionX = (serverPositionX) => {
         if (!previewDimensions.width) return 0;
+
+        // Use Instagram dimensions for Instagram frames
+        if (selectedOverlay?.name === 'instagram-frame.png') {
+            return Math.round(serverPositionX * previewDimensions.width / INSTAGRAM_WIDTH);
+        }
+
+        // Use standard dimensions for other frames
         return Math.round(serverPositionX * previewDimensions.width / ACTUAL_WIDTH);
     };
 
+
     const calculatePreviewPositionY = (serverPositionY) => {
         if (!previewDimensions.height) return 0;
+
+        // Use Instagram dimensions for Instagram frames
+        if (selectedOverlay?.name === 'instagram-frame.png') {
+            return Math.round(serverPositionY * previewDimensions.height / INSTAGRAM_HEIGHT);
+        }
+
+        // Use standard dimensions for other frames
         return Math.round(serverPositionY * previewDimensions.height / ACTUAL_HEIGHT);
     };
 
     // Calculate server position from UI preview position
     const calculateServerPositionX = (previewPositionX) => {
         if (!previewDimensions.width) return 0;
+
+        // Use Instagram dimensions for Instagram frames
+        if (selectedOverlay?.name === 'instagram-frame.png') {
+            return Math.round(previewPositionX * INSTAGRAM_WIDTH / previewDimensions.width);
+        }
+        // Use standard dimensions for other frames
         return Math.round(previewPositionX * ACTUAL_WIDTH / previewDimensions.width);
     };
-
     const calculateServerPositionY = (previewPositionY) => {
         if (!previewDimensions.height) return 0;
+
+        // Use Instagram dimensions for Instagram frames
+        if (selectedOverlay?.name === 'instagram-frame.png') {
+            return Math.round(previewPositionY * INSTAGRAM_HEIGHT / previewDimensions.height);
+        }
+
+        // Use standard dimensions for other frames
         return Math.round(previewPositionY * ACTUAL_HEIGHT / previewDimensions.height);
     };
 
@@ -582,16 +610,24 @@ const FrameTemplateEditor = ({ onClose }) => {
 
                                         {/* Debug crosshair at UI position */}
                                         {showDebugInfo && (
-                                            <div
-                                                className="absolute w-8 h-8 pointer-events-none z-20 border-2 border-red-500"
-                                                style={{
-                                                    left: `calc(50% + ${position.x}px)`,
-                                                    top: `calc(50% + ${position.y}px)`,
-                                                    transform: 'translate(-50%, -50%)'
-                                                }}
-                                            >
-                                                <div className="absolute top-0 bottom-0 left-1/2 w-px bg-red-500"></div>
-                                                <div className="absolute left-0 right-0 top-1/2 h-px bg-red-500"></div>
+                                            <div className="absolute top-4 right-4 bg-black/80 text-white text-xs p-3 rounded">
+                                                <h4 className="font-bold mb-1">Debug Information</h4>
+                                                <p><strong>Preview Dimensions:</strong> {previewDimensions.width}×{previewDimensions.height}px</p>
+                                                <p><strong>Actual Dimensions:</strong> {selectedOverlay?.name === 'instagram-frame.png' ?
+                                                    `${INSTAGRAM_WIDTH}×${INSTAGRAM_HEIGHT}px (Instagram)` :
+                                                    `${ACTUAL_WIDTH}×${ACTUAL_HEIGHT}px (Standard)`}
+                                                </p>
+                                                <p><strong>Scale Factor:</strong> {(selectedOverlay?.name === 'instagram-frame.png' ?
+                                                    (INSTAGRAM_WIDTH / previewDimensions.width) :
+                                                    (ACTUAL_WIDTH / previewDimensions.width)).toFixed(2)}x
+                                                </p>
+                                                <p><strong>UI Position:</strong> {position.x}, {position.y}</p>
+                                                <p><strong>Server Position:</strong> {calculateServerPositionX(position.x)}, {calculateServerPositionY(position.y)}</p>
+                                                <p className="mt-2 font-bold text-yellow-300">
+                                                    Movement Ratio: 1px in UI = {Math.round(selectedOverlay?.name === 'instagram-frame.png' ?
+                                                    (INSTAGRAM_WIDTH / previewDimensions.width) :
+                                                    (ACTUAL_WIDTH / previewDimensions.width))}px in server
+                                                </p>
                                             </div>
                                         )}
 

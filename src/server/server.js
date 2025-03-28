@@ -781,7 +781,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
 
         // Get metadata from the original photo
         const imgMetadata = await sharp(sourceImagePath).metadata();
-        console.log(`Processing photo with dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
+        console.log(`Processing Instagram photo with dimensions: ${imgMetadata.width}x${imgMetadata.height}`);
 
         // Calculate the center point
         const centerX = targetWidth / 2;
@@ -792,7 +792,11 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
         const scaledWidth = Math.round(imgMetadata.width * scale);
         const scaledHeight = Math.round(imgMetadata.height * scale);
 
-        console.log(`Applying template with scale: ${scale}, position: ${template.positionX},${template.positionY}, rotation: ${template.rotation}`);
+        // IMPORTANT: Extract position values with proper fallbacks
+        const posX = template.positionX || 0;
+        const posY = template.positionY || 0;
+
+        console.log(`Applying Instagram template with scale: ${scale}, position: ${posX},${posY}, rotation: ${template.rotation || 0}`);
         console.log(`Scaled dimensions: ${scaledWidth}x${scaledHeight}`);
 
         // Create a buffer of the scaled and rotated source image
@@ -803,7 +807,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
                 fit: 'contain',
                 background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
-            .rotate(template.rotation, {
+            .rotate(template.rotation || 0, {
                 background: { r: 255, g: 255, b: 255, alpha: 0 }
             })
             .toBuffer();
@@ -821,10 +825,11 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             .toBuffer();
 
         // Position the processed image on the white background
-        const positionX = Math.round(centerX - (scaledWidth / 2) + template.positionX);
-        const positionY = Math.round(centerY - (scaledHeight / 2) + template.positionY);
+        // IMPORTANT: Use the extracted values, not directly from template
+        const positionX = Math.round(centerX - (scaledWidth / 2) + posX);
+        const positionY = Math.round(centerY - (scaledHeight / 2) + posY);
 
-        console.log(`Positioning image at: ${positionX},${positionY} on ${targetWidth}x${targetHeight} canvas`);
+        console.log(`Positioning Instagram image at: ${positionX},${positionY} on ${targetWidth}x${targetHeight} canvas (center: ${centerX},${centerY}, offset: ${posX},${posY})`);
 
         const withPhotoComposite = await sharp(backgroundImage)
             .composite([
@@ -838,8 +843,8 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
 
         // Ensure overlay image exists
         if (!fs.existsSync(overlayImagePath)) {
-            console.error(`Overlay image not found: ${overlayImagePath}`);
-            throw new Error('Overlay image not found');
+            console.error(`Instagram overlay image not found: ${overlayImagePath}`);
+            throw new Error('Instagram overlay image not found');
         }
 
         // Add the Instagram overlay on top
@@ -853,13 +858,13 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
             .jpeg({ quality: 95 })
             .toFile(outputPath);
 
+        console.log(`Successfully applied Instagram template and saved to: ${outputPath}`);
         return true;
     } catch (error) {
         console.error('Error applying templated Instagram overlay:', error);
         throw error;
     }
 }
-
 /**
  * Processes a photo specifically for Instagram format (9:16 ratio)
  * @param {string} sourceImagePath - Path to the source image
