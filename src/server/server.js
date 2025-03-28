@@ -787,6 +787,13 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
         const centerX = targetWidth / 2;
         const centerY = targetHeight / 2;
 // Calculate maximum scale to fit within Instagram dimensions
+        const baseCanvasWidth = 1080;
+        const baseCanvasHeight = 1920;
+
+// If your UI scale is relative to 1080x1920, we scale the offset accordingly
+        const scaleX = targetWidth / baseCanvasWidth;
+        const scaleY = targetHeight / baseCanvasHeight;
+
 
         const maxScaleWidth = (targetWidth * 1.1) / imgMetadata.width;
         const maxScaleHeight = (targetHeight * 1.1) / imgMetadata.height;
@@ -833,8 +840,10 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
 
         // Position the processed image on the white background
         // IMPORTANT: Use the extracted values, not directly from template
-        const offsetX = template.positionX || 0;
-        const offsetY = template.positionY || 0;
+        const offsetX = (template.positionX || 0) * scaleX;
+        const offsetY = (template.positionY || 0) * scaleY;
+        console.log(`OFFSET${offsetX},${offsetY}scalee ${scaleX}x${scaleY} canvas (center: ${template.positionX},${template.positionY}`);
+
         const positionX = Math.round((targetWidth - scaledWidth) / 2 + offsetX);
         const positionY = Math.round((targetHeight - scaledHeight) / 2 + offsetY);
 
