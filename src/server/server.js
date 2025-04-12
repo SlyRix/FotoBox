@@ -1,7 +1,7 @@
 // server/index.js
 const express = require('express');
 const cors = require('cors');
-const { exec } = require('child_process');
+const {exec} = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
@@ -17,14 +17,14 @@ const config = require('./config');
 // ==========================================
 
 // File upload configuration
-const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
+const upload = multer({limits: {fileSize: 10 * 1024 * 1024}}); // 10MB limit
 
 // Counter for mosaic generation
 let photoCounter = 0;
 const MOSAIC_PHOTO_INTERVAL = 3; // Regenerate every 3rd photo
 
 // Track ongoing captures to prevent conflicts
-const captureInProgress = { status: false };
+const captureInProgress = {status: false};
 
 // Express app
 const app = express();
@@ -126,7 +126,7 @@ function createRequiredDirectories() {
         try {
             if (!fs.existsSync(dir)) {
                 console.log(`Creating directory: ${dir}`);
-                fs.mkdirSync(dir, { recursive: true });
+                fs.mkdirSync(dir, {recursive: true});
             }
         } catch (err) {
             console.error(`Failed to create directory ${dir}:`, err);
@@ -150,7 +150,7 @@ const frameTemplates = {};
 function loadTemplatesFromDisk() {
     try {
         if (!fs.existsSync(TEMPLATES_DIR)) {
-            fs.mkdirSync(TEMPLATES_DIR, { recursive: true });
+            fs.mkdirSync(TEMPLATES_DIR, {recursive: true});
             return;
         }
 
@@ -179,7 +179,7 @@ function loadTemplatesFromDisk() {
 function saveTemplateToDisk(overlayName, template) {
     try {
         if (!fs.existsSync(TEMPLATES_DIR)) {
-            fs.mkdirSync(TEMPLATES_DIR, { recursive: true });
+            fs.mkdirSync(TEMPLATES_DIR, {recursive: true});
         }
 
         const filePath = path.join(TEMPLATES_DIR, `${overlayName}.json`);
@@ -226,7 +226,7 @@ let activeStreams = new Map(); // Track active streaming clients
 function setupWebSocketServer(server) {
     console.log('=== SETTING UP WEBSOCKET SERVER ===');
 
-    wsServer = new WebSocket.Server({ server });
+    wsServer = new WebSocket.Server({server});
     console.log(`WebSocket server created: ${wsServer ? 'YES' : 'NO'}`);
 
     wsServer.on('connection', (ws, req) => {
@@ -234,7 +234,7 @@ function setupWebSocketServer(server) {
         console.log(`New WebSocket connection from ${req.socket.remoteAddress} (ID: ${clientId})`);
 
         // Store client in our map
-        activeStreams.set(clientId, { ws, isStreaming: false });
+        activeStreams.set(clientId, {ws, isStreaming: false});
 
         // Send welcome message
         ws.send(JSON.stringify({
@@ -249,7 +249,7 @@ function setupWebSocketServer(server) {
                 const data = JSON.parse(message);
 
                 if (data.type === 'ping') {
-                    ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+                    ws.send(JSON.stringify({type: 'pong', timestamp: Date.now()}));
                     return;
                 }
 
@@ -379,7 +379,8 @@ function startWebcamPreview() {
                 }
 
                 // Delete the preview file to save space
-                fs.unlink(previewPath, () => { });
+                fs.unlink(previewPath, () => {
+                });
             });
         });
     };
@@ -428,7 +429,8 @@ function stopWebcamPreview() {
             if (err) return;
             for (const file of files) {
                 if (file.startsWith('preview_')) {
-                    fs.unlink(path.join(PREVIEW_DIR, file), () => { });
+                    fs.unlink(path.join(PREVIEW_DIR, file), () => {
+                    });
                 }
             }
         });
@@ -484,9 +486,9 @@ async function processPhotoWithDualFormats(sourceFilePath, filename) {
                     width: 2480,         // ~A5 at 300dpi
                     height: 1748,        // A5-landscape (1.414:1)
                     fit: 'contain',      // Fit image in frame without cropping
-                    background: { r: 255, g: 255, b: 255 } // White background
+                    background: {r: 255, g: 255, b: 255} // White background
                 })
-                .jpeg({ quality: 90 })
+                .jpeg({quality: 90})
                 .toFile(printPath);
             console.log(`Print version saved: ${printPath}`);
         } catch (printError) {
@@ -642,9 +644,9 @@ async function applyOverlayToImage(sourceImagePath, overlayImagePath, outputPath
         // Composite them together
         await sharp(sourceImagePath)
             .composite([
-                { input: resizedOverlay, gravity: 'center' }
+                {input: resizedOverlay, gravity: 'center'}
             ])
-            .jpeg({ quality: 95 })
+            .jpeg({quality: 95})
             .toFile(outputPath);
 
         return true;
@@ -697,7 +699,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
                 width: CANVAS_WIDTH,
                 height: CANVAS_HEIGHT,
                 channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 1 }
+                background: {r: 255, g: 255, b: 255, alpha: 1}
             }
         }).png().toBuffer();
 
@@ -715,10 +717,10 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
                 width: scaledWidth,
                 height: scaledHeight,
                 fit: 'contain',
-                background: { r: 255, g: 255, b: 255, alpha: 0 }
+                background: {r: 255, g: 255, b: 255, alpha: 0}
             })
             .rotate(template.rotation || 0, {
-                background: { r: 255, g: 255, b: 255, alpha: 0 }
+                background: {r: 255, g: 255, b: 255, alpha: 0}
             })
             .toBuffer();
 
@@ -740,7 +742,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
 
         // Add the photo to the white canvas
         const canvasWithPhoto = await sharp(baseCanvas)
-            .composite([{ input: processedPhoto, left, top }])
+            .composite([{input: processedPhoto, left, top}])
             .toBuffer();
 
         // Resize the overlay to fill the entire canvas
@@ -754,8 +756,8 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
 
         // Apply the overlay on top of the photo
         await sharp(canvasWithPhoto)
-            .composite([{ input: resizedOverlay, left: 0, top: 0 }])
-            .jpeg({ quality: 95 })
+            .composite([{input: resizedOverlay, left: 0, top: 0}])
+            .jpeg({quality: 95})
             .toFile(outputPath);
 
         console.log(`Successfully applied template and saved to: ${outputPath}`);
@@ -765,6 +767,7 @@ async function applyTemplatedOverlay(sourceImagePath, overlayImagePath, outputPa
         throw error;
     }
 }
+
 /**
  * Applies an Instagram template to a photo
  * @param {string} sourceImagePath - Path to the source image
@@ -802,7 +805,8 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
 
 // Use provided scale but constrain it
         const relativeScale = Math.min(Math.max(template.scale || 1, 0.1), 1); // clamp between 10% and 100%
-        const scale = maxScale * relativeScale;        const scaledWidth = Math.round(imgMetadata.width * scale);
+        const scale = maxScale * relativeScale;
+        const scaledWidth = Math.round(imgMetadata.width * scale);
         const scaledHeight = Math.round(imgMetadata.height * scale);
         console.log(`targetscale ${template.scale}`);
 
@@ -819,10 +823,10 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
                 width: scaledWidth,
                 height: scaledHeight,
                 fit: 'contain',
-                background: { r: 255, g: 255, b: 255, alpha: 0 }
+                background: {r: 255, g: 255, b: 255, alpha: 0}
             })
             .rotate(template.rotation || 0, {
-                background: { r: 255, g: 255, b: 255, alpha: 0 }
+                background: {r: 255, g: 255, b: 255, alpha: 0}
             })
             .toBuffer();
 
@@ -832,7 +836,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
                 width: targetWidth,
                 height: targetHeight,
                 channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 1 }
+                background: {r: 255, g: 255, b: 255, alpha: 1}
             }
         })
             .jpeg()
@@ -873,7 +877,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
                     gravity: 'center'
                 }
             ])
-            .jpeg({ quality: 95 })
+            .jpeg({quality: 95})
             .toFile(outputPath);
 
         console.log(`Successfully applied Instagram template and saved to: ${outputPath}`);
@@ -883,6 +887,7 @@ async function applyTemplatedInstagramOverlay(sourceImagePath, overlayImagePath,
         throw error;
     }
 }
+
 /**
  * Processes a photo specifically for Instagram format (9:16 ratio)
  * @param {string} sourceImagePath - Path to the source image
@@ -937,7 +942,7 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
                     width: targetWidth,
                     height: targetHeight,
                     channels: 4,
-                    background: { r: 255, g: 255, b: 255, alpha: 1 } // White background
+                    background: {r: 255, g: 255, b: 255, alpha: 1} // White background
                 }
             })
                 .jpeg()
@@ -956,7 +961,7 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
                     width: isPortrait ? null : Math.min(targetWidth, imageMetadata.width),
                     height: isPortrait ? Math.min(targetHeight, imageMetadata.height) : null,
                     fit: 'contain',
-                    background: { r: 255, g: 255, b: 255, alpha: 0 }
+                    background: {r: 255, g: 255, b: 255, alpha: 0}
                 })
                 .toBuffer();
 
@@ -978,7 +983,7 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
                         gravity: 'center'
                     }
                 ])
-                .jpeg({ quality: 95 })
+                .jpeg({quality: 95})
                 .toFile(outputPath);
 
             return true;
@@ -994,7 +999,7 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
                         width: targetWidth,
                         height: targetHeight,
                         channels: 4,
-                        background: { r: 255, g: 255, b: 255, alpha: 1 }
+                        background: {r: 255, g: 255, b: 255, alpha: 1}
                     }
                 })
                     .composite([
@@ -1003,7 +1008,7 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
                             gravity: 'center'
                         }
                     ])
-                    .jpeg({ quality: 95 })
+                    .jpeg({quality: 95})
                     .toFile(outputPath);
 
                 return true;
@@ -1027,7 +1032,7 @@ async function processInstagramPhoto(sourceImagePath, overlayImagePath, outputPa
 async function generateThumbnail(sourceFilePath, filename) {
     // Ensure thumbnail directory exists
     if (!fs.existsSync(THUMBNAILS_DIR)) {
-        fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
+        fs.mkdirSync(THUMBNAILS_DIR, {recursive: true});
     }
 
     const thumbnailPath = path.join(THUMBNAILS_DIR, `thumb_${filename}`);
@@ -1049,9 +1054,9 @@ async function generateThumbnail(sourceFilePath, filename) {
                 width: 424,         // A5-landscape (1.414:1)
                 height: 300,
                 fit: 'contain',     // Don't crop image
-                background: { r: 255, g: 255, b: 255 } // White background
+                background: {r: 255, g: 255, b: 255} // White background
             })
-            .jpeg({ quality: 80, progressive: true })
+            .jpeg({quality: 80, progressive: true})
             .toFile(thumbnailPath);
 
         console.log(`Thumbnail created: ${thumbnailPath}`);
@@ -1088,7 +1093,7 @@ async function ensureInstagramFrameExists() {
                     width: width,
                     height: height,
                     channels: 4,
-                    background: { r: 176, g: 137, b: 104, alpha: 1 }  // wedding-love color
+                    background: {r: 176, g: 137, b: 104, alpha: 1}  // wedding-love color
                 }
             });
 
@@ -1148,7 +1153,7 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
 
         // Ensure QR directory exists
         if (!fs.existsSync(QR_DIR)) {
-            fs.mkdirSync(QR_DIR, { recursive: true });
+            fs.mkdirSync(QR_DIR, {recursive: true});
         }
 
         // Generate or get thumbnail URL
@@ -1403,7 +1408,7 @@ app.get('/api/photos', (req, res) => {
 
     fs.readdir(dirToScan, (err, files) => {
         if (err) {
-            return res.status(500).json({ error: 'Error retrieving photos' });
+            return res.status(500).json({error: 'Error retrieving photos'});
         }
 
         // Filter for image files
@@ -1729,15 +1734,15 @@ app.delete('/api/photos/:filename', (req, res) => {
     }
 
     if (success) {
-        res.json({ success: true, message: 'All photo versions deleted successfully' });
+        res.json({success: true, message: 'All photo versions deleted successfully'});
     } else {
-        res.status(500).json({ success: false, error: errorMessage });
+        res.status(500).json({success: false, error: errorMessage});
     }
 });
 
 // Send print request
 app.post('/api/photos/print', (req, res) => {
-    const { filename } = req.body;
+    const {filename} = req.body;
 
     if (!filename) {
         return res.status(400).json({
@@ -1770,46 +1775,62 @@ app.post('/api/photos/print', (req, res) => {
 
     console.log(`Print request received for: ${printFilename}`);
 
-    // Construct the print command for the Canon SELPHY CP1500
-    // -o media=Postcard is for 4x6" paper
-    // -o fit-to-page will ensure the image is properly sized
-    // -o borderless=true for borderless printing (if supported)
-    const printCommand = `${config.printing.printCommand} ${config.printing.printerName} -o media=${config.printing.paperSize} -o fit-to-page -o borderless=${config.printing.printFormat === 'borderless' ? 'true' : 'false'} "${filepath}"`;
+    const processedPrintPath = path.join(PRINT_PHOTOS_DIR, `selphy_${printFilename}`);
 
-    // Execute the print command
-    exec(printCommand, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Print error: ${error.message}`);
+    // ImageMagick processing before printing
+    const convertCommand = `convert "${filepath}" -resize 1548x1088^ -gravity center -extent 1548x1088 -colorspace RGB -density 300 "${processedPrintPath}"`;
+
+    exec(convertCommand, (convertError, convertStdout, convertStderr) => {
+        if (convertError) {
+            console.error(`Convert error: ${convertError.message}`);
             return res.status(500).json({
                 success: false,
-                error: 'Failed to print photo',
-                details: error.message
+                error: 'Failed to preprocess photo for printing',
+                details: convertError.message
             });
         }
 
-        if (stderr) {
-            console.warn(`Print warning: ${stderr}`);
-        }
+        // Construct the print command for the Canon SELPHY CP1500
+        // -o media=Postcard is for 4x6" paper
+        // -o fit-to-page will ensure the image is properly sized
+        // -o borderless=true for borderless printing (if supported)
+        const printCommand = `${config.printing.printCommand} ${config.printing.printerName} -o media=${config.printing.paperSize} -o fit-to-page -o borderless=${config.printing.printFormat === 'borderless' ? 'true' : 'false'} "${processedPrintPath}"`;
 
-        // Get job ID from stdout if available (usually in the format "request id is PRINTER-X")
-        let jobId = null;
-        const match = stdout.match(/request id is (\S+)/i);
-        if (match && match[1]) {
-            jobId = match[1];
-        }
+        // Execute the print command
+        exec(printCommand, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Print error: ${error.message}`);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to print photo',
+                    details: error.message
+                });
+            }
 
-        console.log(`Print job submitted successfully: ${jobId || 'unknown job ID'}`);
+            if (stderr) {
+                console.warn(`Print warning: ${stderr}`);
+            }
 
-        res.json({
-            success: true,
-            message: 'Print request sent to printer',
-            jobId: jobId,
-            filename: printFilename
+            // Get job ID from stdout if available (usually in the format "request id is PRINTER-X")
+            let jobId = null;
+            const match = stdout.match(/request id is (\S+)/i);
+            if (match && match[1]) {
+                jobId = match[1];
+            }
+
+            console.log(`Print job submitted successfully: ${jobId || 'unknown job ID'}`);
+
+            res.json({
+                success: true,
+                message: 'Print request sent to printer',
+                jobId: jobId,
+                filename: printFilename
+            });
         });
     });
 });
 app.get('/api/print-status/:jobId', (req, res) => {
-    const { jobId } = req.params;
+    const {jobId} = req.params;
 
     if (!jobId) {
         return res.status(400).json({
@@ -1840,10 +1861,11 @@ app.get('/api/print-status/:jobId', (req, res) => {
         });
     });
 });
+
 /**
-* Checks if the printer is ready and available
-* @returns {Promise<boolean>} True if printer is ready, false otherwise
-*/
+ * Checks if the printer is ready and available
+ * @returns {Promise<boolean>} True if printer is ready, false otherwise
+ */
 async function isPrinterReady() {
     return new Promise((resolve) => {
         if (!config.printing.enabled) {
@@ -2082,7 +2104,7 @@ app.post('/api/admin/overlays', upload.single('overlay'), async (req, res) => {
 
     // Ensure overlays directory exists
     if (!fs.existsSync(OVERLAYS_DIR)) {
-        fs.mkdirSync(OVERLAYS_DIR, { recursive: true });
+        fs.mkdirSync(OVERLAYS_DIR, {recursive: true});
     }
 
     const overlayPath = path.join(OVERLAYS_DIR, overlayName);
@@ -2251,7 +2273,7 @@ app.get('/api/mosaic', async (req, res) => {
                 width: mosaicWidth,
                 height: mosaicHeight,
                 channels: 4,
-                background: { r: 255, g: 255, b: 255, alpha: 0.2 } // Translucent background
+                background: {r: 255, g: 255, b: 255, alpha: 0.2} // Translucent background
             }
         });
 
@@ -2390,7 +2412,7 @@ app.get('/api/mosaic/info', async (req, res) => {
 
 // Save or update a frame template
 app.post('/api/admin/frame-templates', (req, res) => {
-    const { overlayName, template } = req.body;
+    const {overlayName, template} = req.body;
 
     if (!overlayName || !template) {
         return res.status(400).json({
@@ -2431,7 +2453,7 @@ app.post('/api/admin/frame-templates', (req, res) => {
 
 // Get a specific frame template
 app.get('/api/admin/frame-templates/:overlayName', (req, res) => {
-    const { overlayName } = req.params;
+    const {overlayName} = req.params;
 
     if (frameTemplates[overlayName]) {
         return res.json({
@@ -2470,7 +2492,7 @@ app.get('/api/admin/frame-templates', (req, res) => {
 
 // Delete a frame template
 app.delete('/api/admin/frame-templates/:overlayName', (req, res) => {
-    const { overlayName } = req.params;
+    const {overlayName} = req.params;
 
     if (frameTemplates[overlayName]) {
         delete frameTemplates[overlayName];
@@ -2491,7 +2513,7 @@ app.delete('/api/admin/frame-templates/:overlayName', (req, res) => {
 });
 app.post('/api/photos/:filename/filter', async (req, res) => {
     const photoId = req.params.filename;
-    const { filter } = req.body;
+    const {filter} = req.body;
 
     if (!photoId || !filter) {
         return res.status(400).json({
@@ -2541,7 +2563,7 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
                     saturation: 1.05
                 })
                 .sharpen(0.5)
-                .toFormat('jpeg', { quality: 90 })
+                .toFormat('jpeg', {quality: 90})
                 .toFile(filteredPhotoPath);
 
             // Create a temporary file for the vignette effect
@@ -2587,7 +2609,7 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
 
             // Save the filtered image
             await sharpImage
-                .toFormat('jpeg', { quality: 90 })
+                .toFormat('jpeg', {quality: 90})
                 .toFile(filteredPhotoPath);
         }
 
@@ -2614,7 +2636,7 @@ async function applyVignetteEffect(inputPath, outputPath) {
     try {
         // Get dimensions of the input image
         const metadata = await sharp(inputPath).metadata();
-        const { width, height } = metadata;
+        const {width, height} = metadata;
 
         // Create a radial gradient for vignette effect
         const svgVignette = `
@@ -2658,7 +2680,7 @@ function getFilterParams(filter) {
             };
         case 'sepia':
             return {
-                sepia: { r: 112, g: 66, b: 20 },
+                sepia: {r: 112, g: 66, b: 20},
                 modulate: {
                     brightness: 1.1,
                     saturation: 0.8
@@ -2680,7 +2702,7 @@ function getFilterParams(filter) {
                     contrast: 0.95,
                     saturation: 1.15
                 },
-                sepia: { r: 255, g: 222, b: 213 }
+                sepia: {r: 255, g: 222, b: 213}
             };
         case 'forever':
             return {
@@ -2697,6 +2719,7 @@ function getFilterParams(filter) {
             return {};
     }
 }
+
 // ==========================================
 // SERVER INITIALIZATION
 // ==========================================
