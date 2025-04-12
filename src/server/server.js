@@ -1778,7 +1778,7 @@ app.post('/api/photos/print', (req, res) => {
     const processedPrintPath = path.join(PRINT_PHOTOS_DIR, `selphy_${printFilename}`);
 
     // ImageMagick processing before printing
-    const convertCommand = `convert "${filepath}" -resize 1548x1088^ -gravity center -extent 1548x1088 -colorspace RGB -density 300 "${processedPrintPath}"`;
+    const convertCommand = `convert "${filepath}" -resize 1548x1088^ -gravity center -extent 1548x1088 -colorspace RGB -density 300 -quality 100 -interlace none -strip "${processedPrintPath}"`;
 
     exec(convertCommand, (convertError, convertStdout, convertStderr) => {
         if (convertError) {
