@@ -1794,7 +1794,7 @@ app.post('/api/photos/print', (req, res) => {
         // -o media=Postcard is for 4x6" paper
         // -o fit-to-page will ensure the image is properly sized
         // -o borderless=true for borderless printing (if supported)
-        const printCommand = `${config.printing.printCommand} ${config.printing.printerName} -o media=${config.printing.paperSize} -o fit-to-page -o borderless=${config.printing.printFormat === 'borderless' ? 'true' : 'false'} "${processedPrintPath}"`;
+        const printCommand = `${config.printing.printCommand} ${config.printing.printerName} -o media=Postcard -o fit-to-page -o borderless=true -o ColorModel=RGB -o StpBorderless=True -o StpColorPrecision=Best -o Resolution=300dpi -o StpColorCorrection=Accurate -o StpImageType=Photo -o StpShrinkOutput=Crop -o StpLegacyDyesubGamma=False "${processedPrintPath}"`;
 
         // Execute the print command
         exec(printCommand, (error, stdout, stderr) => {
