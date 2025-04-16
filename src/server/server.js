@@ -1141,13 +1141,15 @@ async function ensureInstagramFrameExists() {
  */
 async function generateQRAndRespond(req, res, filename, timestamp, processedPhotos = null) {
     try {
+        // Get uploader instance
+        const { getPhotoUploader } = require('./photoUploader');
+        const uploader = getPhotoUploader();
+
         // Get the base filename WITHOUT removing file extension (keep the .jpg)
         const baseFilename = filename;
-        const photoViewDomain = 'photo-view.slyrix.com';
 
-        // Get the client domain
-        // Create the correct photo URL - exactly matching the format shown in admin dashboard
-        const photoViewUrl = `https://${photoViewDomain}/photo/${baseFilename}`;
+        // Use home server URL from config
+        const photoViewUrl = config.homeServer.photoViewUrlFormat.replace('{photoId}', baseFilename);
 
         console.log(`Generating QR code for URL: ${photoViewUrl}`);
 
@@ -1178,9 +1180,42 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
             },
             margin: 1,
             width: 300  // Larger QR for better scanning
-        }, (qrErr) => {
+        }, async (qrErr) => {
             if (qrErr) {
                 console.error(`Error generating QR code: ${qrErr.message}`);
+            }
+
+            // Create metadata for upload
+            const metadata = {
+                filename: filename,
+                timestamp: Date.now(),
+                photoViewUrl: photoViewUrl,
+                originalPi: config.server.host,
+                event: config.app.title
+            };
+
+            // Queue photo for upload to home server if enabled
+            let uploadStatus = { success: true, pending: false };
+            if (config.homeServer.enabled) {
+                try {
+                    // Use original photo path for best quality upload
+                    const originalPath = processedPhotos && processedPhotos.originalPath
+                        ? processedPhotos.originalPath
+                        : path.join(ORIGINALS_DIR, `original_${filename}`);
+
+                    // Get thumbnail path
+                    const thumbPath = path.join(THUMBNAILS_DIR, `thumb_${filename}`);
+
+                    // Queue for upload
+                    uploadStatus = await uploader.queuePhotoForUpload(
+                        originalPath,
+                        metadata,
+                        fs.existsSync(thumbPath) ? thumbPath : null
+                    );
+                } catch (uploadErr) {
+                    console.error(`Error queueing photo for upload: ${uploadErr.message}`);
+                    // Continue anyway to send local response
+                }
             }
 
             // Send response with all URLs
@@ -1192,7 +1227,9 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
                     thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
                     qrUrl: `/qrcodes/${qrFilename}`,
                     photoViewUrl: photoViewUrl,  // Include the actual URL the QR code points to
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    uploadPending: uploadStatus.pending || false,
+                    uploadMessage: uploadStatus.message || null
                 }
             });
         });
