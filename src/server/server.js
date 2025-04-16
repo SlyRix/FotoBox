@@ -1218,6 +1218,7 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
                     // Continue anyway to send local response
                 }
             }
+            uploadStatus = uploadStatus || { success: false, pending: false, message: null };
 
             // Send response with all URLs
             res.json({
