@@ -1235,6 +1235,7 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
         });
     } catch (error) {
         console.error('Error in generateQRAndRespond:', error);
+        uploadStatus = { success: false, pending: false, message: uploadErr.message };
         // Send a basic response in case of error
         res.json({
             success: true,
