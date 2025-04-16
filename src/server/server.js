@@ -1213,6 +1213,7 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
                         fs.existsSync(thumbPath) ? thumbPath : null
                     );
                 } catch (uploadErr) {
+                    uploadStatus = { success: false, pending: false, message: uploadErr.message };
                     console.error(`Error queueing photo for upload: ${uploadErr.message}`);
                     // Continue anyway to send local response
                 }
@@ -1235,7 +1236,6 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
         });
     } catch (error) {
         console.error('Error in generateQRAndRespond:', error);
-        uploadStatus = { success: false, pending: false, message: uploadErr.message };
         // Send a basic response in case of error
         res.json({
             success: true,
