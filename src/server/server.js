@@ -12,6 +12,9 @@ const compression = require('compression');
 const sharp = require('sharp');
 const multer = require('multer');
 const config = require('./config');
+const { getPhotoUploader } = require('./photoUploader');
+
+
 // ==========================================
 // CONFIGURATION AND INITIALIZATION
 // ==========================================
@@ -2630,7 +2633,32 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
         });
     }
 });
+// Add a status API endpoint for the uploader
+app.get('/api/upload-status', (req, res) => {
+    if (!config.homeServer.enabled) {
+        return res.json({
+            enabled: false,
+            message: 'Photo uploader is disabled in config'
+        });
+    }
 
+    try {
+        const uploader = getPhotoUploader();
+        const pendingUploads = uploader.getAllPendingUploads();
+
+        res.json({
+            enabled: true,
+            online: uploader.isOnline,
+            pendingCount: pendingUploads.length,
+            pendingUploads: pendingUploads
+        });
+    } catch (error) {
+        res.status(500).json({
+            enabled: true,
+            error: `Failed to get uploader status: ${error.message}`
+        });
+    }
+});
 // Create a vignette effect overlay (for the Forever filter)
 async function applyVignetteEffect(inputPath, outputPath) {
     try {
@@ -2735,6 +2763,17 @@ server.listen(PORT, async () => {
     // Run diagnostics
     runDiagnostics();
 
+
+    if (config.homeServer.enabled) {
+        try {
+            const uploader = getPhotoUploader();
+            console.log(`Photo uploader initialized - connected to ${config.homeServer.url}`);
+        } catch (error) {
+            console.error(`Failed to initialize photo uploader: ${error.message}`);
+        }
+    } else {
+        console.log('Photo uploader disabled in config');
+    }
     // Create all required directories
     const directoriesCreated = createRequiredDirectories();
     if (!directoriesCreated) {
@@ -2758,6 +2797,14 @@ server.listen(PORT, async () => {
 process.on('SIGINT', () => {
     if (previewInterval) {
         clearInterval(previewInterval);
+    }
+    if (config.homeServer.enabled) {
+        try {
+            const uploader = getPhotoUploader();
+            uploader.shutdown();
+        } catch (error) {
+            console.error(`Error shutting down photo uploader: ${error.message}`);
+        }
     }
     console.log('Server shutting down gracefully...');
     process.exit();

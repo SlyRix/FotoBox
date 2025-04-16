@@ -46,6 +46,24 @@ const config = {
         title: 'Rushel & Sivani Wedding FotoBox',
         baseUrl: process.env.BASE_URL || 'http://localhost:5000',
         clientUrl: process.env.CLIENT_URL || 'http://localhost:3000'
+    },
+    // Home server configuration for photo upload
+    homeServer: {
+        enabled: true,              // Set to false to disable uploads (offline mode)
+        url: 'https://photo-view.slyrix.com',
+        apiKey: 'your-secret-api-key',  // IMPORTANT: Use the same key as on the server!
+        uploadEndpoint: '/api/upload-photo',
+        statusEndpoint: '/api/status',
+        photoViewUrlFormat: 'https://photo-view.slyrix.com/photo/{photoId}'
+    },
+
+// Upload settings
+    upload: {
+        maxRetries: 5,              // Maximum number of upload attempts
+        retryDelay: 30000,          // 30 seconds between retries
+        checkInterval: 300000,      // 5 minutes between connection checks
+        deleteAfterUpload: false,   // Whether to delete local files after successful upload
+        batchSize: 5                // Number of photos to upload in parallel
     }
 };
 
