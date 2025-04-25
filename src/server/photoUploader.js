@@ -19,7 +19,7 @@ class PhotoUploader {
     constructor() {
         this.homeServerUrl = config.homeServer.url || 'https://photo-view.slyrix.com';
         this.uploadEndpoint = `${this.homeServerUrl}/api/upload-photo`;
-        this.apiKey = config.homeServer.apiKey || 'your-secret-api-key';
+        this.apiKey = config.homeServer.apiKey || 'xP9dR7tK2mB5vZ3q';
         this.pendingUploads = new Map(); // Map to track in-progress uploads
         this.isOnline = false;
         this.checkIntervalId = null;
