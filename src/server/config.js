@@ -49,9 +49,9 @@ const config = {
     },
     // Home server configuration for photo upload
     homeServer: {
-        enabled: true,              // Set to false to disable uploads (offline mode)
+        enabled: true,
         url: 'https://photo-view.slyrix.com',
-        apiKey: 'your-secret-api-key',  // IMPORTANT: Use the same key as on the server!
+        apiKey: 'xP9dR7tK2mB5vZ3q',  // REPLACE THIS with your actual API key
         uploadEndpoint: '/api/upload-photo',
         statusEndpoint: '/api/status',
         photoViewUrlFormat: 'https://photo-view.slyrix.com/photo/{photoId}'

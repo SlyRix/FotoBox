@@ -1,4 +1,4 @@
-// photoUploader.js - Handles uploading photos to home server with retry functionality
+// Enhanced photoUploader.js with better error handling and retry logic
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
@@ -19,7 +19,7 @@ class PhotoUploader {
     constructor() {
         this.homeServerUrl = config.homeServer.url || 'https://photo-view.slyrix.com';
         this.uploadEndpoint = `${this.homeServerUrl}/api/upload-photo`;
-        this.apiKey = config.homeServer.apiKey || '';
+        this.apiKey = config.homeServer.apiKey || 'your-secret-api-key';
         this.pendingUploads = new Map(); // Map to track in-progress uploads
         this.isOnline = false;
         this.checkIntervalId = null;
@@ -27,6 +27,28 @@ class PhotoUploader {
         this.maxRetries = config.upload.maxRetries || 5;
         this.retryDelay = config.upload.retryDelay || 30000; // 30 seconds
         this.checkInterval = config.upload.checkInterval || 300000; // 5 minutes
+
+        // Enhanced axios instance with better error handling
+        this.api = axios.create({
+            baseURL: this.homeServerUrl,
+            timeout: 30000, // 30 seconds
+            headers: {
+                'X-API-Key': this.apiKey
+            }
+        });
+
+        // Set up response interceptor for better error logging
+        this.api.interceptors.response.use(
+            response => response,
+            error => {
+                logger.error(`API Error: ${error.message}`);
+                if (error.response) {
+                    logger.error(`Status: ${error.response.status}`);
+                    logger.error(`Data: ${JSON.stringify(error.response.data)}`);
+                }
+                return Promise.reject(error);
+            }
+        );
 
         // Load any pending uploads from disk
         this.loadPendingUploads();
@@ -41,12 +63,12 @@ class PhotoUploader {
      */
     async checkConnection() {
         try {
-            const response = await axios.get(`${this.homeServerUrl}/api/status`, {
-                timeout: 5000,
-                headers: { 'X-API-Key': this.apiKey }
-            });
+            logger.info(`Checking connection to ${this.homeServerUrl}/api/status`);
+            const response = await this.api.get('/api/status', { timeout: 5000 });
             const wasOnline = this.isOnline;
             this.isOnline = response.status === 200;
+
+            logger.info(`Connection status: ${this.isOnline ? 'ONLINE' : 'OFFLINE'}`);
 
             // If we just came online, trigger upload of pending photos
             if (!wasOnline && this.isOnline) {
@@ -56,6 +78,7 @@ class PhotoUploader {
 
             return this.isOnline;
         } catch (error) {
+            logger.error(`Connection check failed: ${error.message}`);
             this.isOnline = false;
             return false;
         }
@@ -179,6 +202,16 @@ class PhotoUploader {
 
         logger.info(`Queueing photo for upload: ${photoId}`);
 
+        // Verify the photo file exists
+        if (!fs.existsSync(photoPath)) {
+            logger.error(`Photo file does not exist: ${photoPath}`);
+            return {
+                success: false,
+                pending: false,
+                message: `Photo file does not exist: ${photoPath}`
+            };
+        }
+
         // Create upload data
         const uploadData = {
             photoPath,
@@ -262,6 +295,13 @@ class PhotoUploader {
                     lastError: error.message
                 });
 
+                // Also update the file on disk
+                this.saveUploadInfo(photoId, {
+                    ...uploadData,
+                    retries: retries + 1,
+                    lastError: error.message
+                });
+
                 logger.error(`Upload failed for ${photoId} (attempt ${retries + 1}/${this.maxRetries}): ${error.message}`);
             }
         }
@@ -301,6 +341,14 @@ class PhotoUploader {
         // Add metadata
         form.append('metadata', JSON.stringify(metadata));
 
+        // Log what we're uploading
+        logger.info(`Uploading photo: ${metadata.filename}`);
+        logger.info(`Upload endpoint: ${this.uploadEndpoint}`);
+        logger.info(`Metadata: ${JSON.stringify({
+            ...metadata,
+            thumbnailIncluded: !!thumbnailPath && fs.existsSync(thumbnailPath)
+        })}`);
+
         try {
             const response = await axios.post(this.uploadEndpoint, form, {
                 headers: {
@@ -310,9 +358,20 @@ class PhotoUploader {
                 timeout: 30000 // 30 second timeout
             });
 
+            logger.info(`Upload response: ${JSON.stringify(response.data)}`);
             return response.data;
         } catch (error) {
+            // Enhanced error logging
             logger.error(`Upload error: ${error.message}`);
+
+            if (error.response) {
+                logger.error(`Status: ${error.response.status}`);
+                logger.error(`Headers: ${JSON.stringify(error.response.headers)}`);
+                logger.error(`Data: ${JSON.stringify(error.response.data || 'No data')}`);
+            } else if (error.request) {
+                logger.error('No response received from server');
+            }
+
             throw error;
         }
     }
