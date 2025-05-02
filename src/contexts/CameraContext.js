@@ -139,6 +139,7 @@ export const CameraProvider = ({ children }) => {
         setPreviewStatus('connecting');
 
         const ws = new WebSocket(wsUrl);
+        console.log("WebSocket object created");
 
         ws.onopen = () => {
             console.log('WebSocket connection established');
@@ -152,6 +153,7 @@ export const CameraProvider = ({ children }) => {
             // Start ping interval to keep connection alive
             const pingInterval = setInterval(() => {
                 if (ws.readyState === WebSocket.OPEN) {
+                    console.log('Sending immediate startPreview test');
                     ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
                 } else {
                     clearInterval(pingInterval);
