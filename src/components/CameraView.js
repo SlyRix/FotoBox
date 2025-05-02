@@ -39,14 +39,14 @@ const CameraView = () => {
         img.onerror = () => {
             setStreamActive(false);
         };
-        img.src = `${SNAPSHOT_URL}&t=${Date.now()}`;
+        img.src = `${SNAPSHOT_URL}`;
 
         // Poll occasionally to check if stream becomes available
         const interval = setInterval(() => {
             const newImg = new Image();
             newImg.onload = () => setStreamActive(true);
             newImg.onerror = () => setStreamActive(false);
-            newImg.src = `${SNAPSHOT_URL}&t=${Date.now()}`;
+            newImg.src = `${SNAPSHOT_URL}`;
         }, 5000);
 
         return () => clearInterval(interval);
