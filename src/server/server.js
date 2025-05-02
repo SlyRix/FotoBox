@@ -1399,11 +1399,16 @@ function regenerateMosaicInBackground() {
 function runDiagnostics() {
     console.log('=== FOTOBOX SERVER DIAGNOSTICS ===');
     try {
-        exec('fswebcam --version', (error, stdout) => {
+        exec('which fswebcam', (error, stdout) => {
             if (error) {
-                console.log(`fswebcam available: NO - ${error.message}`);
+                console.log(`fswebcam available: NO - Command not found`);
             } else {
-                console.log(`fswebcam available: YES - ${stdout.split('\n')[0]}`);
+                const fswebcamPath = stdout.trim();
+                console.log(`fswebcam available: YES - Path: ${fswebcamPath}`);
+                // Try to get version with full path
+                exec(`${fswebcamPath} --version 2>&1`, (versionError, versionStdout) => {
+                    console.log(`fswebcam version: ${versionStdout.trim()}`);
+                });
             }
         });
 
