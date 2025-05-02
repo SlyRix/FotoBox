@@ -28,7 +28,7 @@ const CameraView = () => {
 
     // Hard-coded stream URL that we know works
     const STREAM_URL = "http://raspberrypi5.local:8081/stream";
-    const SNAPSHOT_URL = "http://raspberrypi5.local:8081/stream";
+    const SNAPSHOT_URL = "http://raspberrypi5.local:8081/snapshot";
 
     // Check if webcam stream is available on mount
     useEffect(() => {
@@ -39,7 +39,7 @@ const CameraView = () => {
         img.onerror = () => {
             setStreamActive(false);
         };
-        img.src = `${SNAPSHOT_URL}?t=${Date.now()}`;
+        img.src = `${SNAPSHOT_URL}&t=${Date.now()}`;
 
         // Poll occasionally to check if stream becomes available
         const interval = setInterval(() => {
