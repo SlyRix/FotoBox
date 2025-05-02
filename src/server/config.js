@@ -17,6 +17,7 @@ const config = {
 
     // Camera settings
     camera: {
+        webcamDevice: '/dev/video0',  // Explicitly set based on your logs
         captureCommand: 'gphoto2 --capture-image-and-download --filename',
         detectCommand: 'gphoto2 --auto-detect'
     },

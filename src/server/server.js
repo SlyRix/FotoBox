@@ -340,21 +340,78 @@ function startWebcamPreview() {
         message: 'Starting webcam preview...'
     });
 
-    // Function to capture and send preview frame
+    // Get webcam device from config or use default
+    const webcamDevice = config.camera && config.camera.webcamDevice ? config.camera.webcamDevice : '/dev/video0';
+
+    // Function to capture and send preview frame with improved error handling
     const capturePreviewFrame = () => {
         const timestamp = Date.now();
         const previewPath = path.join(PREVIEW_DIR, `preview_${timestamp}.jpg`);
+        console.log(`Attempting to capture preview frame to: ${previewPath}`);
 
-        // Use fswebcam with optimized settings for smoother preview
-        exec(`fswebcam -d /dev/video0 -r 320x240 --fps 30 --no-banner --skip 1 --jpeg 80 ${previewPath}`, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`Error capturing preview: ${error.message}`);
+        // Ensure preview directory exists
+        if (!fs.existsSync(PREVIEW_DIR)) {
+            try {
+                fs.mkdirSync(PREVIEW_DIR, { recursive: true });
+                console.log(`Created preview directory: ${PREVIEW_DIR}`);
+            } catch (dirError) {
+                console.error(`Failed to create preview directory: ${dirError.message}`);
+                broadcastToStreamingClients({
+                    type: 'previewStatus',
+                    status: 'error',
+                    message: 'Failed to create preview directory'
+                });
+                return;
+            }
+        }
+
+        // Build the fswebcam command with proper escaping
+        const fswebcamCommand = `fswebcam -d ${webcamDevice} -r 320x240 --fps 30 --no-banner --skip 1 --jpeg 80 "${previewPath}"`;
+        console.log(`Executing command: ${fswebcamCommand}`);
+
+        // Use execFile for better security and error handling
+        const child_process = require('child_process');
+        const parts = fswebcamCommand.split(' ');
+        const cmd = parts[0];
+        const args = parts.slice(1);
+
+        // Execute the command
+        const childProcess = child_process.spawn(cmd, args, {
+            shell: true,
+            timeout: 3000, // 3 second timeout
+        });
+
+        let stdoutData = '';
+        let stderrData = '';
+
+        // Capture stdout and stderr
+        childProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+
+        childProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+        });
+
+        // Handle command completion
+        childProcess.on('close', (code) => {
+            if (code !== 0) {
+                console.error(`Error capturing preview (exit code ${code}): ${stderrData}`);
+
+                // Notify clients but don't stop trying
+                broadcastToStreamingClients({
+                    type: 'previewStatus',
+                    status: 'warning',
+                    message: 'Frame capture failed, retrying...'
+                });
                 return;
             }
 
+            console.log(`Preview frame captured successfully to ${previewPath}`);
+
             // Check if file exists
             if (!fs.existsSync(previewPath)) {
-                console.error('Preview file was not created');
+                console.error('Preview file was not created despite successful command');
                 return;
             }
 
@@ -365,10 +422,17 @@ function startWebcamPreview() {
                     return;
                 }
 
+                if (imageData.length === 0) {
+                    console.error('Preview file is empty');
+                    return;
+                }
+
+                console.log(`Read ${imageData.length} bytes from preview file`);
+
                 // Send to all active clients
                 let activeClientCount = 0;
-                for (const [_, client] of activeStreams) {
-                    if (client.isStreaming && client.ws.readyState === WebSocket.OPEN) {
+                for (const [clientId, client] of activeStreams) {
+                    if (client.isStreaming && client.ws && client.ws.readyState === WebSocket.OPEN) {
                         try {
                             // Convert to base64 for sending via WebSocket
                             const base64Image = imageData.toString('base64');
@@ -379,20 +443,33 @@ function startWebcamPreview() {
                             }));
                             activeClientCount++;
                         } catch (err) {
-                            console.error(`Error sending preview to client: ${err.message}`);
+                            console.error(`Error sending preview to client ${clientId}: ${err.message}`);
+                            // Don't consider this client active anymore if we can't send to it
+                            client.isStreaming = false;
                         }
                     }
                 }
 
+                console.log(`Sent preview frame to ${activeClientCount} clients`);
+
                 // If no active clients, stop preview
                 if (activeClientCount === 0) {
+                    console.log('No active clients, stopping preview');
                     stopWebcamPreview();
                 }
 
                 // Delete the preview file to save space
-                fs.unlink(previewPath, () => {
+                fs.unlink(previewPath, (unlinkErr) => {
+                    if (unlinkErr) {
+                        console.error(`Error deleting preview file: ${unlinkErr.message}`);
+                    }
                 });
             });
+        });
+
+        // Handle process errors
+        childProcess.on('error', (err) => {
+            console.error(`Process error in preview capture: ${err.message}`);
         });
     };
 
@@ -403,11 +480,29 @@ function startWebcamPreview() {
         message: 'Webcam preview active'
     });
 
-    // Start the preview interval with a shorter interval for smoother preview
-    previewInterval = setInterval(capturePreviewFrame, 200); // 5 fps
+    try {
+        // Start the preview interval with a shorter interval for smoother preview
+        previewInterval = setInterval(capturePreviewFrame, 300); // Reduced to ~3 fps for better reliability
 
-    // Capture first frame immediately
-    capturePreviewFrame();
+        // Capture first frame immediately
+        capturePreviewFrame();
+
+        console.log('Preview interval started successfully');
+    } catch (intervalError) {
+        console.error(`Failed to start preview interval: ${intervalError.message}`);
+
+        // Clean up if interval setup fails
+        if (previewInterval) {
+            clearInterval(previewInterval);
+            previewInterval = null;
+        }
+
+        broadcastToStreamingClients({
+            type: 'previewStatus',
+            status: 'error',
+            message: 'Failed to start preview'
+        });
+    }
 }
 
 /**
