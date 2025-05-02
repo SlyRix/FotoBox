@@ -27,8 +27,8 @@ const CameraView = () => {
     const [isProcessing, setIsProcessing] = useState(false);
 
     // Hard-coded stream URL that we know works
-    const STREAM_URL = "http://raspberrypi5.local:8081/stream";
-    const SNAPSHOT_URL = "http://raspberrypi5.local:8081/snapshot";
+    const STREAM_URL = "https://raspberrypi5.local:8081/stream";
+    const SNAPSHOT_URL = "https://raspberrypi5.local:8081/snapshot";
 
     // Check if webcam stream is available on mount
     useEffect(() => {
