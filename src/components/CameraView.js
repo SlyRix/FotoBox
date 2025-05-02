@@ -27,8 +27,8 @@ const CameraView = () => {
     const [isProcessing, setIsProcessing] = useState(false);
 
     // Hard-coded stream URL that we know works
-    const STREAM_URL = "https://fotobox-sh.slyrix.com/?action=stream";
-    const SNAPSHOT_URL = "https://fotobox-sh.slyrix.com/?action=snapshot";
+    const STREAM_URL = "http://localhost:8081/stream";
+    const SNAPSHOT_URL = "http://localhost:8081/stream";
 
     // Check if webcam stream is available on mount
     useEffect(() => {
