@@ -57,6 +57,10 @@ app.use(cors({
         const allowedOrigins = [
             'http://192.168.1.88:3000',
             'https://192.168.1.88:3000',
+            'http://192.168.1.70',
+            'https://192.168.1.70',
+            'http://raspberrypi5.local',
+            'https://raspberrypi5.local',
             'http://localhost:3000',
             'http://localhost:5000',
             'https://localhost:3000',
