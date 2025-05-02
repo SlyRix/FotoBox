@@ -19,7 +19,7 @@ import { SoundProvider } from './contexts/SoundContext';
 import './styles/tailwind.css';
 
 // Global config for API URL - accessible throughout the app
-export const API_BASE_URL = 'https://fotobox-api.slyrix.com';
+export const API_BASE_URL = 'http://raspberrypi5.local:5000';
 export const API_ENDPOINT = `${API_BASE_URL}/api`;
 export const PHOTO_VIEW_URL = 'https://photo-view.slyrix.com';  // Add this new constant
 
