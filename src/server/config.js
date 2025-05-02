@@ -25,7 +25,7 @@ const config = {
     // Printing settings (for future implementation)
     printing: {
         enabled: true,
-        printerName: 'Canon_SELPHY_CP1500_raspberrypi5',
+        printerName: 'SelphyCP1500',
         printCommand: 'lp -d',
         paperSize: 'Postcard', // 4x6" (Postcard size)
         printFormat: 'borderless', // Most photo booth setups want borderless
