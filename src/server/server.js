@@ -1888,7 +1888,7 @@ app.delete('/api/photos/:filename', (req, res) => {
 
 // Send print request
 app.post('/api/photos/print', (req, res) => {
-    const { filename } = req.body;
+    const {filename} = req.body;
 
     if (!filename) {
         return res.status(400).json({
@@ -1897,6 +1897,7 @@ app.post('/api/photos/print', (req, res) => {
         });
     }
 
+    // Check if printing is enabled in config
     if (!config.printing.enabled) {
         console.log(`Print request received for ${filename}, but printing is disabled in config`);
         return res.json({
@@ -1905,9 +1906,11 @@ app.post('/api/photos/print', (req, res) => {
         });
     }
 
+    // Use print version (A5 landscape) for printing
     const printFilename = filename.startsWith('print_') ? filename : `print_${filename.replace(/^(instagram_|frame_)/, '')}`;
     const filepath = path.join(PRINT_PHOTOS_DIR, printFilename);
 
+    // Check if the print file exists
     if (!fs.existsSync(filepath)) {
         console.error(`Print file not found: ${filepath}`);
         return res.status(404).json({
@@ -1916,37 +1919,59 @@ app.post('/api/photos/print', (req, res) => {
         });
     }
 
-    console.log(`Direct print request received for: ${printFilename}`);
+    console.log(`Print request received for: ${printFilename}`);
 
-    const printCommand = `${config.printing.printCommand} ${config.printing.printerName} -o media=Postcard -o fit-to-page -o borderless=true -o ColorModel=RGB -o StpBorderless=True -o StpColorPrecision=Best -o Resolution=300dpi -o StpColorCorrection=Accurate -o StpImageType=Photo -o StpShrinkOutput=Crop -o StpLegacyDyesubGamma=False "${filepath}"`;
+    const processedPrintPath = path.join(PRINT_PHOTOS_DIR, `selphy_${printFilename}`);
 
-    exec(printCommand, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Print error: ${error.message}`);
+    // ImageMagick processing before printing
+    const convertCommand = `convert "${filepath}" -resize 1800x1200^ -gravity center -extent 1800x1200 -colorspace RGB -density 300 -quality 100 -interlace none -strip "${processedPrintPath}"`;
+
+    exec(convertCommand, (convertError, convertStdout, convertStderr) => {
+        if (convertError) {
+            console.error(`Convert error: ${convertError.message}`);
             return res.status(500).json({
                 success: false,
-                error: 'Failed to print photo',
-                details: error.message
+                error: 'Failed to preprocess photo for printing',
+                details: convertError.message
             });
         }
 
-        if (stderr) {
-            console.warn(`Print warning: ${stderr}`);
-        }
+        // Construct the print command for the Canon SELPHY CP1500
+        // -o media=Postcard is for 4x6" paper
+        // -o fit-to-page will ensure the image is properly sized
+        // -o borderless=true for borderless printing (if supported)
+        const printCommand = `${config.printing.printCommand} ${config.printing.printerName} -o media=Postcard -o fit-to-page -o borderless=true -o ColorModel=RGB -o StpBorderless=True -o StpColorPrecision=Best -o Resolution=300dpi -o StpColorCorrection=Accurate -o StpImageType=Photo -o StpShrinkOutput=Crop -o StpLegacyDyesubGamma=False "${processedPrintPath}"`;
 
-        let jobId = null;
-        const match = stdout.match(/request id is (\S+)/i);
-        if (match && match[1]) {
-            jobId = match[1];
-        }
+        // Execute the print command
+        exec(printCommand, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Print error: ${error.message}`);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to print photo',
+                    details: error.message
+                });
+            }
 
-        console.log(`Print job submitted successfully: ${jobId || 'unknown job ID'}`);
+            if (stderr) {
+                console.warn(`Print warning: ${stderr}`);
+            }
 
-        res.json({
-            success: true,
-            message: 'Print request sent to printer',
-            jobId: jobId,
-            filename: printFilename
+            // Get job ID from stdout if available (usually in the format "request id is PRINTER-X")
+            let jobId = null;
+            const match = stdout.match(/request id is (\S+)/i);
+            if (match && match[1]) {
+                jobId = match[1];
+            }
+
+            console.log(`Print job submitted successfully: ${jobId || 'unknown job ID'}`);
+
+            res.json({
+                success: true,
+                message: 'Print request sent to printer',
+                jobId: jobId,
+                filename: printFilename
+            });
         });
     });
 });
