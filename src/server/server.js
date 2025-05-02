@@ -250,7 +250,7 @@ function setupWebSocketServer(server) {
         ws.on('message', (message) => {
             try {
                 const data = JSON.parse(message);
-
+                console.log(`WebSocket message received: ${JSON.stringify(data)}`);
                 if (data.type === 'ping') {
                     ws.send(JSON.stringify({type: 'pong', timestamp: Date.now()}));
                     return;
@@ -258,12 +258,18 @@ function setupWebSocketServer(server) {
 
                 // Handle stream start/stop requests
                 if (data.type === 'startPreview') {
+                    console.log('Starting preview requested');
                     // Start streaming if not already streaming for this client
                     const clientInfo = activeStreams.get(clientId);
                     if (clientInfo && !clientInfo.isStreaming) {
                         clientInfo.isStreaming = true;
                         activeStreams.set(clientId, clientInfo);
-                        startWebcamPreview();
+                        try {
+                            console.log('Executing fswebcam...');
+                            startWebcamPreview();
+                        }catch (execError) {
+                            console.error(`Error executing fswebcam: ${execError.message}`);
+                        }
                     }
                 } else if (data.type === 'stopPreview') {
                     // Stop streaming for this client
@@ -274,8 +280,10 @@ function setupWebSocketServer(server) {
                         stopWebcamPreview();
                     }
                 }
+                console.log('fswebcam execution successful');
             } catch (e) {
                 console.log(`Received non-JSON message: ${message}`);
+
             }
         });
 
