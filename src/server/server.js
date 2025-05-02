@@ -1255,8 +1255,8 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
         // Get the base filename WITHOUT removing file extension (keep the .jpg)
         const baseFilename = filename;
 
-        // Use home server URL from config
-        const photoViewUrl = config.homeServer.photoViewUrlFormat.replace('{photoId}', baseFilename);
+        // UPDATED: Use original_ prefix in the photoViewUrl
+        const photoViewUrl = config.homeServer.photoViewUrlFormat.replace('{photoId}', `original_${baseFilename}`);
 
         console.log(`Generating QR code for URL: ${photoViewUrl}`);
 
@@ -1293,10 +1293,10 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
             }
 
             // Create metadata for upload
-            const metadata = { 
+            const metadata = {
                 filename: filename,
                 timestamp: Date.now(),
-                photoViewUrl: photoViewUrl,
+                photoViewUrl: photoViewUrl,  // UPDATED: Using the new URL with original_ prefix
                 originalPi: config.server.host,
                 event: config.app.title
             };
@@ -1335,7 +1335,7 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
                     url: processedPhotos ? processedPhotos.publicUrl : `/photos/${filename}`,
                     thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
                     qrUrl: `/qrcodes/${qrFilename}`,
-                    photoViewUrl: photoViewUrl,  // Include the actual URL the QR code points to
+                    photoViewUrl: photoViewUrl,  // UPDATED: Include the new URL with original_ prefix
                     timestamp: Date.now(),
                     uploadPending: uploadStatus.pending || false,
                     uploadMessage: uploadStatus.message || null
@@ -1688,17 +1688,9 @@ app.get('/api/photos/:photoId', (req, res) => {
         let printUrl = `/photos/print/print_${baseFilename}`;
         let instagramUrl = `/photos/instagram_${baseFilename}`;
 
-        // Create the correct photo view URL
-        let photoViewUrl;
-        if (isOriginal) {
-            photoViewUrl = `https://${clientDomain}/photo/original_${baseFilename}`;
-        } else if (isInstagram) {
-            photoViewUrl = `https://${clientDomain}/photo/instagram_${baseFilename}`;
-        } else if (isCustomFrame) {
-            photoViewUrl = `https://${clientDomain}/photo/${photoId}`;
-        } else {
-            photoViewUrl = `https://${clientDomain}/photo/${baseFilename}`;
-        }
+        // UPDATED: Create the correct photo view URL - always use original_ prefix
+        // This makes it consistent with QR code URLs
+        let photoViewUrl = `https://${clientDomain}/photo/original_${baseFilename}`;
 
         // Return photo data
         res.json({

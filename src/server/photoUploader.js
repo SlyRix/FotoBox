@@ -237,8 +237,10 @@ class PhotoUploader {
         } else {
             logger.info('Offline mode - photo queued for later upload');
 
-            // If the original uploadData contains photoViewUrl, return it
-            const photoViewUrl = metadata.photoViewUrl || `https://photo-view.slyrix.com/photo/${photoId}`;
+            // UPDATED: Create the photoViewUrl with the original_ prefix
+            // If the metadata doesn't already include photoViewUrl with the correct format
+            const photoViewUrl = metadata.photoViewUrl ||
+                `https://photo-view.slyrix.com/photo/original_${photoId}`;
 
             // Return the prospective URL even though upload is pending
             return {
