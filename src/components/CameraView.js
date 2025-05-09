@@ -8,11 +8,9 @@ import PageTransition from './PageTransition';
 import { useSound } from '../contexts/SoundContext';
 import Icon from '@mdi/react';
 import { mdiCamera, mdiHome, mdiHeartOutline, mdiHeart, mdiVolumeHigh, mdiVolumeMute } from '@mdi/js';
-import CaptureErrorRecovery from './CaptureErrorRecovery';
-import {API_ENDPOINT} from "../App";
 
 const CameraView = () => {
-    const { takePhoto, loading, currentPhoto, setCurrentPhoto } = useCamera();
+    const { takePhoto, loading } = useCamera();
     const {
         playCountdownBeep,
         playFinalBeep,
@@ -27,7 +25,6 @@ const CameraView = () => {
     const [isReady, setIsReady] = useState(true);
     const [streamActive, setStreamActive] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
-    const [captureError, setCaptureError] = useState(null);
 
     // Hard-coded stream URL that we know works
     const STREAM_URL = "http://raspberrypi5.local:8081/stream";
@@ -60,8 +57,6 @@ const CameraView = () => {
         setIsReady(false);
         // Play click sound when button is pressed
         playClickSound();
-        // Clear any previous errors
-        setCaptureError(null);
         // Start countdown from 5
         setCountdown(5);
     };
@@ -107,49 +102,24 @@ const CameraView = () => {
 
         try {
             // Take the photo - server handles overlay application during capture
-            const response = await fetch(`${API_ENDPOINT}/photos/capture`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
+            const photo = await takePhoto();
 
-            // Parse response data
-            const data = await response.json();
-
-            if (!response.ok) {
-                // Handle error response
-                console.error('Photo capture failed:', data);
-                setCaptureError(data);
-                setIsProcessing(false);
-                return;
-            }
-
-            if (data.success) {
+            if (photo) {
                 // Add a short delay to ensure the server has time to process
                 setTimeout(() => {
-                    setCurrentPhoto(data.photo);
                     // Navigate to preview page
                     navigate('/preview');
                 }, 1000);
             } else {
-                // Handle application error
-                console.error('Photo capture application error:', data);
-                setCaptureError(data);
+                // Reset if there was an error
+                setIsReady(true);
+                setCountdown(null);
                 setIsProcessing(false);
             }
         } catch (err) {
             console.error('Failed to take photo:', err);
-            setCaptureError({
-                error: 'Network error',
-                errorCode: 'NETWORK_ERROR',
-                recoverable: true,
-                recoverySuggestions: [
-                    'Check your internet connection',
-                    'The server may be temporarily unavailable',
-                    'Try again in a moment'
-                ]
-            });
+            setIsReady(true);
+            setCountdown(null);
             setIsProcessing(false);
         }
     };
@@ -410,21 +380,6 @@ const CameraView = () => {
                     )}
                 </AnimatePresence>
             </div>
-            {captureError && (
-                <CaptureErrorRecovery
-                    error={captureError}
-                    onRetry={() => {
-                        setCaptureError(null);
-                        setIsReady(true);
-                        handleTakePhoto();
-                    }}
-                    onCancel={() => {
-                        setCaptureError(null);
-                        setIsReady(true);
-                    }}
-                    onGoHome={() => navigate('/')}
-                />
-            )}
         </PageTransition>
     );
 };

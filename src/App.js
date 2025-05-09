@@ -17,7 +17,6 @@ import KioskMode from './components/KioskMode';
 import { CameraProvider } from './contexts/CameraContext';
 import { SoundProvider } from './contexts/SoundContext';
 import './styles/tailwind.css';
-import OfflineStatusBar from './components/OfflineStatusBar';
 
 // Global config for API URL - accessible throughout the app
 export const API_BASE_URL = 'http://raspberrypi5.local:5000';
@@ -75,7 +74,7 @@ function App() {
         <SoundProvider>
             <CameraProvider apiBaseUrl={API_BASE_URL} apiEndpoint={API_ENDPOINT}>
                 <KioskMode />
-                <OfflineStatusBar /> {/* Add this line */}
+
                 <Router>
                     <div className="min-h-screen bg-wedding-background">
                         <AnimatedRoutes />

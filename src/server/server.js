@@ -1722,23 +1722,18 @@ app.post('/api/photos/capture', async (req, res) => {
     if (captureInProgress.status) {
         return res.status(429).json({
             success: false,
-            error: 'A photo capture is already in progress. Please try again in a moment.',
-            errorCode: 'CAPTURE_IN_PROGRESS',
-            recoverable: true
+            error: 'A photo capture is already in progress. Please try again in a moment.'
         });
     }
 
     captureInProgress.status = true;
-    let captureStartTime = Date.now();
 
     // Generate unique filename based on timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `wedding_${timestamp}.jpg`;
     const filepath = path.join(PHOTOS_DIR, filename);
-    const tempFilepath = path.join(PHOTOS_DIR, `tmp_${filename}`);
 
     console.log(`Taking photo with camera: ${filename}`);
-    logger.info(`Starting photo capture: ${filename}`);
 
     // Stop preview during capture
     const wasPreviewActive = previewInterval !== null;
@@ -1754,103 +1749,10 @@ app.post('/api/photos/capture', async (req, res) => {
         });
     }
 
-    // Set a timeout to prevent hanging
-    const captureTimeout = setTimeout(() => {
-        if (captureInProgress.status) {
-            logger.error(`Photo capture timed out after 15 seconds: ${filename}`);
-            captureInProgress.status = false;
+    // Build the gphoto2 command for high quality camera capture
+    const captureCommand = `gphoto2 --force-overwrite --capture-image-and-download --filename "${filepath}"`;
 
-            // Resume preview if it was active
-            if (wasPreviewActive) {
-                startWebcamPreview();
-            }
-
-            // Don't send response here - the main function may still be running
-        }
-    }, 15000);
-
-    // Build the gphoto2 command for high quality camera capture with retries
-    const maxRetries = 2;
-    let retryCount = 0;
-    let captureSuccess = false;
-    let captureError = null;
-
-    try {
-        while (!captureSuccess && retryCount <= maxRetries) {
-            // If this is a retry, log it
-            if (retryCount > 0) {
-                logger.info(`Retry ${retryCount}/${maxRetries} for capture: ${filename}`);
-            }
-
-            try {
-                // Try to capture with gphoto2
-                const captureCommand = `gphoto2 --force-overwrite --capture-image-and-download --filename "${tempFilepath}" --debug --debug-logfile=/tmp/gphoto2_log.txt`;
-
-                // Execute with timeout
-                const { error, stdout, stderr } = await execWithTimeout(captureCommand, 10000);
-
-                // Check for errors or success
-                if (error) {
-                    throw new Error(`gphoto2 error: ${error.message}`);
-                }
-
-                if (stderr && stderr.includes('ERROR')) {
-                    throw new Error(`gphoto2 stderr: ${stderr}`);
-                }
-
-                // Check if file was actually created
-                if (!fs.existsSync(tempFilepath)) {
-                    throw new Error('Camera capture command completed but no file was created');
-                }
-
-                // Move the temp file to the final location
-                fs.renameSync(tempFilepath, filepath);
-
-                captureSuccess = true;
-                logger.info(`Photo captured successfully: ${filename}`);
-            } catch (err) {
-                captureError = err;
-                logger.error(`Capture attempt ${retryCount + 1} failed: ${err.message}`);
-                retryCount++;
-
-                // Short delay before retrying
-                if (retryCount <= maxRetries) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-            }
-        }
-
-        // If all retries failed, try webcam fallback
-        if (!captureSuccess) {
-            logger.warn(`All camera capture attempts failed, falling back to webcam`);
-
-            // Use webcam as fallback
-            try {
-                const fallbackCommand = `fswebcam -d /dev/video0 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
-
-                const { error, stdout, stderr } = await execWithTimeout(fallbackCommand, 8000);
-
-                if (error) {
-                    throw new Error(`Webcam fallback error: ${error.message}`);
-                }
-
-                // Check if file was created
-                if (!fs.existsSync(filepath)) {
-                    throw new Error('Webcam capture command completed but no file was created');
-                }
-
-                captureSuccess = true;
-                logger.info(`Photo captured with webcam fallback: ${filename}`);
-            } catch (err) {
-                captureError = err;
-                logger.error(`Webcam fallback also failed: ${err.message}`);
-            }
-        }
-
-        // Clear timeout since we're done with capture attempts
-        clearTimeout(captureTimeout);
-        captureInProgress.status = false;
-
+    exec(captureCommand, (error, stdout, stderr) => {
         // Resume preview if it was active
         if (wasPreviewActive) {
             setTimeout(() => {
@@ -1863,99 +1765,76 @@ app.post('/api/photos/capture', async (req, res) => {
             }, 1500); // Short delay to allow camera to recover
         }
 
-        // If all attempts failed, return error
-        if (!captureSuccess) {
-            const errorMessage = 'Photo capture failed with both camera and webcam';
-            logger.error(errorMessage);
-            return res.status(500).json({
-                success: false,
-                error: errorMessage,
-                errorCode: 'CAPTURE_FAILED',
-                cameraError: captureError ? captureError.message : 'Unknown error',
-                recoverable: true,
-                recoverySuggestions: [
-                    'Check if the camera is properly connected',
-                    'Ensure the camera is turned on',
-                    'Try restarting the photo booth application',
-                    'Check if the webcam is connected as a backup'
-                ]
+        if (error || (stderr && stderr.includes('ERROR'))) {
+            console.error(`Error taking photo: ${error ? error.message : stderr}`);
+
+            // Fall back to webcam as backup
+            const fallbackCommand = `fswebcam -d /dev/video0 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
+
+            exec(fallbackCommand, async (fbError, fbStdout, fbStderr) => {
+                captureInProgress.status = false;
+
+                if (fbError) {
+                    return res.status(500).json({
+                        success: false,
+                        error: 'Photo capture failed with both camera and webcam'
+                    });
+                }
+
+                console.log(`Photo taken with webcam fallback`);
+
+                try {
+                    // Process dual-format photo from webcam capture
+                    const processedPhotos = await processPhotoWithDualFormats(filepath, filename);
+
+                    // Increment photo counter for mosaic generation
+                    photoCounter++;
+                    console.log(`Photo counter: ${photoCounter}`);
+
+                    // Regenerate mosaic on schedule
+                    if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
+                        console.log(`Captured ${photoCounter} photos. Regenerating mosaic.`);
+                        regenerateMosaicInBackground();
+                    }
+
+                    // Generate QR code and respond
+                    generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
+                } catch (err) {
+                    console.error('Error in dual-format processing:', err);
+                    // Try standard processing as fallback
+                    generateQRAndRespond(req, res, filename, timestamp);
+                }
             });
+
+            return;
         }
 
-        // Process the photo (original was successful)
-        try {
-            // Process dual-format photo
-            const processedPhotos = await processPhotoWithDualFormats(filepath, filename);
-
-            // Increment photo counter and handle mosaic
-            photoCounter++;
-            if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
-                regenerateMosaicInBackground();
-            }
-
-            // Record capture time for analytics
-            const captureTime = Date.now() - captureStartTime;
-            logger.info(`Photo processing completed in ${captureTime}ms: ${filename}`);
-
-            // Generate QR code and respond
-            generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
-        } catch (processError) {
-            logger.error(`Error processing photo: ${processError.message}`);
-
-            // Fall back to simpler processing
-            try {
-                generateQRAndRespond(req, res, filename, timestamp);
-            } catch (finalError) {
-                return res.status(500).json({
-                    success: false,
-                    error: 'Photo was captured but could not be processed',
-                    errorCode: 'PROCESSING_FAILED',
-                    recoverable: true,
-                    photoPath: filepath
-                });
-            }
-        }
-    } catch (finalCaptureError) {
-        clearTimeout(captureTimeout);
         captureInProgress.status = false;
+        console.log(`Photo successfully taken with camera: ${filename}`);
 
-        // Resume preview if it was active
-        if (wasPreviewActive) {
-            setTimeout(() => {
-                startWebcamPreview();
-            }, 1000);
-        }
+        // Process dual-format for camera capture
+        processPhotoWithDualFormats(filepath, filename)
+            .then(processedPhotos => {
+                // Increment photo counter for mosaic generation
+                photoCounter++;
+                console.log(`Photo counter: ${photoCounter}`);
 
-        logger.error(`Catastrophic capture error: ${finalCaptureError.message}`);
-        return res.status(500).json({
-            success: false,
-            error: 'A system error occurred during photo capture',
-            errorCode: 'SYSTEM_ERROR',
-            systemError: finalCaptureError.message,
-            recoverable: false
-        });
-    }
-});
+                // Regenerate mosaic on schedule
+                if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
+                    console.log(`Regenerating mosaic`);
+                    regenerateMosaicInBackground();
+                }
 
-// Helper function for command execution with timeout
-function execWithTimeout(command, timeout) {
-    return new Promise((resolve, reject) => {
-        const child = exec(command, (error, stdout, stderr) => {
-            resolve({ error, stdout, stderr });
-        });
-
-        // Set timeout to kill process if it takes too long
-        const timeoutId = setTimeout(() => {
-            child.kill();
-            reject(new Error(`Command timed out after ${timeout}ms: ${command}`));
-        }, timeout);
-
-        // Clear timeout when process completes
-        child.on('close', () => {
-            clearTimeout(timeoutId);
-        });
+                // Generate QR code and respond
+                generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
+            })
+            .catch(err => {
+                console.error('Error in dual-format processing:', err);
+                // Try standard processing as fallback
+                generateQRAndRespond(req, res, filename, timestamp);
+            });
     });
-}
+});
 
 // Delete a photo (all versions)
 app.delete('/api/photos/:filename', (req, res) => {
