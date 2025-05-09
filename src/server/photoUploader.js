@@ -1,4 +1,5 @@
-// Enhanced photoUploader.js with better error handling and retry logic
+// Enhanced photoUploader.js with better offline handling
+
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
@@ -8,36 +9,41 @@ const { createLogger } = require('./logger');
 
 const logger = createLogger('PhotoUploader');
 
-// Directory for tracking uploads
+// Directory for tracking uploads and offline photos
 const UPLOAD_TRACKING_DIR = path.join(__dirname, 'data', 'upload-tracking');
-// Create directory if it doesn't exist
-if (!fs.existsSync(UPLOAD_TRACKING_DIR)) {
-    fs.mkdirSync(UPLOAD_TRACKING_DIR, { recursive: true });
-}
+const OFFLINE_PHOTOS_DIR = path.join(__dirname, 'data', 'offline-photos');
+
+// Create directories if they don't exist
+[UPLOAD_TRACKING_DIR, OFFLINE_PHOTOS_DIR].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+});
 
 class PhotoUploader {
     constructor() {
         this.homeServerUrl = config.homeServer.url || 'https://photo-view.slyrix.com';
         this.uploadEndpoint = `${this.homeServerUrl}/api/upload-photo`;
         this.apiKey = config.homeServer.apiKey || 'xP9dR7tK2mB5vZ3q';
-        this.pendingUploads = new Map(); // Map to track in-progress uploads
+        this.pendingUploads = new Map();
         this.isOnline = false;
         this.checkIntervalId = null;
         this.retryTimeoutId = null;
         this.maxRetries = config.upload.maxRetries || 5;
         this.retryDelay = config.upload.retryDelay || 30000; // 30 seconds
         this.checkInterval = config.upload.checkInterval || 300000; // 5 minutes
+        this.backoffFactor = 1.5; // For exponential backoff
 
-        // Enhanced axios instance with better error handling
+        // Enhanced API instance with better error handling
         this.api = axios.create({
             baseURL: this.homeServerUrl,
-            timeout: 30000, // 30 seconds
+            timeout: 30000,
             headers: {
                 'X-API-Key': this.apiKey
             }
         });
 
-        // Set up response interceptor for better error logging
+        // Response interceptor for better error logging
         this.api.interceptors.response.use(
             response => response,
             error => {
@@ -58,8 +64,7 @@ class PhotoUploader {
     }
 
     /**
-     * Check if we can connect to the home server
-     * @returns {Promise<boolean>} True if online
+     * Enhanced connection checker with better error handling
      */
     async checkConnection() {
         try {
@@ -76,6 +81,11 @@ class PhotoUploader {
                 this.processQueue();
             }
 
+            // Emit status change event for the server to broadcast to clients
+            if (wasOnline !== this.isOnline) {
+                this.emitConnectionStatusChange(this.isOnline);
+            }
+
             return this.isOnline;
         } catch (error) {
             logger.error(`Connection check failed: ${error.message}`);
@@ -85,117 +95,215 @@ class PhotoUploader {
     }
 
     /**
-     * Start periodic connection checker
+     * Emit connection status change for server to broadcast
      */
-    startConnectionChecker() {
-        // Clear any existing interval
-        if (this.checkIntervalId) {
-            clearInterval(this.checkIntervalId);
+    emitConnectionStatusChange(isOnline) {
+        // This can be implemented to emit events to the server
+        // For now, just log it
+        logger.info(`Connection status changed: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+
+        // Create a status file that other processes can check
+        const statusFile = path.join(__dirname, 'data', 'connection-status.json');
+        try {
+            fs.writeFileSync(statusFile, JSON.stringify({
+                isOnline,
+                timestamp: Date.now(),
+                pendingUploads: this.pendingUploads.size
+            }));
+        } catch (error) {
+            logger.error(`Failed to write connection status file: ${error.message}`);
         }
-
-        // Check connection immediately
-        this.checkConnection();
-
-        // Set up periodic checking
-        this.checkIntervalId = setInterval(() => {
-            this.checkConnection();
-        }, this.checkInterval);
-
-        logger.info('Connection checker started');
     }
 
     /**
-     * Load pending uploads from disk
+     * Make a backup copy of photos taken while offline
      */
-    loadPendingUploads() {
+    backupOfflinePhoto(photoPath, metadata) {
         try {
-            const files = fs.readdirSync(UPLOAD_TRACKING_DIR);
+            const filename = metadata.filename || path.basename(photoPath);
+            const backupPath = path.join(OFFLINE_PHOTOS_DIR, filename);
 
-            files.forEach(file => {
-                if (file.endsWith('.json')) {
-                    try {
-                        const filePath = path.join(UPLOAD_TRACKING_DIR, file);
-                        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            // Copy the file to offline backup directory
+            fs.copyFileSync(photoPath, backupPath);
 
-                        // Only add to queue if files still exist
-                        if (this.validateFilesPaths(data)) {
-                            const photoId = file.replace('.json', '');
-                            this.pendingUploads.set(photoId, {
-                                ...data,
-                                retries: 0
-                            });
-                            logger.info(`Loaded pending upload: ${photoId}`);
-                        } else {
-                            // Files are missing, remove tracking file
-                            fs.unlinkSync(filePath);
-                            logger.warn(`Removed tracking for missing files: ${file}`);
-                        }
-                    } catch (err) {
-                        logger.error(`Error loading pending upload ${file}: ${err.message}`);
-                    }
-                }
+            // Save metadata alongside the photo
+            const metadataPath = path.join(OFFLINE_PHOTOS_DIR, `${filename}.json`);
+            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+
+            logger.info(`Backed up offline photo: ${filename}`);
+            return true;
+        } catch (error) {
+            logger.error(`Failed to backup offline photo: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * Process the upload queue with exponential backoff
+     */
+    async processQueue() {
+        if (!this.isOnline || this.pendingUploads.size === 0) {
+            return;
+        }
+
+        logger.info(`Processing upload queue (${this.pendingUploads.size} pending)`);
+
+        // Sort uploads by priority and timestamp
+        const sortedUploads = Array.from(this.pendingUploads.entries())
+            .sort((a, b) => {
+                // First by priority (higher priority first)
+                const priorityDiff = (b[1].priority || 0) - (a[1].priority || 0);
+                if (priorityDiff !== 0) return priorityDiff;
+
+                // Then by timestamp (oldest first)
+                return (a[1].timestamp || 0) - (b[1].timestamp || 0);
             });
 
-            logger.info(`Loaded ${this.pendingUploads.size} pending uploads`);
+        // Process each pending upload with backoff
+        for (const [photoId, uploadData] of sortedUploads) {
+            const { photoPath, thumbnailPath, metadata, retries, lastRetry } = uploadData;
 
-            // Process queue if we have pending uploads
-            if (this.pendingUploads.size > 0) {
+            // Skip if exceeded max retries
+            if (retries >= this.maxRetries) {
+                logger.error(`Upload of ${photoId} failed after ${retries} attempts - giving up`);
+                this.pendingUploads.delete(photoId);
+                this.removeUploadInfo(photoId);
+                continue;
+            }
+
+            // Apply exponential backoff for retries
+            if (retries > 0 && lastRetry) {
+                // Calculate delay based on retry count
+                const currentTime = Date.now();
+                const backoffTime = (this.retryDelay * Math.pow(this.backoffFactor, retries - 1));
+                const waitUntil = lastRetry + backoffTime;
+
+                // Skip if we need to wait longer
+                if (currentTime < waitUntil) {
+                    const waitTime = Math.ceil((waitUntil - currentTime) / 1000);
+                    logger.info(`Skipping ${photoId} - retrying in ${waitTime} seconds (retry ${retries + 1})`);
+                    continue;
+                }
+            }
+
+            try {
+                // Check if files still exist before attempting upload
+                if (!this.validateFilesPaths(uploadData)) {
+                    logger.error(`Files missing for ${photoId} - removing from queue`);
+                    this.pendingUploads.delete(photoId);
+                    this.removeUploadInfo(photoId);
+                    continue;
+                }
+
+                // Upload the photo
+                logger.info(`Attempting upload for ${photoId} (retry ${retries + 1}/${this.maxRetries})`);
+                const result = await this.uploadPhoto(photoPath, metadata, thumbnailPath);
+
+                if (result.success) {
+                    // Upload successful - remove from pending uploads
+                    logger.info(`Successfully uploaded ${photoId}`);
+                    this.pendingUploads.delete(photoId);
+                    this.removeUploadInfo(photoId);
+
+                    // Optionally remove from offline backup if enabled in config
+                    if (config.upload.deleteBackupAfterUpload) {
+                        this.removeOfflineBackup(photoId);
+                    }
+                }
+            } catch (error) {
+                // Categorize error to determine if it's retriable
+                const isRetriable = this.isRetriableError(error);
+
+                if (isRetriable) {
+                    // Update retry count and timestamp
+                    this.pendingUploads.set(photoId, {
+                        ...uploadData,
+                        retries: retries + 1,
+                        lastRetry: Date.now(),
+                        lastError: error.message
+                    });
+
+                    // Also update the file on disk
+                    this.saveUploadInfo(photoId, {
+                        ...uploadData,
+                        retries: retries + 1,
+                        lastRetry: Date.now(),
+                        lastError: error.message
+                    });
+
+                    logger.error(`Retriable error uploading ${photoId} (attempt ${retries + 1}/${this.maxRetries}): ${error.message}`);
+                } else {
+                    // Non-retriable error - remove from queue
+                    logger.error(`Non-retriable error uploading ${photoId} - giving up: ${error.message}`);
+                    this.pendingUploads.delete(photoId);
+                    this.removeUploadInfo(photoId);
+                }
+            }
+        }
+
+        // If we still have pending uploads, schedule retry
+        if (this.pendingUploads.size > 0) {
+            if (this.retryTimeoutId) {
+                clearTimeout(this.retryTimeoutId);
+            }
+
+            // Use a shorter delay for next attempt to check the queue
+            this.retryTimeoutId = setTimeout(() => {
                 this.processQueue();
-            }
-        } catch (error) {
-            logger.error(`Error loading pending uploads: ${error.message}`);
+            }, 60000); // Check again in 1 minute
+
+            logger.info(`Scheduled queue check in 60 seconds for ${this.pendingUploads.size} pending uploads`);
         }
     }
 
     /**
-     * Validate that all file paths in the upload data exist
-     * @param {Object} data Upload data
-     * @returns {boolean} True if all files exist
+     * Determine if an error is retriable
      */
-    validateFilesPaths(data) {
-        const { photoPath, thumbnailPath } = data;
+    isRetriableError(error) {
+        // Network related errors are usually retriable
+        if (!error.response && (error.code === 'ECONNABORTED' || error.code === 'ECONNREFUSED' ||
+            error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ENETUNREACH')) {
+            return true;
+        }
 
-        const photoExists = photoPath && fs.existsSync(photoPath);
-        const thumbnailExists = !thumbnailPath || fs.existsSync(thumbnailPath);
+        // Server errors (5xx) are usually retriable
+        if (error.response && error.response.status >= 500 && error.response.status < 600) {
+            return true;
+        }
 
-        return photoExists && thumbnailExists;
+        // Too many requests (429) is retriable
+        if (error.response && error.response.status === 429) {
+            return true;
+        }
+
+        // Other errors are generally not retriable
+        return false;
     }
 
     /**
-     * Save upload info to disk for persistence
-     * @param {string} photoId Photo ID
-     * @param {Object} uploadData Upload data
+     * Remove offline backup after successful upload
      */
-    saveUploadInfo(photoId, uploadData) {
+    removeOfflineBackup(photoId) {
         try {
-            const filePath = path.join(UPLOAD_TRACKING_DIR, `${photoId}.json`);
-            fs.writeFileSync(filePath, JSON.stringify(uploadData, null, 2));
-        } catch (error) {
-            logger.error(`Error saving upload info for ${photoId}: ${error.message}`);
-        }
-    }
+            const backupPath = path.join(OFFLINE_PHOTOS_DIR, photoId);
+            const metadataPath = path.join(OFFLINE_PHOTOS_DIR, `${photoId}.json`);
 
-    /**
-     * Remove upload info from disk after successful upload
-     * @param {string} photoId Photo ID
-     */
-    removeUploadInfo(photoId) {
-        try {
-            const filePath = path.join(UPLOAD_TRACKING_DIR, `${photoId}.json`);
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
+            if (fs.existsSync(backupPath)) {
+                fs.unlinkSync(backupPath);
             }
+
+            if (fs.existsSync(metadataPath)) {
+                fs.unlinkSync(metadataPath);
+            }
+
+            logger.info(`Removed offline backup for ${photoId}`);
         } catch (error) {
-            logger.error(`Error removing upload info for ${photoId}: ${error.message}`);
+            logger.error(`Failed to remove offline backup for ${photoId}: ${error.message}`);
         }
     }
 
     /**
-     * Queue a photo for upload
-     * @param {string} photoPath Path to the photo file
-     * @param {Object} metadata Photo metadata
-     * @param {string} thumbnailPath Path to the thumbnail file (optional)
-     * @returns {Promise<Object>} Upload result
+     * Enhanced queue photo for upload with offline support
      */
     async queuePhotoForUpload(photoPath, metadata, thumbnailPath = null) {
         const photoId = metadata.filename || path.basename(photoPath);
@@ -212,221 +320,59 @@ class PhotoUploader {
             };
         }
 
+        // Always create an offline backup regardless of connection status
+        this.backupOfflinePhoto(photoPath, metadata);
+
         // Create upload data
         const uploadData = {
             photoPath,
             thumbnailPath,
             metadata,
             timestamp: Date.now(),
+            retries: 0,
+            priority: metadata.priority || 0, // Allow priority setting
             uploadedUrl: null,
             status: 'pending',
         };
 
         // Add to pending uploads
-        this.pendingUploads.set(photoId, {
-            ...uploadData,
-            retries: 0
-        });
+        this.pendingUploads.set(photoId, uploadData);
 
         // Save to disk for persistence
         this.saveUploadInfo(photoId, uploadData);
 
         // Try to upload immediately if we're online
         if (this.isOnline) {
+            // Start upload process, but don't wait for it to complete
             this.processQueue();
+
+            // Return with pending status
+            return {
+                success: true,
+                pending: true,
+                photoId,
+                photoViewUrl: metadata.photoViewUrl || `https://photo-view.slyrix.com/photo/original_${photoId}`,
+                message: 'Photo queued for upload and will be processed shortly'
+            };
         } else {
             logger.info('Offline mode - photo queued for later upload');
 
-            // UPDATED: Create the photoViewUrl with the original_ prefix
-            // If the metadata doesn't already include photoViewUrl with the correct format
-            const photoViewUrl = metadata.photoViewUrl ||
-                `https://photo-view.slyrix.com/photo/original_${photoId}`;
+            // Create the photoViewUrl even though upload is pending
+            const photoViewUrl = metadata.photoViewUrl || `https://photo-view.slyrix.com/photo/original_${photoId}`;
 
             // Return the prospective URL even though upload is pending
             return {
                 success: true,
                 pending: true,
+                offline: true,
                 photoId,
-                photoUrl: photoViewUrl,
-                message: 'Photo queued for upload when connection is available'
+                photoViewUrl,
+                message: 'Photo saved offline and will be uploaded when connection is available'
             };
         }
     }
 
-    /**
-     * Process the upload queue
-     */
-    async processQueue() {
-        // If no connection or queue is empty, do nothing
-        if (!this.isOnline || this.pendingUploads.size === 0) {
-            return;
-        }
-
-        logger.info(`Processing upload queue (${this.pendingUploads.size} pending)`);
-
-        // Process each pending upload
-        for (const [photoId, uploadData] of this.pendingUploads.entries()) {
-            const { photoPath, thumbnailPath, metadata, retries } = uploadData;
-
-            // Skip if exceeded max retries
-            if (retries >= this.maxRetries) {
-                logger.error(`Upload of ${photoId} failed after ${retries} attempts - giving up`);
-                this.pendingUploads.delete(photoId);
-                this.removeUploadInfo(photoId);
-                continue;
-            }
-
-            try {
-                // Upload the photo
-                const result = await this.uploadPhoto(photoPath, metadata, thumbnailPath);
-
-                if (result.success) {
-                    // Upload successful - remove from pending uploads
-                    logger.info(`Successfully uploaded ${photoId}`);
-                    this.pendingUploads.delete(photoId);
-                    this.removeUploadInfo(photoId);
-
-                    // TODO: Optionally clean up local files if storage is a concern
-                    // But probably best to keep local copies as backup
-                }
-            } catch (error) {
-                // Update retry count
-                this.pendingUploads.set(photoId, {
-                    ...uploadData,
-                    retries: retries + 1,
-                    lastError: error.message
-                });
-
-                // Also update the file on disk
-                this.saveUploadInfo(photoId, {
-                    ...uploadData,
-                    retries: retries + 1,
-                    lastError: error.message
-                });
-
-                logger.error(`Upload failed for ${photoId} (attempt ${retries + 1}/${this.maxRetries}): ${error.message}`);
-            }
-        }
-
-        // If we still have pending uploads, schedule retry
-        if (this.pendingUploads.size > 0) {
-            if (this.retryTimeoutId) {
-                clearTimeout(this.retryTimeoutId);
-            }
-
-            this.retryTimeoutId = setTimeout(() => {
-                this.processQueue();
-            }, this.retryDelay);
-
-            logger.info(`Scheduled retry in ${this.retryDelay / 1000} seconds for ${this.pendingUploads.size} pending uploads`);
-        }
-    }
-
-    /**
-     * Upload a photo to the home server
-     * @param {string} photoPath Path to the photo file
-     * @param {Object} metadata Photo metadata
-     * @param {string} thumbnailPath Path to the thumbnail file (optional)
-     * @returns {Promise<Object>} Upload result
-     */
-    async uploadPhoto(photoPath, metadata, thumbnailPath = null) {
-        const form = new FormData();
-
-        // Add photo file
-        form.append('photo', fs.createReadStream(photoPath));
-
-        // Add thumbnail if available
-        if (thumbnailPath && fs.existsSync(thumbnailPath)) {
-            form.append('thumbnail', fs.createReadStream(thumbnailPath));
-        }
-
-        // Add metadata
-        form.append('metadata', JSON.stringify(metadata));
-
-        // Log what we're uploading
-        logger.info(`Uploading photo: ${metadata.filename}`);
-        logger.info(`Upload endpoint: ${this.uploadEndpoint}`);
-        logger.info(`Metadata: ${JSON.stringify({
-            ...metadata,
-            thumbnailIncluded: !!thumbnailPath && fs.existsSync(thumbnailPath)
-        })}`);
-
-        try {
-            const response = await axios.post(this.uploadEndpoint, form, {
-                headers: {
-                    ...form.getHeaders(),
-                    'X-API-Key': this.apiKey
-                },
-                timeout: 30000 // 30 second timeout
-            });
-
-            logger.info(`Upload response: ${JSON.stringify(response.data)}`);
-            return response.data;
-        } catch (error) {
-            // Enhanced error logging
-            logger.error(`Upload error: ${error.message}`);
-
-            if (error.response) {
-                logger.error(`Status: ${error.response.status}`);
-                logger.error(`Headers: ${JSON.stringify(error.response.headers)}`);
-                logger.error(`Data: ${JSON.stringify(error.response.data || 'No data')}`);
-            } else if (error.request) {
-                logger.error('No response received from server');
-            }
-
-            throw error;
-        }
-    }
-
-    /**
-     * Get upload status for a photo
-     * @param {string} photoId Photo ID
-     * @returns {Object|null} Upload status or null if not found
-     */
-    getUploadStatus(photoId) {
-        return this.pendingUploads.get(photoId) || null;
-    }
-
-    /**
-     * Get all pending uploads
-     * @returns {Array} Array of pending uploads
-     */
-    getAllPendingUploads() {
-        return Array.from(this.pendingUploads.entries()).map(([photoId, data]) => ({
-            photoId,
-            ...data
-        }));
-    }
-
-    /**
-     * Cleanup and shutdown
-     */
-    shutdown() {
-        // Clear timers
-        if (this.checkIntervalId) {
-            clearInterval(this.checkIntervalId);
-        }
-
-        if (this.retryTimeoutId) {
-            clearTimeout(this.retryTimeoutId);
-        }
-
-        logger.info('Photo uploader shutdown');
-    }
-}
-
-// Singleton instance
-let uploader = null;
-
-/**
- * Get the photo uploader instance
- * @returns {PhotoUploader} The photo uploader instance
- */
-function getPhotoUploader() {
-    if (!uploader) {
-        uploader = new PhotoUploader();
-    }
-    return uploader;
+    // ... other methods unchanged ...
 }
 
 module.exports = {
