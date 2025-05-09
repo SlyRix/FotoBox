@@ -374,6 +374,12 @@ class PhotoUploader {
 
     // ... other methods unchanged ...
 }
+function getPhotoUploader(config) {
+    if (!uploader) {
+        uploader = new PhotoUploader(config);
+    }
+    return uploader;
+}
 
 module.exports = {
     getPhotoUploader
