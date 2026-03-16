@@ -1,7 +1,7 @@
 // server/index.js
 const express = require('express');
 const cors = require('cors');
-const {exec} = require('child_process');
+const {exec, execFile} = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const QRCode = require('qrcode');
@@ -13,6 +13,20 @@ const sharp = require('sharp');
 const multer = require('multer');
 const config = require('./config');
 const { getPhotoUploader } = require('./photoUploader');
+const { verifyToken, isAdmin, login } = require('./middleware/auth');
+const {
+    configureHelmet,
+    apiLimiter,
+    photoCaptureLimit,
+    loginLimiter,
+    validatePhotoFilename,
+    validatePhotoId,
+    validateOverlayUpload,
+    sanitizeFilename,
+    validateFileType,
+    checkValidation,
+    errorHandler
+} = require('./middleware/security');
 
 
 // ==========================================
@@ -28,6 +42,8 @@ const MOSAIC_PHOTO_INTERVAL = 3; // Regenerate every 3rd photo
 
 // Track ongoing captures to prevent conflicts
 const captureInProgress = {status: false};
+let lastCaptureTime = 0;
+const CAMERA_COOLDOWN_MS = 4000; // ms camera needs after a capture before gphoto2 can run again
 
 // Express app
 const app = express();
@@ -47,6 +63,12 @@ const TEMPLATES_DIR = path.join(__dirname, 'data', 'templates');
 // MIDDLEWARE
 // ==========================================
 
+// Trust proxy (behind Apache + Cloudflare)
+app.set('trust proxy', 1);
+
+// Security headers
+app.use(configureHelmet());
+
 // CORS configuration
 app.use(cors({
     origin: function (origin, callback) {
@@ -65,15 +87,19 @@ app.use(cors({
             'http://localhost:5000',
             'https://localhost:3000',
             'https://localhost:5000',
+            'http://fotobox.rushelwedsivani.com',
+            'https://fotobox.rushelwedsivani.com',
             'http://fotobox.slyrix.com',
-            'https://fotobox.slyrix.com'
+            'https://fotobox.slyrix.com',
+            'http://fotobox-dev.rushelwedsivani.com',
+            'https://fotobox-dev.rushelwedsivani.com'
         ];
 
         if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
             callback(null, true);
         } else {
             console.log('CORS blocked request from:', origin);
-            callback(new Error('Not allowed by CORS'));
+            callback(null, false); // reject without throwing — prevents Node crash
         }
     },
     methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
@@ -95,6 +121,9 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Credentials', true);
     next();
 });
+
+// Apply rate limiting to all API routes
+app.use('/api/', apiLimiter);
 
 // Serve static files with caching
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -150,6 +179,51 @@ function createRequiredDirectories() {
 
 // In-memory storage for frame templates
 const frameTemplates = {};
+
+// Active frame configuration
+let activeFrame = 'wedding-frame.png'; // Default frame
+const ACTIVE_FRAME_CONFIG_PATH = path.join(__dirname, 'data', 'active-frame.json');
+
+/**
+ * Loads the active frame configuration from disk
+ */
+function loadActiveFrameConfig() {
+    try {
+        if (fs.existsSync(ACTIVE_FRAME_CONFIG_PATH)) {
+            const configData = fs.readFileSync(ACTIVE_FRAME_CONFIG_PATH, 'utf8');
+            const config = JSON.parse(configData);
+            activeFrame = config.activeFrame || 'wedding-frame.png';
+            console.log(`Loaded active frame: ${activeFrame}`);
+        } else {
+            console.log(`No active frame config found, using default: ${activeFrame}`);
+        }
+    } catch (error) {
+        console.error('Error loading active frame config:', error);
+        activeFrame = 'wedding-frame.png'; // Fallback to default
+    }
+}
+
+/**
+ * Saves the active frame configuration to disk
+ * @param {string} frameName - Name of the frame to set as active
+ */
+function saveActiveFrameConfig(frameName) {
+    try {
+        const dataDir = path.join(__dirname, 'data');
+        if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, {recursive: true});
+        }
+
+        const config = { activeFrame: frameName };
+        fs.writeFileSync(ACTIVE_FRAME_CONFIG_PATH, JSON.stringify(config, null, 2));
+        activeFrame = frameName;
+        console.log(`Saved active frame: ${frameName}`);
+        return true;
+    } catch (error) {
+        console.error('Error saving active frame config:', error);
+        return false;
+    }
+}
 
 /**
  * Loads frame templates from disk into memory
@@ -552,12 +626,40 @@ function stopWebcamPreview() {
 // ==========================================
 
 /**
+ * Normalizes an input photo to a standard JPEG that sharp can process.
+ * Handles Canon CR2 RAW files and old-style JPEG formats by converting via ImageMagick.
+ * @param {string} sourceFilePath - Path to the source image
+ * @returns {Promise<{path: string, isTemp: boolean}>} Processable path and cleanup flag
+ */
+async function normalizeInputPhoto(sourceFilePath) {
+    try {
+        await sharp(sourceFilePath).metadata();
+        return { path: sourceFilePath, isTemp: false };
+    } catch (e) {
+        console.log(`Input format not natively supported (${e.message.split('\n')[0]}), converting via ImageMagick...`);
+        const tempPath = `${sourceFilePath}.converted.jpg`;
+        await new Promise((resolve, reject) => {
+            execFile('convert', ['-quality', '95', '-colorspace', 'sRGB', sourceFilePath, tempPath], (err, stdout, stderr) => {
+                if (err) {
+                    console.error(`ImageMagick conversion failed: ${err.message}`);
+                    reject(err);
+                } else {
+                    console.log(`Converted to standard JPEG: ${tempPath}`);
+                    resolve();
+                }
+            });
+        });
+        return { path: tempPath, isTemp: true };
+    }
+}
+
+/**
  * Processes a photo in dual formats (original and print version)
  * @param {string} sourceFilePath - Path to the source photo file
  * @param {string} filename - Desired filename for the processed photo
  * @returns {Object} Object containing paths and URLs for all photo versions
  */
-async function processPhotoWithDualFormats(sourceFilePath, filename) {
+async function processPhotoWithDualFormats(sourceFilePath, filename, orientation = 'landscape') {
     // Paths for different versions
     const originalFilename = `original_${filename}`;
     const printFilename = `print_${filename}`;
@@ -580,7 +682,41 @@ async function processPhotoWithDualFormats(sourceFilePath, filename) {
         // Ensure all required directories exist
         createRequiredDirectories();
 
-        // 1. Original image save (unmodified)
+        // Normalize input: handle Canon CR2/RAW files and non-standard JPEG formats
+        let normalizedInput;
+        try {
+            normalizedInput = await normalizeInputPhoto(sourceFilePath);
+        } catch (normError) {
+            console.error(`Input normalization failed: ${normError.message}`);
+            normalizedInput = { path: sourceFilePath, isTemp: false };
+        }
+        let processableSource = normalizedInput.path;
+
+        // 0. Crop portrait only — landscape keeps full original Canon frame
+        // Portrait 2304x3456: centered horizontally, full height
+        if (orientation === 'portrait') {
+            const PORTRAIT_CROP = { left: 1440, top: 0, width: 2304, height: 3456 };
+            try {
+                const croppedPath = sourceFilePath + '_cropped.jpg';
+                const meta = await sharp(processableSource).metadata();
+                if (meta.width >= 5000 || meta.height >= 3000) {
+                    await sharp(processableSource)
+                        .extract(PORTRAIT_CROP)
+                        .jpeg({ quality: 95 })
+                        .toFile(croppedPath);
+                    processableSource = croppedPath;
+                    console.log(`Applied portrait center crop: ${JSON.stringify(PORTRAIT_CROP)}`);
+                } else {
+                    console.log(`Skipping crop: image too small (${meta.width}x${meta.height})`);
+                }
+            } catch (cropErr) {
+                console.error('Portrait crop failed, using full image:', cropErr.message);
+            }
+        } else {
+            console.log('Landscape: no crop, using full Canon frame');
+        }
+
+        // 1. Original image save (unmodified raw file)
         try {
             await fs.promises.copyFile(sourceFilePath, originalPath);
             console.log(`Original saved: ${originalPath}`);
@@ -589,64 +725,35 @@ async function processPhotoWithDualFormats(sourceFilePath, filename) {
             // Continue processing even if original save fails
         }
 
-        // 2. A5-Format version for print - LANDSCAPE (1.414:1 aspect ratio)
+        // 2. Print version - match orientation (A5 portrait or landscape at 300dpi)
+        const printWidth  = orientation === 'portrait' ? 1748 : 2480;
+        const printHeight = orientation === 'portrait' ? 2480 : 1748;
         try {
-            await sharp(sourceFilePath)
+            await sharp(processableSource)
                 .resize({
-                    width: 2480,         // ~A5 at 300dpi
-                    height: 1748,        // A5-landscape (1.414:1)
-                    fit: 'contain',      // Fit image in frame without cropping
-                    background: {r: 255, g: 255, b: 255} // White background
+                    width: printWidth,
+                    height: printHeight,
+                    fit: 'cover',
+                    position: 'centre'
                 })
                 .jpeg({quality: 90})
                 .toFile(printPath);
             console.log(`Print version saved: ${printPath}`);
         } catch (printError) {
             console.error(`Failed to create print version: ${printError.message}`);
-            // Copy the original as fallback if print version fails
+            // Copy the normalized source as fallback if print version fails
             try {
-                await fs.promises.copyFile(sourceFilePath, printPath);
+                await fs.promises.copyFile(processableSource, printPath);
             } catch (fallbackError) {
                 console.error(`Failed to create fallback print version: ${fallbackError.message}`);
             }
         }
 
-        // 3. Apply frame to both print version and public version
+        // 3. Frame application — disabled during dev, re-enable when orientation-specific frames are ready
+        // TODO: provide portrait and landscape frames separately, then re-enable this block
         let overlayApplied = false;
-        const defaultOverlayPath = path.join(OVERLAYS_DIR, 'wedding-frame.png');
-
-        if (fs.existsSync(defaultOverlayPath)) {
-            try {
-                // Apply frame to the print version
-                const printWithFramePath = path.join(PRINT_PHOTOS_DIR, `framed_${printFilename}`);
-                const printFrameSuccess = await applyOverlayToImage(printPath, defaultOverlayPath, printWithFramePath);
-
-                if (printFrameSuccess) {
-                    // Replace the print version with the framed version
-                    fs.unlinkSync(printPath);
-                    fs.renameSync(printWithFramePath, printPath);
-                    console.log(`Frame applied to print version: Success`);
-                }
-
-                // Apply frame to the public version
-                const success = await applyOverlayToImage(printPath, defaultOverlayPath, publicPath);
-                overlayApplied = success;
-                console.log(`Frame applied to public photo: ${success ? 'Success' : 'Failed'}`);
-            } catch (overlayError) {
-                console.error('Error applying default overlay:', overlayError);
-                // If frame application fails, copy print version as fallback
-                try {
-                    await fs.promises.copyFile(printPath, publicPath);
-                } catch (fallbackError) {
-                    console.error(`Failed to create fallback public version: ${fallbackError.message}`);
-                    // Final fallback - copy original if all else fails
-                    try {
-                        await fs.promises.copyFile(sourceFilePath, publicPath);
-                    } catch (finalFallbackError) {
-                        console.error(`Final fallback copy failed: ${finalFallbackError.message}`);
-                    }
-                }
-            }
+        if (false) { // eslint-disable-line no-constant-condition
+            // (frame logic preserved here for future use)
         } else {
             console.warn('No wedding frame overlay found. Using print version without frame.');
             // No overlay available, copy print version as public version
@@ -654,9 +761,9 @@ async function processPhotoWithDualFormats(sourceFilePath, filename) {
                 await fs.promises.copyFile(printPath, publicPath);
             } catch (copyError) {
                 console.error(`Failed to copy print version to public: ${copyError.message}`);
-                // Last resort - copy original if all else fails
+                // Last resort - copy normalized source if all else fails
                 try {
-                    await fs.promises.copyFile(sourceFilePath, publicPath);
+                    await fs.promises.copyFile(processableSource, publicPath);
                 } catch (finalCopyError) {
                     console.error(`Final copy attempt failed: ${finalCopyError.message}`);
                 }
@@ -672,6 +779,11 @@ async function processPhotoWithDualFormats(sourceFilePath, filename) {
             console.error(`Thumbnail generation failed: ${thumbnailError.message}`);
         }
 
+        // Clean up temp conversion file if created
+        if (normalizedInput && normalizedInput.isTemp && fs.existsSync(normalizedInput.path)) {
+            try { fs.unlinkSync(normalizedInput.path); } catch (e) { /* ignore */ }
+        }
+
         return {
             originalPath: originalPath,
             originalUrl: `/photos/originals/${originalFilename}`,
@@ -684,6 +796,10 @@ async function processPhotoWithDualFormats(sourceFilePath, filename) {
         };
     } catch (error) {
         console.error('Error processing photo with dual formats:', error);
+        // Clean up temp conversion file if created
+        if (typeof normalizedInput !== 'undefined' && normalizedInput && normalizedInput.isTemp && fs.existsSync(normalizedInput.path)) {
+            try { fs.unlinkSync(normalizedInput.path); } catch (e) { /* ignore */ }
+        }
         // Return what we can even if processing failed
         return {
             publicPath: sourceFilePath,
@@ -1161,10 +1277,10 @@ async function generateThumbnail(sourceFilePath, filename) {
     try {
         await sharp(sourceFilePath)
             .resize({
-                width: 424,         // A5-landscape (1.414:1)
+                width: 424,
                 height: 300,
-                fit: 'contain',     // Don't crop image
-                background: {r: 255, g: 255, b: 255} // White background
+                fit: 'cover',
+                position: 'centre'
             })
             .jpeg({quality: 80, progressive: true})
             .toFile(thumbnailPath);
@@ -1208,11 +1324,12 @@ async function ensureInstagramFrameExists() {
             });
 
             // Create a transparent rectangle for the center
+            // NOTE: dest-out blend requires an opaque shape to cut the hole
             const transparentCenter = Buffer.from(
                 `<svg width="${width}" height="${height}">
-                    <rect x="${(width - innerWidth) / 2}" y="${(height - innerHeight) / 2}" 
-                          width="${innerWidth}" height="${innerHeight}" 
-                          fill="rgba(0,0,0,0)" />
+                    <rect x="${(width - innerWidth) / 2}" y="${(height - innerHeight) / 2}"
+                          width="${innerWidth}" height="${innerHeight}"
+                          fill="black" />
                 </svg>`
             );
 
@@ -1246,17 +1363,17 @@ async function ensureInstagramFrameExists() {
  * @param {string} timestamp - Timestamp for the QR code
  * @param {Object} processedPhotos - Processed photo information
  */
-async function generateQRAndRespond(req, res, filename, timestamp, processedPhotos = null) {
+async function generateQRAndRespond(req, res, filename, timestamp, processedPhotos = null, orientation = 'landscape') {
     try {
         // Get uploader instance
         const { getPhotoUploader } = require('./photoUploader');
         const uploader = getPhotoUploader();
 
-        // Get the base filename WITHOUT removing file extension (keep the .jpg)
-        const baseFilename = filename;
+        // Get the base filename without "wedding_" prefix if present
+        const baseFilename = filename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '');
 
-        // UPDATED: Use original_ prefix in the photoViewUrl
-        const photoViewUrl = config.homeServer.photoViewUrlFormat.replace('{photoId}', `original_${baseFilename}`);
+        // UPDATED: Use clean filename in the photoViewUrl (no original_ prefix, no extension)
+        const photoViewUrl = config.homeServer.photoViewUrlFormat.replace('{photoId}', baseFilename);
 
         console.log(`Generating QR code for URL: ${photoViewUrl}`);
 
@@ -1305,10 +1422,13 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
             let uploadStatus = { success: true, pending: false };
             if (config.homeServer.enabled) {
                 try {
-                    // Use original photo path for best quality upload
-                    const originalPath = processedPhotos && processedPhotos.originalPath
-                        ? processedPhotos.originalPath
-                        : path.join(ORIGINALS_DIR, `original_${filename}`);
+                    // Upload the web-optimized public version (framed, resized to A5).
+                    // The raw original is large (up to 23MB for DSLR) and exceeds server limits.
+                    // The public version is typically 1-3MB and already has the frame applied.
+                    const uploadPath = processedPhotos && processedPhotos.publicPath && fs.existsSync(processedPhotos.publicPath)
+                        ? processedPhotos.publicPath
+                        : path.join(PHOTOS_DIR, filename);
+                    const originalPath = uploadPath;
 
                     // Get thumbnail path
                     const thumbPath = path.join(THUMBNAILS_DIR, `thumb_${filename}`);
@@ -1333,9 +1453,11 @@ async function generateQRAndRespond(req, res, filename, timestamp, processedPhot
                 photo: {
                     filename: filename,
                     url: processedPhotos ? processedPhotos.publicUrl : `/photos/${filename}`,
-                    thumbnailUrl: thumbnailUrl || `/photos/${filename}`, // Fallback to original if thumbnail fails
+                    originalUrl: processedPhotos ? processedPhotos.originalUrl : null,
+                    orientation: orientation,
+                    thumbnailUrl: thumbnailUrl || `/photos/${filename}`,
                     qrUrl: `/qrcodes/${qrFilename}`,
-                    photoViewUrl: photoViewUrl,  // UPDATED: Include the new URL with original_ prefix
+                    photoViewUrl: photoViewUrl,
                     timestamp: Date.now(),
                     uploadPending: uploadStatus.pending || false,
                     uploadMessage: uploadStatus.message || null
@@ -1437,13 +1559,46 @@ function runDiagnostics() {
     }
 }
 
+// ==========================================
+// AUTHENTICATION ROUTES
+// ==========================================
+
+/**
+ * Admin login endpoint
+ * POST /api/auth/login
+ * Body: { password: string }
+ * Returns: { success: boolean, token?: string, expiresIn?: number, error?: string }
+ */
+app.post('/api/auth/login', loginLimiter, login);
+
+/**
+ * Token verification endpoint
+ * GET /api/auth/verify
+ * Headers: Authorization: Bearer <token>
+ * Returns: { success: boolean, valid: boolean }
+ */
+app.get('/api/auth/verify', (req, res) => {
+    const token = req.headers['authorization']?.split(' ')[1];
+    if (!token) {
+        return res.json({ success: true, valid: false });
+    }
+
+    try {
+        const jwt = require('jsonwebtoken');
+        jwt.verify(token, config.security.jwtSecret);
+        res.json({ success: true, valid: true });
+    } catch (error) {
+        res.json({ success: true, valid: false });
+    }
+});
+
 // =========================================
 // STATIC FILE ENDPOINTS
 // =========================================
 
 // Serve photo files with proper headers
 app.get('/photos/:filename', (req, res) => {
-    const filename = req.params.filename;
+    const filename = path.basename(req.params.filename);
     let filepath;
 
     // Determine which directory contains the photo
@@ -1469,7 +1624,7 @@ app.get('/photos/:filename', (req, res) => {
 
 // Serve QR codes with proper cache control
 app.get('/qrcodes/:filename', (req, res) => {
-    const filename = req.params.filename;
+    const filename = path.basename(req.params.filename);
     const filepath = path.join(QR_DIR, filename);
 
     if (!fs.existsSync(filepath)) {
@@ -1680,7 +1835,7 @@ app.get('/api/photos/:photoId', (req, res) => {
         const hasThumbnail = fs.existsSync(thumbnailPath);
 
         // Get client domain for photo view URL
-        const clientDomain = req.headers.host || 'fotobox.slyrix.com';
+        const clientDomain = req.headers.host || 'fotobox.rushelwedsivani.com';
 
         // Different URLs for different versions
         let normalUrl = `/photos/${baseFilename}`;
@@ -1688,9 +1843,10 @@ app.get('/api/photos/:photoId', (req, res) => {
         let printUrl = `/photos/print/print_${baseFilename}`;
         let instagramUrl = `/photos/instagram_${baseFilename}`;
 
-        // UPDATED: Create the correct photo view URL - always use original_ prefix
-        // This makes it consistent with QR code URLs
-        let photoViewUrl = `https://${clientDomain}/photo/original_${baseFilename}`;
+        // UPDATED: Use /view/ route with clean filename (no original_ prefix, no extension)
+        const homeServerDomain = (process.env.PHOTO_VIEW_URL || config.homeServer.url || 'https://photos.rushelwedsivani.com').replace(/^https?:\/\//, '');
+        const cleanFilename = baseFilename.replace(/^wedding_/, '').replace(/\.[^.]+$/, '');
+        let photoViewUrl = `https://${homeServerDomain}/view/${cleanFilename}`;
 
         // Return photo data
         res.json({
@@ -1716,8 +1872,23 @@ app.get('/api/photos/:photoId', (req, res) => {
     }
 });
 
-// Take a new photo
-app.post('/api/photos/capture', async (req, res) => {
+// Take a new photo (RATE LIMITED)
+// Tracks in-progress autofocus so capture can wait for it to finish
+let autofocusPromise = null;
+
+// Pre-focus endpoint — called on last countdown tick so AF is done before capture
+app.post('/api/autofocus', (req, res) => {
+    autofocusPromise = new Promise((resolve) => {
+        exec('gphoto2 --set-config autofocusdrive=1', (error) => {
+            if (error) console.warn('[Autofocus] pre-focus failed:', error.message);
+            else console.log('[Autofocus] pre-focus complete');
+            resolve();
+        });
+    });
+    res.json({ success: true });
+});
+
+app.post('/api/photos/capture', photoCaptureLimit, async (req, res) => {
     // Prevent multiple simultaneous capture requests
     if (captureInProgress.status) {
         return res.status(429).json({
@@ -1726,7 +1897,21 @@ app.post('/api/photos/capture', async (req, res) => {
         });
     }
 
+    // Camera cooldown — prevent PTP Device Busy (0x2019) on rapid consecutive shots
+    const timeSinceLastCapture = Date.now() - lastCaptureTime;
+    if (timeSinceLastCapture < CAMERA_COOLDOWN_MS) {
+        const waitSec = Math.ceil((CAMERA_COOLDOWN_MS - timeSinceLastCapture) / 1000);
+        return res.status(429).json({
+            success: false,
+            error: `Camera is cooling down. Please wait ${waitSec} second${waitSec !== 1 ? 's' : ''}.`
+        });
+    }
+
     captureInProgress.status = true;
+
+    // Read orientation: 'portrait' (1728x3456) or 'landscape' (3456x1728 center crop)
+    const orientation = (req.body && req.body.orientation === 'portrait') ? 'portrait' : 'landscape';
+    console.log(`Capture orientation: ${orientation}`);
 
     // Generate unique filename based on timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -1749,10 +1934,18 @@ app.post('/api/photos/capture', async (req, res) => {
         });
     }
 
-    // Build the gphoto2 command for high quality camera capture
-    const captureCommand = `gphoto2 --force-overwrite --capture-image-and-download --filename "${filepath}"`;
+    // Wait for any in-progress pre-focus to release the USB connection (max 2s)
+    if (autofocusPromise) {
+        await Promise.race([autofocusPromise, new Promise(r => setTimeout(r, 2000))]);
+        autofocusPromise = null;
+    }
+
+    const captureCommand = `gphoto2 --force-overwrite --set-config /main/imgsettings/imageformat=0 --set-config reviewtime=0 --capture-image-and-download --filename "${filepath}"`;
 
     exec(captureCommand, (error, stdout, stderr) => {
+        // Stamp when gphoto2 exits — cooldown prevents PTP Device Busy on the next call
+        lastCaptureTime = Date.now();
+
         // Resume preview if it was active
         if (wasPreviewActive) {
             setTimeout(() => {
@@ -1768,42 +1961,75 @@ app.post('/api/photos/capture', async (req, res) => {
         if (error || (stderr && stderr.includes('ERROR'))) {
             console.error(`Error taking photo: ${error ? error.message : stderr}`);
 
-            // Fall back to webcam as backup
-            const fallbackCommand = `fswebcam -d /dev/video0 -r 1920x1080 --fps 30 --no-banner -S 3 -F 3 --jpeg 95 "${filepath}"`;
+            // Fall back to webcam snapshot from Python stream
+            console.log('Falling back to webcam snapshot from port 8081...');
 
-            exec(fallbackCommand, async (fbError, fbStdout, fbStderr) => {
-                captureInProgress.status = false;
+            http.get('http://127.0.0.1:8081/snapshot', (snapRes) => {
+                const chunks = [];
 
-                if (fbError) {
+                snapRes.on('data', (chunk) => {
+                    chunks.push(chunk);
+                });
+
+                snapRes.on('end', async () => {
+                    try {
+                        const buffer = Buffer.concat(chunks);
+
+                        // Save the snapshot to file
+                        fs.writeFileSync(filepath, buffer);
+                        console.log(`Photo taken with webcam fallback: ${filename}`);
+
+                        captureInProgress.status = false;
+
+                        try {
+                            // Process dual-format photo from webcam capture
+                            const processedPhotos = await processPhotoWithDualFormats(filepath, filename, orientation);
+
+                            // Increment photo counter for mosaic generation
+                            photoCounter++;
+                            console.log(`Photo counter: ${photoCounter}`);
+
+                            // Regenerate mosaic on schedule
+                            if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
+                                console.log(`Captured ${photoCounter} photos. Regenerating mosaic.`);
+                                regenerateMosaicInBackground();
+                            }
+
+                            // Generate QR code and respond
+                            generateQRAndRespond(req, res, filename, timestamp, processedPhotos, orientation);
+                        } catch (err) {
+                            console.error('Error in dual-format processing:', err);
+                            // Try standard processing as fallback
+                            generateQRAndRespond(req, res, filename, timestamp, null, orientation);
+                        }
+                    } catch (writeError) {
+                        captureInProgress.status = false;
+                        console.error('Error saving snapshot:', writeError.message);
+
+                        return res.status(500).json({
+                            success: false,
+                            error: 'Failed to save webcam snapshot'
+                        });
+                    }
+                });
+
+                snapRes.on('error', (snapError) => {
+                    captureInProgress.status = false;
+                    console.error('Webcam snapshot error:', snapError.message);
+
                     return res.status(500).json({
                         success: false,
                         error: 'Photo capture failed with both camera and webcam'
                     });
-                }
+                });
+            }).on('error', (reqError) => {
+                captureInProgress.status = false;
+                console.error('Webcam request error:', reqError.message);
 
-                console.log(`Photo taken with webcam fallback`);
-
-                try {
-                    // Process dual-format photo from webcam capture
-                    const processedPhotos = await processPhotoWithDualFormats(filepath, filename);
-
-                    // Increment photo counter for mosaic generation
-                    photoCounter++;
-                    console.log(`Photo counter: ${photoCounter}`);
-
-                    // Regenerate mosaic on schedule
-                    if (photoCounter % MOSAIC_PHOTO_INTERVAL === 0) {
-                        console.log(`Captured ${photoCounter} photos. Regenerating mosaic.`);
-                        regenerateMosaicInBackground();
-                    }
-
-                    // Generate QR code and respond
-                    generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
-                } catch (err) {
-                    console.error('Error in dual-format processing:', err);
-                    // Try standard processing as fallback
-                    generateQRAndRespond(req, res, filename, timestamp);
-                }
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to connect to webcam stream'
+                });
             });
 
             return;
@@ -1813,7 +2039,7 @@ app.post('/api/photos/capture', async (req, res) => {
         console.log(`Photo successfully taken with camera: ${filename}`);
 
         // Process dual-format for camera capture
-        processPhotoWithDualFormats(filepath, filename)
+        processPhotoWithDualFormats(filepath, filename, orientation)
             .then(processedPhotos => {
                 // Increment photo counter for mosaic generation
                 photoCounter++;
@@ -1826,19 +2052,19 @@ app.post('/api/photos/capture', async (req, res) => {
                 }
 
                 // Generate QR code and respond
-                generateQRAndRespond(req, res, filename, timestamp, processedPhotos);
+                generateQRAndRespond(req, res, filename, timestamp, processedPhotos, orientation);
             })
             .catch(err => {
                 console.error('Error in dual-format processing:', err);
                 // Try standard processing as fallback
-                generateQRAndRespond(req, res, filename, timestamp);
+                generateQRAndRespond(req, res, filename, timestamp, null, orientation);
             });
     });
 });
 
 // Delete a photo (all versions)
 app.delete('/api/photos/:filename', (req, res) => {
-    const filename = req.params.filename;
+    const filename = path.basename(req.params.filename);
     const baseFilename = filename.replace(/^(original_|print_|instagram_|frame_)/, '');
 
     const filepaths = [
@@ -1888,7 +2114,8 @@ app.delete('/api/photos/:filename', (req, res) => {
 
 // Send print request
 app.post('/api/photos/print', (req, res) => {
-    const {filename} = req.body;
+    const { filename: rawFilename } = req.body;
+    const filename = path.basename(String(rawFilename || ''));
 
     if (!filename) {
         return res.status(400).json({
@@ -1923,10 +2150,18 @@ app.post('/api/photos/print', (req, res) => {
 
     const processedPrintPath = path.join(PRINT_PHOTOS_DIR, `selphy_${printFilename}`);
 
-    // ImageMagick processing before printing
-    const convertCommand = `convert "${filepath}" -resize 1800x1200^ -gravity center -extent 1800x1200 -colorspace RGB -density 300 -quality 100 -interlace none -strip "${processedPrintPath}"`;
+    // Resize photo to exactly 1748x1181px (14.8x10cm at 300dpi = postcard size after peeling strips).
+    // The active frame (wedding-frameNEW2.png) is designed at this exact size.
+    // Fill+crop to match frame ratio, then composite the active frame overlay on top.
+    const overlayPath = path.join(OVERLAYS_DIR, activeFrame);
+    const hasOverlay = fs.existsSync(overlayPath);
+    const convertArgs = [
+        filepath, '-resize', '1748x1181^', '-gravity', 'center', '-extent', '1748x1181',
+        ...(hasOverlay ? [overlayPath, '-composite'] : []),
+        '-colorspace', 'RGB', '-density', '300', '-quality', '100', '-strip', processedPrintPath
+    ];
 
-    exec(convertCommand, (convertError, convertStdout, convertStderr) => {
+    execFile('convert', convertArgs, (convertError, convertStdout, convertStderr) => {
         if (convertError) {
             console.error(`Convert error: ${convertError.message}`);
             return res.status(500).json({
@@ -1936,14 +2171,20 @@ app.post('/api/photos/print', (req, res) => {
             });
         }
 
-        // Construct the print command for the Canon SELPHY CP1500
-        // -o media=Postcard is for 4x6" paper
-        // -o fit-to-page will ensure the image is properly sized
-        // -o borderless=true for borderless printing (if supported)
-        const printCommand = `${config.printing.printCommand} ${config.printing.printerName} -o media=Postcard -o fit-to-page -o borderless=true -o ColorModel=RGB -o StpBorderless=True -o StpColorPrecision=Best -o Resolution=300dpi -o StpColorCorrection=Accurate -o StpImageType=Photo -o StpShrinkOutput=Crop -o StpLegacyDyesubGamma=False "${processedPrintPath}"`;
+        // Print at exact native 300dpi — no scaling, no borderless bleed.
+        // print-scaling=none prints the image at its native size (1748x1181 = 14.8x10cm).
+        // StpBorderless=False prevents the driver from expanding/cropping for bleed.
+        const printArgs = [
+            '-d', config.printing.printerName,
+            '-o', 'media=Postcard', '-o', 'print-scaling=none',
+            '-o', 'ColorModel=RGB', '-o', 'StpBorderless=False',
+            '-o', 'StpColorPrecision=Best', '-o', 'Resolution=300dpi',
+            '-o', 'StpColorCorrection=Accurate', '-o', 'StpImageType=Photo',
+            '-o', 'StpLegacyDyesubGamma=False', processedPrintPath
+        ];
 
         // Execute the print command
-        exec(printCommand, (error, stdout, stderr) => {
+        execFile('lp', printArgs, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Print error: ${error.message}`);
                 return res.status(500).json({
@@ -2081,8 +2322,8 @@ app.get('/api/printer-status', async (req, res) => {
     }
 });
 
-// Generate thumbnails for all photos
-app.get('/api/admin/generate-thumbnails', async (req, res) => {
+// Generate thumbnails for all photos (PROTECTED)
+app.get('/api/admin/generate-thumbnails', verifyToken, isAdmin, async (req, res) => {
     try {
         if (!fs.existsSync(PHOTOS_DIR)) {
             return res.json({
@@ -2226,8 +2467,8 @@ app.post('/api/photos/:photoId/overlay', async (req, res) => {
     }
 });
 
-// Upload a new overlay/frame
-app.post('/api/admin/overlays', upload.single('overlay'), async (req, res) => {
+// Upload a new overlay/frame (PROTECTED)
+app.post('/api/admin/overlays', verifyToken, isAdmin, upload.single('overlay'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({
             success: false,
@@ -2297,8 +2538,8 @@ app.post('/api/admin/overlays', upload.single('overlay'), async (req, res) => {
     }
 });
 
-// Get list of available overlays
-app.get('/api/admin/overlays', (req, res) => {
+// Get list of available overlays (PROTECTED)
+app.get('/api/admin/overlays', verifyToken, isAdmin, (req, res) => {
     try {
         if (!fs.existsSync(OVERLAYS_DIR)) {
             return res.json([]);
@@ -2328,8 +2569,8 @@ app.get('/api/admin/overlays', (req, res) => {
     }
 });
 
-// Delete an overlay/frame
-app.delete('/api/admin/overlays/:name', async (req, res) => {
+// Delete an overlay/frame (PROTECTED)
+app.delete('/api/admin/overlays/:name', verifyToken, isAdmin, async (req, res) => {
     const overlayName = req.params.name;
 
     // Don't allow deleting the main wedding frame or Instagram frame
@@ -2556,8 +2797,8 @@ app.get('/api/mosaic/info', async (req, res) => {
 // FRAME TEMPLATE API ENDPOINTS
 // =========================================
 
-// Save or update a frame template
-app.post('/api/admin/frame-templates', (req, res) => {
+// Save or update a frame template (PROTECTED)
+app.post('/api/admin/frame-templates', verifyToken, isAdmin, (req, res) => {
     const {overlayName, template} = req.body;
 
     if (!overlayName || !template) {
@@ -2597,8 +2838,8 @@ app.post('/api/admin/frame-templates', (req, res) => {
     }
 });
 
-// Get a specific frame template
-app.get('/api/admin/frame-templates/:overlayName', (req, res) => {
+// Get a specific frame template (PROTECTED)
+app.get('/api/admin/frame-templates/:overlayName', verifyToken, isAdmin, (req, res) => {
     const {overlayName} = req.params;
 
     if (frameTemplates[overlayName]) {
@@ -2615,8 +2856,8 @@ app.get('/api/admin/frame-templates/:overlayName', (req, res) => {
     });
 });
 
-// Get all frame templates
-app.get('/api/admin/frame-templates', (req, res) => {
+// Get all frame templates (PROTECTED)
+app.get('/api/admin/frame-templates', verifyToken, isAdmin, (req, res) => {
     try {
         const templates = Object.keys(frameTemplates).map(key => ({
             name: key,
@@ -2636,8 +2877,8 @@ app.get('/api/admin/frame-templates', (req, res) => {
     }
 });
 
-// Delete a frame template
-app.delete('/api/admin/frame-templates/:overlayName', (req, res) => {
+// Delete a frame template (PROTECTED)
+app.delete('/api/admin/frame-templates/:overlayName', verifyToken, isAdmin, (req, res) => {
     const {overlayName} = req.params;
 
     if (frameTemplates[overlayName]) {
@@ -2657,8 +2898,82 @@ app.delete('/api/admin/frame-templates/:overlayName', (req, res) => {
         error: 'Template not found for this frame'
     });
 });
+
+// Get active frame configuration (PROTECTED)
+app.get('/api/admin/active-frame', verifyToken, isAdmin, (req, res) => {
+    try {
+        // List all available frames
+        const availableFrames = [];
+        if (fs.existsSync(OVERLAYS_DIR)) {
+            const files = fs.readdirSync(OVERLAYS_DIR);
+            for (const file of files) {
+                if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
+                    availableFrames.push(file);
+                }
+            }
+        }
+
+        return res.json({
+            success: true,
+            activeFrame: activeFrame,
+            availableFrames: availableFrames
+        });
+    } catch (error) {
+        console.error('Error fetching active frame:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error fetching active frame'
+        });
+    }
+});
+
+// Set active frame (PROTECTED)
+app.post('/api/admin/active-frame', verifyToken, isAdmin, (req, res) => {
+    try {
+        const { frameName } = req.body;
+
+        if (!frameName) {
+            return res.status(400).json({
+                success: false,
+                error: 'Frame name is required'
+            });
+        }
+
+        // Verify the frame file exists
+        const framePath = path.join(OVERLAYS_DIR, frameName);
+        if (!fs.existsSync(framePath)) {
+            return res.status(404).json({
+                success: false,
+                error: 'Frame file not found'
+            });
+        }
+
+        // Save the active frame configuration
+        const success = saveActiveFrameConfig(frameName);
+
+        if (success) {
+            return res.json({
+                success: true,
+                message: 'Active frame updated successfully',
+                activeFrame: activeFrame
+            });
+        } else {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to save active frame configuration'
+            });
+        }
+    } catch (error) {
+        console.error('Error setting active frame:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Server error setting active frame'
+        });
+    }
+});
+
 app.post('/api/photos/:filename/filter', async (req, res) => {
-    const photoId = req.params.filename;
+    const photoId = path.basename(req.params.filename);
     const {filter} = req.body;
 
     if (!photoId || !filter) {
@@ -2777,6 +3092,23 @@ app.post('/api/photos/:filename/filter', async (req, res) => {
     }
 });
 // Add a status API endpoint for the uploader
+// Per-photo upload status — used by QRCodeView to poll until photo is live
+app.get('/api/upload-status/:filename', (req, res) => {
+    const filename = req.params.filename;
+    try {
+        const uploader = getPhotoUploader();
+        const isPending = uploader.pendingUploads.has(filename);
+        res.json({
+            filename,
+            uploaded: !isPending,
+            online: uploader.isOnline,
+            pending: isPending,
+        });
+    } catch (e) {
+        res.json({ filename, uploaded: false, online: false, pending: true });
+    }
+});
+
 app.get('/api/upload-status', (req, res) => {
     if (!config.homeServer.enabled) {
         return res.json({
@@ -2802,6 +3134,30 @@ app.get('/api/upload-status', (req, res) => {
         });
     }
 });
+
+// ── Webcam calibration config ──────────────────────────────────────────────
+const WEBCAM_CONFIG_PATH = path.join(__dirname, '../../webcam-config.json');
+function readWebcamConfig() {
+    try { return JSON.parse(fs.readFileSync(WEBCAM_CONFIG_PATH, 'utf8')); }
+    catch (e) { return { zoom: 1.0 }; }
+}
+// Public endpoint — CameraView reads this without auth
+app.get('/api/webcam-config', (req, res) => { res.json(readWebcamConfig()); });
+// Admin endpoints — read & write
+app.get('/api/admin/webcam-config', verifyToken, isAdmin, (req, res) => { res.json(readWebcamConfig()); });
+app.post('/api/admin/webcam-config', verifyToken, isAdmin, (req, res) => {
+    const { zoom } = req.body;
+    if (typeof zoom !== 'number' || zoom < 1 || zoom > 4)
+        return res.status(400).json({ error: 'Invalid zoom value' });
+    try {
+        fs.writeFileSync(WEBCAM_CONFIG_PATH, JSON.stringify({ zoom }));
+        res.json({ success: true, zoom });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to save config' });
+    }
+});
+// ───────────────────────────────────────────────────────────────────────────
+
 // Create a vignette effect overlay (for the Forever filter)
 async function applyVignetteEffect(inputPath, outputPath) {
     try {
@@ -2892,6 +3248,13 @@ function getFilterParams(filter) {
 }
 
 // ==========================================
+// ERROR HANDLING
+// ==========================================
+
+// Error handler middleware (must be last)
+app.use(errorHandler);
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 
@@ -2925,6 +3288,9 @@ server.listen(PORT, async () => {
 
     // Load templates from disk
     loadTemplatesFromDisk();
+
+    // Load active frame configuration
+    loadActiveFrameConfig();
 
     // Ensure Instagram frame exists
     await ensureInstagramFrameExists();
